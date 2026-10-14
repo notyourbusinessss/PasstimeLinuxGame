@@ -116,7 +116,7 @@ TECH_BY_ID = {t[0]: t for t in TECHS}
 
 # ------------------------------------------------------------------ pacing knobs (tuned with sim.py)
 UNLOCK_LOG = [3.32, 4.17, 7.64, 12.88, 16.74, 17.87, 19.62, 19.91, 22.04, 23.85, 26.94]   # log10 of normalised price, Moon..Proxima b
-TUNE = dict(ushift=0.0, B=50.0, ccoef=0.17, texp=0.5, tpow=0.75, pshift=0.0, pcoef=0.17, sshift=0.0, dmbase=0.40, dm_div=1e9, dm_pow=0.25)
+TUNE = dict(ushift=0.0, B=50.0, ccoef=0.17, texp=0.5, tpow=0.75, pshift=0.0, pcoef=0.17, sshift=0.0, cpow=1.25, sdbase=5.0, sdcoef=4.0, sdpow=0.16, cdiff=10.0, dmbase=0.40, dm_div=1e9, dm_pow=0.25)
 
 
 def project_cost(p):
@@ -246,8 +246,8 @@ SECTORS = [  # name, faction, map position (0..1), reward description, reward ef
     dict(name="Crab Nebula", faction="void", pos=(0.90, 0.60), desc="All production x2", fx=[("ore", 2)]),
     dict(name="Galactic Core", faction="void", pos=(0.92, 0.34), desc="All production x3, fleet power x2",
          fx=[("ore", 3), ("fp", 2)]),
-    dict(name="The Void Throne", faction="devourer", pos=(0.95, 0.86), desc="All production x5  -  the final boss",
-         fx=[("ore", 5)]),
+    dict(name="The Void Throne", faction="devourer", pos=(0.95, 0.86), desc="All production x5, Stardust gain x1.5  -  the final boss",
+         fx=[("ore", 5), ("sd", 1.5)]),
 ]
 NSEC = len(SECTORS)
 SECTOR_EDGES = [(0, 1), (0, 2), (1, 3), (1, 4), (2, 4), (2, 5), (3, 6), (4, 6), (4, 7), (5, 7), (5, 9), (6, 8), (7, 8),
@@ -277,6 +277,38 @@ def win_chance(fp, ep):
     if fp <= 0 or ep <= 0:
         return 0.0
     return max(0.01, min(0.99, 0.5 + 0.5 * math.tanh(1.6 * math.log(fp / ep))))
+
+
+# ------------------------------------------------------------------ New Game Plus: Ascension and Stardust
+STARDUST_PERKS = [  # id, name, Stardust cost, description, effects
+    ("s1", "Colonial Charter", 6, "Every cycle starts with the Moon unlocked", [("startplanets", 1)]),
+    ("s2", "Settlers' Fleet", 24, "Every cycle starts with 3 extra planets unlocked", [("startplanets", 3)]),
+    ("s3", "Founding Fathers", 80, "Every cycle starts with 5 extra planets unlocked", [("startplanets", 5)]),
+    ("s4", "Empire Seeds", 300, "Every cycle starts with 7 extra planets unlocked", [("startplanets", 7)]),
+    ("s5", "Echoes of Wisdom", 12, "Techs cost 30% less", [("techcost", 0.7)]),
+    ("s6", "Deep Memory", 50, "Techs cost 50% less", [("techcost", 0.5)]),
+    ("s7", "Eternal Reactors", 16, "All production x2", [("ore", 2)]),
+    ("s8", "Cosmic Dust", 60, "All production x3", [("ore", 3)]),
+    ("s9", "Singularity Seed", 200, "All production x5", [("ore", 5)]),
+    ("s10", "Primordial Light", 800, "All production x10", [("ore", 10)]),
+    ("s11", "Legacy Wonders", 40, "Keep your first 4 megaprojects when you Ascend", [("keepproj", 4)]),
+    ("s12", "Wonder Archive", 240, "Keep your first 8 megaprojects when you Ascend", [("keepproj", 8)]),
+    ("s13", "Eternal Wonders", 1000, "Keep all 12 megaprojects when you Ascend", [("keepproj", 12)]),
+    ("s14", "War Machine", 30, "Fleet power x3", [("fp", 3)]),
+    ("s15", "Void Fleet", 400, "Fleet power x10", [("fp", 10)]),
+    ("s16", "Time Dilation Engine", 20, "Offline progress at 100%", [("offline", 1.0)]),
+    ("s17", "Stardust Siphon", 100, "Stardust gain x1.5", [("sd", 1.5)]),
+    ("s18", "Quantum Keys", 120, "Start every cycle with 1,000 Dark Matter", [("startdm", 1000)]),
+    ("s19", "Armory Archive", 90, "Keep your armory upgrades when you Ascend", [("keeparm", 1)]),
+    ("s20", "Galactic Charter", 500, "Keep your first 5 liberated sectors when you Ascend", [("keepsec", 5)]),
+    ("s21", "Stellar Dominion", 1600, "Keep your first 10 liberated sectors when you Ascend", [("keepsec", 10)]),
+]
+SD_BY_ID = {p[0]: p for p in STARDUST_PERKS}
+
+
+def sd_bonus(sd_total):
+    """Production bonus from the Stardust you have ever earned."""
+    return 1 + 0.4 * math.sqrt(sd_total)
 
 
 # ------------------------------------------------------------------ per-planet upgrades (cost in that planet's ore)
@@ -404,6 +436,13 @@ def build_achievements():
                 ("Dark Matter Singularity", 1e6, "platinum")], lambda t: f"Own {nf(t)} Dark Matter", lambda g: g.dm)
     ms("Warp", [("First Perk", 1, "bronze"), ("Shopaholic", 6, "silver"), ("Big Spender", 12, "gold"),
                 ("One of Everything", len(PERKS), "platinum")], lambda t: f"Buy {t} Dark Matter perks", lambda g: len(g.perks))
+    # --- New Game Plus
+    ms("Warp", [("New Game Plus", 1, "gold"), ("Cycle Hopper", 3, "platinum"), ("Eternal Return", 10, "platinum")],
+       lambda t: f"Ascend {t} time{'s' if t > 1 else ''}", lambda g: g.ascensions)
+    ms("Warp", [("Stardust Collector", 50, "silver"), ("Stardust Hoarder", 500, "gold"), ("Star Forger", 5000, "platinum")],
+       lambda t: f"Earn {nf(t)} Stardust in total", lambda g: g.sd_total)
+    ms("Warp", [("Archivist", 5, "silver"), ("Keeper of Stars", len(STARDUST_PERKS), "platinum")],
+       lambda t: f"Buy {t} Stardust perks", lambda g: len(g.sd_perks))
     # --- Galaxy
     ms("Galaxy", [("First Blood", 1, "bronze"), ("Frontier", 4, "silver"), ("Warlord", 8, "gold"),
                   ("Conqueror", 12, "gold"), ("Galactic Emperor", NSEC - 1, "platinum")],
@@ -507,6 +546,12 @@ class Game:
         self.ach_bonus = 0.0
         self.conquered = {0}
         self.campaign = None
+        self.cycle = 1
+        self.ascensions = 0
+        self.stardust = self.sd_total = 0
+        self.sd_perks = set()
+        self.cyc_norm = 0.0
+        self.cycle_start = 0.0
         self.armory = [0] * len(ARMORY)
         self.battles_won = self.battles_lost = self.raids_repelled = self.raids_lost = 0
         self.quests = []
@@ -533,7 +578,8 @@ class Game:
                  night_secs=self.night_secs, visited=sorted(self.visited), flags=sorted(self.flags),
                  conquered=sorted(self.conquered), campaign=self.campaign, armory=self.armory,
                  battles_won=self.battles_won, battles_lost=self.battles_lost, raids_repelled=self.raids_repelled,
-                 raids_lost=self.raids_lost,
+                 raids_lost=self.raids_lost, cycle=self.cycle, ascensions=self.ascensions, stardust=self.stardust,
+                 sd_total=self.sd_total, sd_perks=sorted(self.sd_perks), cyc_norm=self.cyc_norm, cycle_start=self.cycle_start,
                  settings=self.settings, time=time.time())
         try:
             tmp = SAVE + ".tmp"
@@ -591,6 +637,10 @@ class Game:
             self.armory = [max(0, min(ARMORY[i][3], int(v))) for i, v in enumerate(arm)] + [0] * (len(ARMORY) - len(arm))
             self.battles_won = int(d.get("battles_won", 0)); self.battles_lost = int(d.get("battles_lost", 0))
             self.raids_repelled = int(d.get("raids_repelled", 0)); self.raids_lost = int(d.get("raids_lost", 0))
+            self.cycle = max(1, int(d.get("cycle", 1))); self.ascensions = int(d.get("ascensions", 0))
+            self.stardust = int(d.get("stardust", 0)); self.sd_total = int(d.get("sd_total", 0))
+            self.sd_perks = {x for x in d.get("sd_perks", []) if x in SD_BY_ID}
+            self.cyc_norm = float(d.get("cyc_norm", self.all_norm)); self.cycle_start = float(d.get("cycle_start", 0))
             if isinstance(d.get("settings"), dict):
                 self.settings.update({k: v for k, v in d["settings"].items() if k in self.settings})
             self.quests = [q for q in d["quests"] if isinstance(q, dict) and q.get("k") in QUEST_TXT][:3]
@@ -629,7 +679,7 @@ class Game:
     def recalc(self):
         E = dict(ore=1.0, click=1.0, cred=1.0, sci=1.0, disc=0.0, crate=0.0, crate_pay=1.0,
                  dm=1.0, auto=0, autoup=0, autocrate=0, start=0.0, offline=OFFLINE_EFF, minebonus=1.0,
-                 clickops=0.0, frenzy=0.0, dmbase=TUNE["dmbase"], travel=1.0, fp=1.0)
+                 clickops=0.0, frenzy=0.0, dmbase=TUNE["dmbase"], travel=1.0, fp=1.0, techcost=1.0, sd=1.0, startplanets=0, keepproj=0, keepsec=0, keeparm=0, startdm=0.0)
         gm = [1.0] * NSH
         effects = []
         for t in self.techs:
@@ -643,13 +693,15 @@ class Game:
             effects += PROJECTS[k][2]
         for k in self.conquered:
             effects += SECTORS[k]["fx"]
+        for pid in self.sd_perks:
+            effects += SD_BY_ID[pid][4]
         for e in effects:
             k = e[0]
-            if k in ("ore", "click", "cred", "sci", "crate_pay", "dm", "minebonus", "travel", "fp"):
+            if k in ("ore", "click", "cred", "sci", "crate_pay", "dm", "minebonus", "travel", "fp", "techcost", "sd"):
                 E[k] *= e[1]
-            elif k in ("disc", "crate", "clickops", "frenzy", "start", "dmbase"):
+            elif k in ("disc", "crate", "clickops", "frenzy", "start", "dmbase", "startdm"):
                 E[k] += e[1]
-            elif k == "offline":
+            elif k in ("offline", "startplanets", "keepproj", "keepsec", "keeparm"):
                 E[k] = max(E[k], e[1])
             elif k in ("auto", "autoup", "autocrate"):
                 E[k] = 1
@@ -685,7 +737,7 @@ class Game:
             buff *= b["mult"]
         self.buff_mult = buff
         self.G = ((1 + E["dmbase"] * math.sqrt(self.dm)) * ach * E["ore"] * (1 + reactor)
-                  * (1 + 0.05 * (self.n_unlocked - 1)) * buff * self.dev_mult)
+                  * (1 + 0.05 * (self.n_unlocked - 1)) * buff * self.dev_mult * sd_bonus(self.sd_total))
         self.crate_rate = 1 + E["crate"] + crate
         self.cred_ops = cred * E["cred"] * ach
         self.sci_ops = sci * E["sci"] * ach
@@ -750,9 +802,19 @@ class Game:
         res = BUILDINGS[b][1]
         return self.ore[p] if res == "ore" else getattr(self, res)
 
+    def cycle_mult(self):
+        """Planets and megaprojects cost more every New Game Plus cycle."""
+        return 1 + TUNE["cdiff"] * (self.cycle - 1)
+
     def unlock_cost(self, k):
         a, b, cr = SITES[k]["unlock"]
-        return [(k - 1, a * SC[k - 1]), (k - 2, b * SC[k - 2] if k >= 2 else 0)], cr
+        m = self.cycle_mult()
+        return [(k - 1, a * m * SC[k - 1]), (k - 2, b * m * SC[k - 2] if k >= 2 else 0)], cr * m ** 0.6
+
+    def project_cost(self, p):
+        ore, cr, sci = project_cost(p)
+        m = self.cycle_mult()
+        return ore * m, cr * m ** 0.6, sci * m ** 0.6
 
     def can_unlock(self, k):
         if k <= 0 or k >= NSITE or self.unlocked[k] or not self.unlocked[k - 1]:
@@ -761,9 +823,9 @@ class Game:
         return all(self.ore[p] >= amt for p, amt in ores) and self.credits >= cr
 
     def dm_potential(self):
-        if self.all_norm < DM_DIV:
+        if self.cyc_norm < DM_DIV:
             return 0
-        return int((self.all_norm / DM_DIV) ** DM_POW * self.E["dm"])
+        return int((self.cyc_norm / DM_DIV) ** DM_POW * self.E["dm"])
 
     def warp_gain(self):
         return max(0, self.dm_potential() - self.dm)
@@ -773,6 +835,7 @@ class Game:
         self.run_ore[p] += x
         self.all_ore[p] += x
         self.run_norm += x / SC[p]
+        self.cyc_norm += x / SC[p]
         self.all_norm += x / SC[p]
 
     def add_credits(self, x):
@@ -888,13 +951,13 @@ class Game:
     def can_buy_project(self, p):
         if p in self.projects or not self.unlocked[p]:
             return False
-        ore, cr, sci = project_cost(p)
+        ore, cr, sci = self.project_cost(p)
         return self.ore[p] >= ore and self.credits >= cr and self.science >= sci
 
     def buy_project(self, p):
         if not self.can_buy_project(p):
             return False
-        ore, cr, sci = project_cost(p)
+        ore, cr, sci = self.project_cost(p)
         self.ore[p] -= ore
         self.credits -= cr
         self.science -= sci
@@ -904,12 +967,15 @@ class Game:
         self.recalc()
         return True
 
+    def tech_cost(self, tid):
+        return TECH_BY_ID[tid][2] * self.E["techcost"]
+
     def research(self, tid):
         t = TECH_BY_ID[tid]
         if tid in self.techs or any(p not in self.techs for p in t[3]):
             return False
-        if self.science >= t[2]:
-            self.science -= t[2]
+        if self.science >= self.tech_cost(tid):
+            self.science -= self.tech_cost(tid)
             self.techs.add(tid)
             self.toast(f"Researched: {t[1]}", 4)
             self.recalc()
@@ -1027,7 +1093,7 @@ class Game:
         return sum(self.planet_power(p) for p in range(NSITE) if self.unlocked[p])
 
     def sector_power(self, k):
-        return 10 ** (SECTOR_LOG[k - 1] + TUNE["sshift"])
+        return 10 ** (SECTOR_LOG[k - 1] + TUNE["sshift"]) * TUNE["cpow"] ** (self.cycle - 1)
 
     def frontier(self):
         """Enemy sectors next to territory you hold."""
@@ -1073,6 +1139,8 @@ class Game:
             self.lose_ships(self.loss_fraction(WIN_LOSSES))
             fac = FACTIONS[SECTORS[k]["faction"]]["name"]
             self.toast(f"VICTORY! {SECTORS[k]['name']} liberated from the {fac}.  {SECTORS[k]['desc']}", 7)
+            if k == NSEC - 1:
+                self.toast("The Devourer is defeated!  You can now ASCEND - see the Warp tab.", 10)
             self.fx("conquer", k)
         else:
             self.battles_lost += 1
@@ -1128,6 +1196,83 @@ class Game:
             self.ore[p] -= lost
             self.toast(f"{FACTIONS[fac]['name']} raided {nm}!  Lost {fmt(lost)} {SITES[p]['ore']}.", 6)
         self.fx("raid", dict(p=p, win=win, faction=fac, lost=lost))
+        return True
+
+    # ---------------- New Game Plus: Ascension -----------------
+    def can_ascend(self):
+        return NSEC - 1 in self.conquered
+
+    def sd_gain(self):
+        x = max(0.0, self.cyc_norm / 1e25) ** TUNE["sdpow"]
+        return int((TUNE["sdbase"] + TUNE["sdcoef"] * x) * self.E["sd"] * (1 + 0.1 * self.ascensions))
+
+    def buy_sd_perk(self, pid):
+        pk = SD_BY_ID[pid]
+        if pid in self.sd_perks or self.stardust < pk[2]:
+            return False
+        self.stardust -= pk[2]
+        self.sd_perks.add(pid)
+        self.recalc()
+        self.apply_sd_start(only=pk)
+        return True
+
+    def apply_sd_start(self, only=None):
+        """Free starting benefits of Stardust perks (extra planets, Dark Matter) - applied when bought and every Ascension."""
+        for pk in ([only] if only else [SD_BY_ID[i] for i in sorted(self.sd_perks)]):
+            for e in pk[4]:
+                if e[0] == "startplanets":
+                    for k in range(1, min(NSITE, 1 + int(e[1]))):
+                        if not self.unlocked[k]:
+                            self.unlocked[k] = True
+                            self.add_ore(k, (SUPPLY + self.E["start"]) * SC[k])
+                elif e[0] == "startdm":
+                    self.dm += int(e[1])
+        self.recalc()
+
+    def ascend(self, force=False):
+        """New Game Plus: reset everything except achievements, Stardust and what Stardust perks let you keep."""
+        if not (force or self.can_ascend()):
+            return False
+        gain = max(1, self.sd_gain())
+        self.stardust += gain
+        self.sd_total += gain
+        self.cycle += 1
+        self.ascensions += 1
+        keep_proj = {k for k in self.projects if k < self.E["keepproj"]}
+        keep_sec = {k for k in self.conquered if k <= self.E["keepsec"]} | {0}
+        keep_arm = list(self.armory) if self.E["keeparm"] else [0] * len(ARMORY)
+        n = NSITE
+        self.ore = [0.0] * n
+        self.run_ore = [0.0] * n
+        self.owned = [[0] * NSH for _ in range(n)]
+        self.ups = [set() for _ in range(n)]
+        self.unlocked = [True] + [False] * (n - 1)
+        self.bld = [[0] * NB for _ in range(n)]
+        self.credits = 0.0
+        self.science = 0.0
+        self.techs = set()
+        self.perks = set()
+        self.dm = self.dm_spent = 0
+        self.projects = keep_proj
+        self.conquered = keep_sec
+        self.armory = keep_arm
+        self.campaign = None
+        self.run_norm = 0.0
+        self.cyc_norm = 0.0
+        self.cur = 0
+        self.travel = None
+        self.visited = {0}
+        self.crate = None
+        self.buffs = []
+        self.event = None
+        self.cycle_start = self.play_time
+        self.recalc()
+        add = (SUPPLY + self.E["start"]) * SC[0]
+        self.add_ore(0, add)
+        self.apply_sd_start()
+        self.toast(f"ASCENDED! Cycle {self.cycle} begins.  +{gain} Stardust", 8)
+        self.fx("ascend", dict(gain=gain, cycle=self.cycle))
+        self.save()
         return True
 
     # ---------------- quests -----------------

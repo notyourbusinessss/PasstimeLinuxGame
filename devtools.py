@@ -7,7 +7,7 @@ These are only reachable when the game is started from a terminal with the --dev
 Using any cheat marks the save as having cheated (which unlocks a secret achievement).
 """
 import core
-from core import BMAX, NB, NSH, NSITE, NSEC, ARMORY, PERKS, PROJECTS, SC, SITES, TECHS, UPGRADES, ACHIEVEMENTS, fmt
+from core import BMAX, NB, NSH, NSITE, NSEC, ARMORY, STARDUST_PERKS, PERKS, PROJECTS, SC, SITES, TECHS, UPGRADES, ACHIEVEMENTS, fmt
 
 EVENT_NAMES = [("Meteor shower", "meteor"), ("Pirate raid", "pirates"), ("Solar flare", "flare"),
                ("Cosmic lottery", "lottery"), ("Derelict ship", "derelict"), ("Alien trader", "trader"),
@@ -179,6 +179,20 @@ def sections(app):
     def max_armory():
         g.armory = [a[3] for a in ARMORY]
 
+    def add_sd(n):
+        def run():
+            g.stardust += n
+            g.sd_total += n
+        return run
+
+    def sd_all():
+        g.sd_perks = {p[0] for p in STARDUST_PERKS}
+        g.apply_sd_start()
+
+    def sd_reset():
+        g.sd_perks = set()
+        g.stardust = g.sd_total
+
     def set_speed(k):
         def run():
             d.speed = k
@@ -268,6 +282,13 @@ def sections(app):
             ("Max armory", cheat(max_armory), False),
             ("Enemy raid here (repelled)", cheat(lambda: g.raid(g.cur, force=True)), False),
             ("Enemy raid here (lost)", cheat(lambda: g.raid(g.cur, force=False)), False),
+        ]),
+        ("Ascension (New Game+)", [
+            ("+100 Stardust", cheat(add_sd(100)), False),
+            ("+10,000 Stardust", cheat(add_sd(10000)), False),
+            ("Ascend now (forced)", cheat(lambda: g.ascend(force=True)), False),
+            ("Grant ALL Stardust perks", cheat(sd_all), False),
+            ("Reset Stardust perks (refund)", cheat(sd_reset), False),
         ]),
         ("Achievements & warp", [
             ("Unlock ALL achievements", cheat(ach_all), False),
