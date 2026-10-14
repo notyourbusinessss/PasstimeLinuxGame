@@ -5,7 +5,7 @@ Nothing here changes the game state; the numbers come from the same rules the ca
 """
 import math
 
-from core import NSH, SECTORS, SECTOR_LINKS, fmt, win_chance
+from core import FACTIONS, NSH, SECTORS, SECTOR_LINKS, fmt, win_chance
 import director
 
 STATUS = [  # win chance at least, label, colour
@@ -108,6 +108,17 @@ def fleet_tiers(g, n=3):
     return tiers or [0]
 
 
+def stance_line(g, fac):
+    """(text, colour) for the state between you and a faction: war, truce or peace with its tension."""
+    name = FACTIONS[fac]["name"]
+    st = director.stance(g, fac)
+    if st == "war":
+        return f"AT WAR with the {name} for {int(director.war_age(g, fac) // 60)} min", (255, 120, 110)
+    if st == "truce":
+        return f"Truce with the {name}: {int(g.truce[fac] // 60) + 1} min left", (130, 220, 255)
+    return f"At peace with the {name} - tension {g.tension.get(fac, 0.0) * 100:.0f}%", (130, 230, 150)
+
+
 def report(g, k):
     """Lines for the 'Front report' card of sector k: ([(text, colour), ...], your power share or None)."""
     lines = []
@@ -128,6 +139,7 @@ def report(g, k):
     label, col = status(g, k)
     fp, ep = g.fleet_power(), g.sector_power(k)
     sh = share(g, k)
+    lines.append(stance_line(g, SECTORS[k]["faction"]))
     lines.append((f"{label}   -   you {fmt(fp)} vs enemy {fmt(ep)}", col))
     lines.append((f"Power split: you {sh * 100:.0f}% / enemy {100 - sh * 100:.0f}%", (205, 210, 230)))
     src = source_sector(g, k)

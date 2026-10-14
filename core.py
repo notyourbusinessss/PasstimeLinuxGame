@@ -470,6 +470,10 @@ def build_achievements():
         lambda g: "forewarned" in g.flags)
     add("Close Look", "Zoom in on a frontline in the galaxy view", "Galaxy", "bronze",
         lambda g: "closeup" in g.flags)
+    add("First Strike", "Declare war by invading a faction at peace", "Galaxy", "bronze", lambda g: g.wars_declared >= 1)
+    add("They Struck First", "Be invaded: a faction declares war on you", "Galaxy", "bronze", lambda g: g.wars_suffered >= 1)
+    add("Peace in Our Time", "End a war by sueing for peace", "Galaxy", "silver", lambda g: g.peaces_made >= 1,
+        lambda g: (g.peaces_made, 1))
     add("Dig In", "Fortify a planet or sector against an incoming attack", "Galaxy", "bronze", lambda g: "fortified" in g.flags)
     add("Hold the Line", "Repel a Regional assault", "Galaxy", "silver", lambda g: g.tier_wins[1] >= 1,
         lambda g: (g.tier_wins[1], 1))
@@ -536,6 +540,7 @@ class Game:
         self.dev_mult = 1.0                 # developer cheat: production multiplier
         self.click_times = deque()
         self.raid_t = random.uniform(420, 780)
+        self.warned = set()                # factions whose "war is near" warning was shown
         self.offensive_t = random.uniform(1500, 2400)
         self.notified_unlock = -1
         self.recalc()
@@ -578,6 +583,10 @@ class Game:
         self.battles_won = self.battles_lost = self.raids_repelled = self.raids_lost = 0
         self.incoming = []
         self.hostility = {}
+        self.war = {}                      # faction -> dict(since, by): who is at war with you, and who started it
+        self.tension = {}                  # faction -> 0..1: how close a faction at peace is to declaring war on you
+        self.truce = {}                    # faction -> seconds left of a truce (no tension, no attacks)
+        self.wars_declared = self.wars_suffered = self.peaces_made = 0
         self.garrison = {}
         self.lost_sectors = set()
         self.director_log = []
@@ -609,7 +618,8 @@ class Game:
                  night_secs=self.night_secs, visited=sorted(self.visited), flags=sorted(self.flags),
                  conquered=sorted(self.conquered), campaign=self.campaign, armory=self.armory,
                  battles_won=self.battles_won, battles_lost=self.battles_lost, raids_repelled=self.raids_repelled,
-                 raids_lost=self.raids_lost, incoming=self.incoming, hostility=self.hostility, garrison={str(k): v for k, v in self.garrison.items()},
+                 raids_lost=self.raids_lost, incoming=self.incoming, hostility=self.hostility, war=self.war, tension=self.tension, truce=self.truce,
+                 wars_declared=self.wars_declared, wars_suffered=self.wars_suffered, peaces_made=self.peaces_made, garrison={str(k): v for k, v in self.garrison.items()},
                  lost_sectors=sorted(self.lost_sectors), director_log=self.director_log, director_id=self.director_id,
                  tier_wins=self.tier_wins, offensives_repelled=self.offensives_repelled, sectors_lost=self.sectors_lost,
                  sectors_retaken=self.sectors_retaken, cycle=self.cycle, ascensions=self.ascensions, stardust=self.stardust,
@@ -700,6 +710,12 @@ class Game:
             self.raids_repelled = int(d.get("raids_repelled", 0)); self.raids_lost = int(d.get("raids_lost", 0))
             self.incoming = []     # attacks in flight are not restored: the enemy never acts while the game is closed
             self.hostility = {str(k): float(v) for k, v in dict(d.get("hostility", {})).items() if k in FACTIONS}
+            self.war = {str(k): dict(since=float(v.get("since", 0.0)), by=str(v.get("by", "player")))
+                        for k, v in dict(d.get("war", {})).items() if k in FACTIONS and isinstance(v, dict)}
+            self.tension = {str(k): max(0.0, min(1.0, float(v))) for k, v in dict(d.get("tension", {})).items() if k in FACTIONS}
+            self.truce = {str(k): max(0.0, float(v)) for k, v in dict(d.get("truce", {})).items() if k in FACTIONS}
+            self.wars_declared = int(d.get("wars_declared", 0)); self.wars_suffered = int(d.get("wars_suffered", 0))
+            self.peaces_made = int(d.get("peaces_made", 0))
             self.garrison = {int(k): float(v) for k, v in dict(d.get("garrison", {})).items() if 0 < int(k) < NSEC}
             self.lost_sectors = {int(k) for k in d.get("lost_sectors", []) if 0 < int(k) < NSEC}
             self.director_log = [(float(a), str(b)) for a, b in list(d.get("director_log", []))[-8:]]
@@ -1211,6 +1227,8 @@ class Game:
         self.campaign = dict(k=k, t=0.0, dur=self.campaign_duration(k), fp=fp,
                              chance=win_chance(fp, self.sector_power(k)))
         fac = SECTORS[k]["faction"]
+        if fac not in self.war:                                          # invading a faction at peace is a declaration of war
+            director.declare_war(self, fac, "player")
         self.hostility[fac] = self.hostility.get(fac, 0.0) + 1.0        # attacking a faction makes it more hostile
         self.toast(f"Fleet dispatched to {SECTORS[k]['name']}  ({self.campaign['chance'] * 100:.0f}% to win)", 4)
         self.fx("campaign", k)
@@ -1328,6 +1346,7 @@ class Game:
         self.campaign = None
         self.incoming = []
         self.hostility = {}
+        self.war, self.tension, self.truce = {}, {}, {}
         self.lost_sectors = set()
         self.garrison = {k: self.sector_power(k) * 1.3 for k in keep_sec if k}
         self.grace = 1200.0

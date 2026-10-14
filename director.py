@@ -10,7 +10,10 @@ What it does
     preferring the weakly defended ones;
   * schedules **counter-offensives** that try to retake sectors you liberated;
   * announces attacks in advance depending on your **Intel** armory upgrade, and lets you **Fortify** the target;
-  * stays quiet for a while after loading a save, Warping or Ascending, and never acts while the game is closed.
+  * stays quiet for a while after loading a save, Warping or Ascending, and never acts while the game is closed;
+  * keeps the galaxy at **peace** until a war starts: either you invade a faction (a declaration of war), or a faction
+    that borders you loses patience (its *tension* fills up) and invades you. Only factions at war attack you, and you
+    can sue for peace to end a war.
 """
 import math
 import random
@@ -47,8 +50,144 @@ def hostility_mult(g, fac):
     return min(2.0, 1.0 + 0.15 * g.hostility.get(fac, 0.0))
 
 
+# ------------------------------------------------------------------ war and peace
+TENSION_TIME = 5400.0           # seconds of border contact until a faction of average temper declares war (90 minutes)
+TRUCE_TIME = 2700.0             # how long a truce lasts after you make peace
+WAR_MIN = 600.0                 # a war has to last this long before you can sue for peace
+TEMPER = dict(pirates=1.4, hive=1.2, devourer=1.1, iron=1.0, void=0.9, crystal=0.7)     # how quickly each faction loses patience
+
+
+def at_war(g, fac):
+    return fac in g.war
+
+
+def war_fronts(g):
+    """Enemy sectors next to your territory whose faction is at war with you: the only places attacks come from."""
+    return [k for k in g.frontier() if SECTORS[k]["faction"] in g.war]
+
+
+def borders(g, fac):
+    return any(SECTORS[k]["faction"] == fac for k in g.frontier())
+
+
+def stance(g, fac):
+    return "war" if fac in g.war else ("truce" if g.truce.get(fac, 0.0) > 0 else "peace")
+
+
+def war_age(g, fac):
+    return g.play_time - g.war[fac]["since"] if fac in g.war else 0.0
+
+
+def peace_cost(g, fac):
+    return max(2000.0, g.cred_ops * 600.0)
+
+
+def can_sue(g, fac):
+    """(ok, why not): you can sue for peace after 10 minutes of war, when you are not attacking that faction."""
+    if fac not in g.war:
+        return False, "Not at war"
+    if war_age(g, fac) < WAR_MIN:
+        return False, f"Too early ({int((WAR_MIN - war_age(g, fac)) // 60) + 1} min)"
+    if g.campaign and SECTORS[g.campaign["k"]]["faction"] == fac:
+        return False, "Your fleet is attacking them"
+    if g.credits < peace_cost(g, fac):
+        return False, "Not enough credits"
+    return True, ""
+
+
+def declare_war(g, fac, by):
+    """by = "player" (you invade) or "enemy" (they invade you). Returns False if already at war."""
+    if fac in g.war or fac not in FACTIONS:
+        return False
+    broke_truce = g.truce.pop(fac, 0.0) > 0
+    g.war[fac] = dict(since=g.play_time, by=by)
+    g.tension[fac] = 0.0
+    name = FACTIONS[fac]["name"]
+    if by == "player":
+        g.wars_declared += 1
+        g.raid_t = min(g.raid_t, 300.0)               # they answer within a few minutes
+        text = f"You declared war on the {name}"
+        if broke_truce:
+            g.hostility[fac] = g.hostility.get(fac, 0.0) + 1.0
+            text += " (the truce is broken)"
+        g.toast(f"WAR! You invade the {name}. Their fleets will strike back.", 7)
+    else:
+        g.wars_suffered += 1
+        g.raid_t = min(g.raid_t, 120.0)
+        text = f"The {name} declared war on you"
+        g.toast(f"WAR! The {name} invade! Defend your planets and sectors.", 8)
+    log(g, text)
+    core.log.info("War: %s (%s)", text, by)
+    g.fx("war", dict(fac=fac, by=by))
+    if by == "enemy":
+        first_strike(g, fac)
+    return True
+
+
+def first_strike(g, fac):
+    """The opening move of a faction that declares war: a counter-offensive on your weakest border sector, or a raid."""
+    exposed = [k for k in g.conquered if k and any(SECTORS[n]["faction"] == fac and n not in g.conquered
+                                                  for n in SECTOR_LINKS_[k])]
+    if len(g.conquered) - 1 >= 2 and exposed:
+        k = min(exposed, key=lambda q: sector_defense(g, q) / max(g.sector_power(q), 1e-9))
+        if schedule_offensive(g, target=k, src_fac=fac):
+            return
+    schedule_raid(g)
+
+
+def end_war(g, fac, why):
+    if g.war.pop(fac, None) is None:
+        return
+    g.incoming = [i for i in g.incoming if i["fac"] != fac]       # their fleets turn back
+    log(g, f"War with the {FACTIONS[fac]['name']} ended: {why}")
+    core.log.info("War with %s ended: %s", fac, why)
+
+
+def sue_for_peace(g, fac):
+    ok, _ = can_sue(g, fac)
+    if not ok:
+        return False
+    g.credits -= peace_cost(g, fac)
+    end_war(g, fac, "you sued for peace")
+    g.truce[fac] = TRUCE_TIME
+    g.tension[fac] = 0.0
+    g.peaces_made += 1
+    g.toast(f"PEACE with the {FACTIONS[fac]['name']}. A truce holds for {int(TRUCE_TIME // 60)} minutes.", 7)
+    g.fx("peace", dict(fac=fac))
+    return True
+
+
+def step_war(g, dt):
+    """Truces run out, tension builds at the border of factions at peace, and a faction at the limit declares war."""
+    rate = dt / TENSION_TIME * (1.0 + 0.25 * min(8, len(g.conquered) - 1))      # the more of the galaxy you hold, the more they fear you
+    for fac in FACTIONS:
+        if fac in g.war:
+            if not any(SECTORS[k]["faction"] == fac and k not in g.conquered for k in range(1, NSEC)):
+                end_war(g, fac, "nothing of them is left")
+            continue
+        left = g.truce.get(fac, 0.0)
+        if left > 0:
+            g.truce[fac] = left - dt
+            if g.truce[fac] <= 0:
+                g.truce.pop(fac, None)
+                g.toast(f"The truce with the {FACTIONS[fac]['name']} has ended.", 5)
+            continue
+        t = g.tension.get(fac, 0.0)
+        if not borders(g, fac):
+            g.tension[fac] = max(0.0, t - dt / 1200.0)
+            continue
+        t += rate * TEMPER.get(fac, 1.0)
+        g.tension[fac] = min(1.0, t)
+        if t >= 0.8 and fac not in g.warned:
+            g.warned.add(fac)
+            g.toast(f"The {FACTIONS[fac]['name']} are massing on your border - war is near!", 8)
+        if t >= 1.0:
+            g.warned.discard(fac)
+            declare_war(g, fac, "enemy")
+
+
 def weakest_front(g):
-    front = g.frontier()
+    front = war_fronts(g)
     return min(front, key=g.sector_power) if front else None
 
 
@@ -66,7 +205,7 @@ def aggression(g):
     if not g.galaxy_open:
         return 0.0
     k = weakest_front(g)
-    if k is None:
+    if k is None:                                   # at peace nobody attacks
         return 0.0
     fp = max(1.0, g.fleet_power())
     ep = g.sector_power(k)
@@ -157,15 +296,17 @@ def schedule_raid(g, tier=None, lead=None, targets=None):
     return inc
 
 
-def schedule_offensive(g, target=None, lead=None):
-    """An enemy counter-offensive against a sector you hold that borders enemy territory."""
-    exposed = [k for k in g.conquered if k != 0 and any(n not in g.conquered for n in SECTOR_LINKS_[k])]
+def schedule_offensive(g, target=None, lead=None, src_fac=None):
+    """An enemy counter-offensive against a sector you hold that borders the territory of a faction at war with you."""
+    exposed = [k for k in g.conquered if k != 0 and any(n not in g.conquered and SECTORS[n]["faction"] in g.war
+                                                       for n in SECTOR_LINKS_[k])]
     if target is None:
         if not exposed:
             return None
         weights = [1.0 / (0.3 + sector_defense(g, k) / max(g.sector_power(k), 1e-9)) for k in exposed]
         target = random.choices(exposed, weights=weights)[0]
-    enemies = [n for n in SECTOR_LINKS_[target] if n not in g.conquered]
+    enemies = [n for n in SECTOR_LINKS_[target] if n not in g.conquered and (src_fac is None or SECTORS[n]["faction"] == src_fac)]
+    enemies = [n for n in enemies if SECTORS[n]["faction"] in g.war] or enemies
     src = random.choice(enemies) if enemies else target
     fac = SECTORS[src]["faction"] or SECTORS[target]["faction"]
     inc = dict(id=next_id(g), kind="offensive", tier=-1, fac=fac, src=src, target=target, targets=[], t=0.0,
@@ -296,7 +437,7 @@ def resolve_offensive(g, inc):
 
 def instant_raid(g, p=None, force=None):
     """Developer helper: an immediate small raid on planet p with a chosen outcome."""
-    src = weakest_front(g)
+    src = weakest_front(g) or (min(g.frontier(), key=g.sector_power) if g.frontier() else None)
     if src is None:
         return False
     p = p if p is not None else random.choice([q for q in range(NSITE) if g.unlocked[q]])
@@ -334,6 +475,9 @@ def step(g, dt):
         g.grace = max(0.0, g.grace - dt)
         return
     if not g.galaxy_open or not g.frontier():
+        return
+    step_war(g, dt)
+    if not war_fronts(g):                           # at peace: nothing attacks you
         return
     g.raid_t -= dt
     guard = 0

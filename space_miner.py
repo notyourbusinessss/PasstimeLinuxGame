@@ -89,6 +89,8 @@ class App:
         self.can_scale = False               # True when the window is resizable and scales the game to fit
         self.fullscreen = False
         self.test_fault = 0
+        self.war_confirm = 0.0
+        self.war_confirm_k = None
         self.had_event = False
         self.snd = sounds.Sounds(self.g.settings)
         self.t = 0.0
@@ -280,6 +282,15 @@ class App:
     def set_tab(self, k):
         self.tab = k
 
+    def attack(self, k):
+        """ATTACK / DECLARE WAR on the Galaxy tab: invading a faction at peace needs a second click."""
+        g = self.g
+        if SECTORS[k]["faction"] not in g.war and not (self.war_confirm > 0 and self.war_confirm_k == k):
+            self.war_confirm, self.war_confirm_k = 4.0, k
+            return
+        self.war_confirm = 0.0
+        g.start_campaign(k)
+
     def describe(self):
         """A few lines about the game state, added to error reports."""
         g = self.g
@@ -442,6 +453,7 @@ class App:
         self.ascend_fx = max(0, self.ascend_fx - dt)
         self.ascend_confirm = max(0, self.ascend_confirm - dt)
         self.warp_confirm = max(0, self.warp_confirm - dt)
+        self.war_confirm = max(0, self.war_confirm - dt)
         self.reset_confirm = max(0, self.reset_confirm - dt)
         for kind, data in g.fx_events:
             if kind == "warp":
@@ -505,6 +517,17 @@ class App:
                                          sound="raid", col=(255, 110, 100), glyph="!", dur=5.0))
                 else:
                     self.snd.play("raid")
+            elif kind == "war":
+                name = FACTIONS[data["fac"]]["name"]
+                if data["by"] == "player":
+                    self.add_banner(dict(header="WAR DECLARED", title=name, sub="You invade. Their fleets will strike back.",
+                                         right="", sound="raid", col=FACTIONS[data["fac"]]["col"], glyph="!", dur=5.0))
+                else:
+                    self.add_banner(dict(header="INVASION!", title=name, sub="They declare war on you. Defend your worlds!",
+                                         right="", sound="lose", col=(255, 90, 90), glyph="!", dur=6.0))
+            elif kind == "peace":
+                self.add_banner(dict(header="PEACE", title=f"Truce with the {FACTIONS[data['fac']]['name']}",
+                                     sub="They stand down for a while.", right="", sound="win", col=(130, 220, 255), glyph="v", dur=4.5))
             elif kind == "sector_lost":
                 sec = SECTORS[data]
                 self.add_banner(dict(header="SECTOR LOST", title=sec["name"], sub="Liberate it again to get its bonus back.",
@@ -1450,17 +1473,21 @@ class App:
         # ---- Threat Director
         lvl = director.level(g)
         agg = director.aggression(g)
-        tcol = [(120, 220, 140), (190, 230, 120), (255, 215, 100), (255, 150, 90), (255, 90, 90)][lvl]
+        at_peace = not director.war_fronts(g)
+        tcol = (120, 220, 140) if at_peace else [(120, 220, 140), (190, 230, 120), (255, 215, 100), (255, 150, 90), (255, 90, 90)][lvl]
         tlines = []
-        if g.grace > 0:
-            tlines.append((f"Enemy fleets are regrouping - quiet for {fmt_time(g.grace)}", (170, 176, 205)))
-        elif not g.frontier():
+        if not g.frontier():
             tlines.append(("No enemy territory borders yours.", (170, 176, 205)))
+        elif at_peace:
+            tlines.append(("Nobody is at war with you. Invade a faction - or wait: tension builds on your borders.", (170, 176, 205)))
+        elif g.grace > 0:
+            tlines.append((f"Enemy fleets are regrouping - quiet for {fmt_time(g.grace)}", (170, 176, 205)))
         else:
             tlines.append(("Raids and counter-offensives come more often when your fleet or planets look weak.", (170, 176, 205)))
         rr = pygame.Rect(PANEL.x, y, PANEL.w, 84)
-        self.row(scr, fonts, rr, f"Threat level: {director.LEVELS[lvl]}", "Enemy aggression", None, None, True, tcol, None,
-                 frac=agg, glyph="!", lines=tlines)
+        self.row(scr, fonts, rr, "Peace" if at_peace and g.frontier() else f"Threat level: {director.LEVELS[lvl]}",
+                 "No faction is at war with you" if at_peace and g.frontier() else "Enemy aggression", None, None, True, tcol, None,
+                 frac=None if at_peace else agg, glyph="!", lines=tlines)
         y += 92
         ilv = director.intel(g)
         if not g.incoming:
@@ -1488,15 +1515,36 @@ class App:
                      can, (255, 110, 100), (lambda i=inc["id"]: director.fortify(g, i)) if can else None,
                      frac=inc["t"] / max(0.1, inc["eta"]), glyph="!")
             y += 84
-        # ---- faction hostility
-        facs = [f for f in FACTIONS if any(SECTORS[k]["faction"] == f and k not in g.conquered for k in range(1, NSEC))]
+        # ---- factions: war, truce or peace (tension)
+        facs = [f for f in FACTIONS if any(SECTORS[k]["faction"] == f and k not in g.conquered for k in range(1, NSEC))
+                and (f in g.war or g.truce.get(f, 0.0) > 0 or director.borders(g, f))]
         if facs:
-            hl = [(f"{FACTIONS[f]['name']}:  attack power x{director.hostility_mult(g, f):.2f}   "
-                   f"(hostility {g.hostility.get(f, 0.0):.1f})", FACTIONS[f]["col"]) for f in facs]
-            rr = pygame.Rect(PANEL.x, y, PANEL.w, 50 + 15 * len(hl))
-            self.row(scr, fonts, rr, "Faction hostility", "Every campaign against a faction makes its attacks stronger for a while.",
-                     None, None, True, (255, 150, 110), None, glyph="H", lines=hl)
-            y += rr.h + 8
+            self.txt(scr, med, "Factions", (PANEL.x + 4, y), (255, 225, 140))
+            y += 28
+        for f in facs:
+            fcol = FACTIONS[f]["col"]
+            rr = pygame.Rect(PANEL.x, y, PANEL.w, 62)
+            y += 68
+            st = director.stance(g, f)
+            if st == "war":
+                ok, why = director.can_sue(g, f)
+                by = "invaded you" if g.war[f]["by"] == "enemy" else "you invaded them"
+                self.row(scr, fonts, rr, f"{FACTIONS[f]['name']}  -  AT WAR",
+                         f"{fmt_time(director.war_age(g, f))} ({by}). Their attacks hit x{director.hostility_mult(g, f):.2f}",
+                         "SUE FOR PEACE", f"{fmt(director.peace_cost(g, f))} cr" if ok or why == "Not enough credits" else why,
+                         ok, (255, 110, 100), (lambda f=f: director.sue_for_peace(g, f)) if ok else None,
+                         icon=self.enemy_small[f], tcol=fcol)
+            elif st == "truce":
+                left = g.truce[f]
+                self.row(scr, fonts, rr, f"{FACTIONS[f]['name']}  -  TRUCE", f"Peace holds for {fmt_time(left)}", None, None, True,
+                         (130, 220, 255), None, frac=left / director.TRUCE_TIME, icon=self.enemy_small[f], tcol=fcol)
+            else:
+                t = g.tension.get(f, 0.0)
+                tc = (120, 220, 140) if t < 0.5 else ((255, 215, 100) if t < 0.8 else (255, 110, 100))
+                sub = ("They are about to declare war!" if t >= 0.8 else
+                       "Tension rises while you border them; at 100% they invade you.")
+                self.row(scr, fonts, rr, f"{FACTIONS[f]['name']}  -  PEACE", sub, f"tension {t * 100:.0f}%", None, True, tc, None,
+                         frac=t, icon=self.enemy_small[f], tcol=fcol)
         if g.director_log:
             ll = [(f"{fmt_time(max(0, g.play_time - t))} ago  -  {text}"[:78], (190, 196, 220)) for t, text in reversed(g.director_log[-5:])]
             rr = pygame.Rect(PANEL.x, y, PANEL.w, 36 + 15 * len(ll))
@@ -1527,9 +1575,17 @@ class App:
                      (f"Win chance {ch * 100:.0f}%    campaign time {fmt_time(g.campaign_duration(k))}", self.chance_color(ch)),
                      (f"Losses: victory {g.loss_fraction(core.WIN_LOSSES) * 100:.1f}% of ships, defeat "
                       f"{g.loss_fraction(core.LOSE_LOSSES) * 100:.1f}%", (170, 176, 205))]
-            label = "ATTACK" if g.campaign is None else "BUSY"
+            at_war = sec["faction"] in g.war
+            if not at_war:
+                lines.append(("Invading starts a WAR: their fleets will raid you and counter-attack.", (255, 170, 130)))
+            if g.campaign is not None:
+                label = "BUSY"
+            elif at_war:
+                label = "ATTACK"
+            else:
+                label = "CONFIRM WAR!" if self.war_confirm > 0 and self.war_confirm_k == k else "DECLARE WAR"
             self.row(scr, fonts, rr, f"{sec['name']}  -  {fac['name']}", f"Reward: {sec['desc']}", label, None,
-                     can, fac["col"], (lambda k=k: g.start_campaign(k)) if can else None,
+                     can, fac["col"], (lambda k=k: self.attack(k)) if can else None,
                      icon=self.enemy_big[sec["faction"]], lines=lines)
         rl, shr = front.report(g, k)
         rr = pygame.Rect(PANEL.x, y, PANEL.w, 56 + 15 * len(rl) + (8 if shr is not None else 0))
@@ -1757,6 +1813,7 @@ class App:
             ("Raids repelled / lost", f"{g.raids_repelled:,} / {g.raids_lost:,}"),
             ("Big raids repelled (regional / system)", f"{g.tier_wins[1]:,} / {g.tier_wins[2]:,}"),
             ("Counter-offensives held", f"{g.offensives_repelled:,}"),
+            ("Wars declared / suffered / peace treaties", f"{g.wars_declared} / {g.wars_suffered} / {g.peaces_made}"),
             ("Sectors lost / retaken", f"{g.sectors_lost:,} / {g.sectors_retaken:,}"),
             ("Fleet power", fmt(g.fleet_power())),
             ("Colony levels built", f"{g.bldg:,}"),
@@ -2199,6 +2256,7 @@ def selftest_step(app, g, frames, shot):
         app.view = "galaxy"
         app.sel_sector = 3
         assert g.start_campaign(3), "campaign failed to start"
+        assert "pirates" in g.war and g.wars_declared == 1, "invading did not declare war"
     if frames == 64:
         g.armory[director.INTEL] = 6
         g.credits = 1e15
@@ -2210,6 +2268,11 @@ def selftest_step(app, g, frames, shot):
             assert director.fortify(g, inc["id"]) or director.intel(g) < 2
     if frames == 66:
         shot("galaxy_map")
+    if frames == 66:
+        g.war["pirates"]["since"] = g.play_time - 700                 # old enough to sue for peace
+        assert director.can_sue(g, "pirates")[0] is False             # ...but the campaign against them is still running
+        app.attack(4)                                                 # the first click only asks for confirmation
+        assert "hive" not in g.war and app.war_confirm > 0
     if frames == 67:
         fv = app.fv                                  # zoom, pan and click the galaxy view
         fv.focus(3, snap=True)

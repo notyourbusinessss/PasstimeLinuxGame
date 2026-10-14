@@ -10,7 +10,7 @@ The first release.
 - The **galaxy**: 15 enemy-held sectors in 6 factions, campaigns, an armory (weapons, armor, engines, shields, intel) and permanent sector bonuses.
 - The **Threat Director**: adaptive raids and counter-offensives, Intel warnings, Fortify, faction hostility.
 - **Frontline close-up**: a zoomable galaxy map with battle lines, fleets, garrison shields and a mini-map.
-- 162 achievements, a stats page, procedural graphics and sound (no asset files for those).
+- 165 achievements, a stats page, procedural graphics and sound (no asset files for those).
 
 ### Release
 - Resizable window, fullscreen (F11 / Alt+Enter, `--fullscreen`) that scales to fit any screen.

@@ -194,13 +194,38 @@ def sections(app):
         g.sd_perks = set()
         g.stardust = g.sd_total
 
+    def force_war():
+        """The attack cheats need a faction at war: start one (without its opening strike) if nobody is."""
+        if not director.war_fronts(g) and g.frontier():
+            f = core.SECTORS[min(g.frontier())]["faction"]
+            g.war[f] = dict(since=g.play_time, by="enemy")
+
+    def war_all():
+        for f in core.FACTIONS:
+            if f not in g.war:
+                director.declare_war(g, f, "player")
+
+    def peace_all():
+        for f in list(g.war):
+            g.war.pop(f, None)
+            g.truce[f] = director.TRUCE_TIME
+        g.incoming.clear()
+
+    def max_tension():
+        for f in core.FACTIONS:
+            if f not in g.war and director.borders(g, f):
+                g.tension[f] = 0.97
+        g.grace = 0.0
+
     def sched_raid(tier):
         def run():
+            force_war()
             if director.schedule_raid(g, tier=tier, lead=8.0) is None:
                 g.toast("No enemy territory borders yours yet (liberate / reach Mars first).", 3)
         return run
 
     def sched_offensive():
+        force_war()
         if director.schedule_offensive(g, lead=12.0) is None:
             g.toast("You hold no sector that borders enemy territory.", 3)
 
@@ -320,6 +345,9 @@ def sections(app):
             ("Resolve all incoming now", cheat(resolve_incoming), False),
             ("Clear all incoming", cheat(lambda: g.incoming.clear()), False),
             ("Lose a sector", cheat(lose_sector), False),
+            ("Declare war on every faction", cheat(war_all), False),
+            ("Make peace with everyone (truce)", cheat(peace_all), False),
+            ("Max tension: a border faction invades soon", cheat(max_tension), False),
             ("All factions +3 hostility", cheat(more_hostile), False),
             ("Skip the enemy grace period", cheat(lambda: setattr(g, "grace", 0.0)), False),
             ("Enemy raid here (repelled)", cheat(lambda: g.raid(g.cur, force=True)), False),
