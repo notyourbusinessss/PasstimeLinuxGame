@@ -6,6 +6,7 @@ import random
 import sys
 
 import core
+import director
 from core import (BUILDINGS, NB, NSH, NSITE, SC, SHIPS, SITES, TECHS, PERKS, GROWTH, geo_max, fmt)
 
 
@@ -91,19 +92,33 @@ class Bot:
             return
         # armory: weapons / engines / armor when they cost a small slice of credits and science
         for i in sorted(range(len(core.ARMORY)), key=lambda i: core.armory_cost(i, g.armory[i])[0]):
-            if i == 3 or g.armory[i] >= core.ARMORY[i][3]:
+            if i == 3 or g.armory[i] >= core.ARMORY[i][3] or (i == 4 and g.armory[i] >= 4):
                 continue
             cr, sci = core.armory_cost(i, g.armory[i])
             res, cres = reserves(g)
             if cr <= 0.3 * max(0.0, g.credits - cres) and sci <= 0.3 * g.science:
                 g.buy_armory(i)
+        # enemy attacks: fortify the target when the odds look poor and credits are plentiful
+        for inc in list(g.incoming):
+            if director.intel(g) < 2:
+                break
+            cost = director.fortify_cost(g, inc)
+            if inc["kind"] == "offensive":
+                if director.incoming_chance(g, inc) < 0.75 and g.credits > 3 * cost:
+                    director.fortify(g, inc["id"])
+            else:
+                for p in inc["targets"]:
+                    if director.incoming_chance(g, inc, p) < 0.6 and g.credits > 3 * cost:
+                        director.fortify(g, inc["id"], p)
         if g.campaign is None:
             options = [k for k in g.frontier()
                        if core.win_chance(g.fleet_power(), g.sector_power(k)) >= BOT_CHANCE]
             if options:
                 g.start_campaign(min(options))
-        while self.seen_conq < len(g.conquered):
-            self.seen_conq += 1
+        lost = sorted(self.conq_logged - g.conquered)
+        for k in lost:
+            self.log.append((g.t, f"LOST {core.SECTORS[k]['name']}"))
+        self.conq_logged -= set(lost)
         new = sorted(g.conquered - self.conq_logged)
         for k in new:
             self.log.append((g.t, f"conquer {core.SECTORS[k]['name']}"))
@@ -229,7 +244,7 @@ def main():
             t, msg = bot.log[seen]
             if not quiet:
                 print(f"  [{fmt_t(t)}] {msg}")
-            elif msg.startswith(("unlock", "project", "conquer", "ASCEND")):
+            elif msg.startswith(("unlock", "project", "conquer", "ASCEND", "LOST")):
                 print(f"  [{fmt_t(t)}] {msg}")
             seen += 1
         if g.t >= next_report and not quiet:
@@ -241,6 +256,8 @@ def main():
             pass
     print(f"END {fmt_t(g.t)} planets={g.n_unlocked} techs={len(g.techs)}/{len(TECHS)} DM={g.dm} warps={g.warps} "
           f"achievements={len(g.ach)}/{len(core.ACHIEVEMENTS)}")
+    print(f"enemy: raids repelled {g.raids_repelled} / lost {g.raids_lost}, by tier won {g.tier_wins}, "
+          f"counter-offensives held {g.offensives_repelled}, sectors lost {g.sectors_lost}, retaken {g.sectors_retaken}")
 
 
 if __name__ == "__main__":

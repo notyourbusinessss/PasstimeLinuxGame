@@ -16,6 +16,7 @@ import pygame
 
 import core
 import devtools
+import director
 import gfx
 import sounds
 from core import (BMAX, BUILDINGS, NB, NSH, NSITE, PERKS, PROJECTS, SC, SHIPS, SITES, TECHS, TECH_BY_ID,
@@ -310,7 +311,8 @@ class App:
             self.banners.append(b)
 
     def spawn_raid(self, data):
-        n = random.randint(6, 10)
+        base = director.TIERS[data.get("tier", 0)]["count"]
+        n = random.randint(base - 2, base + 2)
         for i in range(n):
             a = random.uniform(0, math.tau)
             d = random.uniform(330, 420)
@@ -409,6 +411,23 @@ class App:
                 self.snd.play("raid")
                 if data["p"] == g.cur and self.view == "system":
                     self.spawn_raid(data)
+            elif kind == "warning":
+                if data["kind"] == "offensive" or data["tier"] >= 1:
+                    name = "Enemy counter-offensive" if data["kind"] == "offensive" else director.TIERS[data["tier"]]["name"]
+                    self.add_banner(dict(header="INCOMING ATTACK", title=name, sub=data["text"][:60], right=f"{int(data['eta'])}s",
+                                         sound="raid", col=(255, 110, 100), glyph="!", dur=5.0))
+                else:
+                    self.snd.play("raid")
+            elif kind == "sector_lost":
+                sec = SECTORS[data]
+                self.add_banner(dict(header="SECTOR LOST", title=sec["name"], sub="Liberate it again to get its bonus back.",
+                                     right="", sound="lose", col=(255, 90, 90), glyph="x", dur=6.0))
+                x, y = sec_pos(data)
+                self.burst(x, y, (255, 90, 90), 40)
+            elif kind == "held":
+                sec = SECTORS[data]
+                self.add_banner(dict(header="COUNTER-OFFENSIVE REPELLED", title=sec["name"], sub="Your garrison held the line.",
+                                     right="", sound="buy", col=(130, 220, 255), glyph="v", dur=4.0))
         g.fx_events.clear()
         if self.banners:
             b = self.banners[0]
@@ -678,18 +697,21 @@ class App:
 
     def draw_toasts(self, scr, sm):
         y = H - 62
+        maxw = 610
         for msg, secs in reversed(self.g.toasts):
+            if sm.size(msg)[0] > maxw:                      # fit long messages with an ellipsis
+                while msg and sm.size(msg + "...")[0] > maxw:
+                    msg = msg[:-1]
+                msg = msg.rstrip() + "..."
             img = sm.render(msg, True, (255, 245, 210))
             r = img.get_rect(midbottom=(CX, y)).inflate(28, 12)
-            r.width = min(r.width, 650)
-            r.centerx = CX
             bg = pygame.Surface(r.size, pygame.SRCALPHA)
             a = int(min(1, secs) * 225)
             pygame.draw.rect(bg, (16, 18, 38, a), bg.get_rect(), border_radius=10)
             pygame.draw.rect(bg, (255, 215, 110, a), bg.get_rect(), 1, border_radius=10)
             scr.blit(bg, r)
             img.set_alpha(int(min(1, secs) * 255))
-            scr.blit(img, img.get_rect(center=r.center), area=pygame.Rect(0, 0, r.w - 20, img.get_height()))
+            scr.blit(img, img.get_rect(center=r.center))
             y -= 38
 
     # ---------------- HUD & strip -----------------
@@ -743,6 +765,19 @@ class App:
                      f"({fmt_time(max(0, c['dur'] - c['t']))} left)", (22, y + 2), (255, 175, 150), shadow=True)
             pygame.draw.rect(scr, (40, 24, 28), (22, y + 20, 150, 6), border_radius=3)
             pygame.draw.rect(scr, (255, 120, 100), (22, y + 20, 150 * c["t"] / c["dur"], 6), border_radius=3)
+            y += 34
+        if director.intel(g) >= 1:
+            for inc in g.incoming[:2]:
+                left = max(0, inc["eta"] - inc["t"])
+                blink = 0.6 + 0.4 * math.sin(self.t * 6)
+                name = "Counter-offensive" if inc["kind"] == "offensive" else director.TIERS[inc["tier"]]["name"]
+                where = ""
+                if director.intel(g) >= 2:
+                    where = f" -> {SECTORS[inc['target']]['name']}" if inc["kind"] == "offensive" else " -> " + ", ".join(
+                        SITES[q]["name"] for q in inc["targets"])
+                self.txt(scr, tiny, f"INCOMING: {name}{where}  ({fmt_time(left)})", (22, y + 2), scale_c((255, 120, 110), blink),
+                         shadow=True)
+                y += 18
         yb = 84
         for b in g.buffs:
             self.txt(scr, sm, f"{b['name']} x{b['mult']:g}  {b['t']:.0f}s", (640, yb), (255, 222, 90), "topright", True)
@@ -1333,6 +1368,21 @@ class App:
                         pygame.draw.arc(scr, (255, 255, 255), (x - 23, y - 23, 46, 46), a0, a0 + 0.3, 2)
                 if math.hypot(mouse[0] - x, mouse[1] - y) < 20 and mouse[0] < PANEL.x - 10:
                     hover = k
+        if director.intel(g) >= 1:                 # enemy fleets on their way
+            for inc in g.incoming:
+                sx, sy = sec_pos(inc["src"])
+                tx, ty = sec_pos(inc["target"]) if inc["kind"] == "offensive" else sec_pos(0)
+                f = max(0.0, min(1.0, inc["t"] / max(0.1, inc["eta"])))
+                self.dashed(scr, (255, 90, 80), (sx, sy), (tx, ty), 2, offset=-self.t * 30)
+                mx, my = sx + (tx - sx) * f, sy + (ty - sy) * f
+                scr.blit(glow(18, (150, 40, 30)), (mx - 18, my - 18), special_flags=ADD)
+                fac = inc["fac"] if director.intel(g) >= 2 else "pirates"
+                ang = -math.degrees(math.atan2(ty - sy, tx - sx))
+                img = pygame.transform.rotate(self.enemy_small[fac], ang)
+                scr.blit(img, img.get_rect(center=(mx, my)))
+                label = fmt_time(max(0, inc["eta"] - inc["t"])) if director.intel(g) < 2 else (
+                    f"{fmt_time(max(0, inc['eta'] - inc['t']))}")
+                self.txt(scr, tiny, label, (mx, my + 14), (255, 150, 140), "midtop", True)
         if camp:                                   # your fleet travelling to the target
             k = camp["k"]
             tx, ty = sec_pos(k)
@@ -1430,6 +1480,61 @@ class App:
                      f"{c['chance'] * 100:.0f}% to win   -   committed power {fmt(c['fp'])}", None, None, True,
                      FACTIONS[sec["faction"]]["col"], None, frac=fr, icon=self.enemy_big[sec["faction"]])
             y += 74
+        # ---- Threat Director
+        lvl = director.level(g)
+        agg = director.aggression(g)
+        tcol = [(120, 220, 140), (190, 230, 120), (255, 215, 100), (255, 150, 90), (255, 90, 90)][lvl]
+        tlines = []
+        if g.grace > 0:
+            tlines.append((f"Enemy fleets are regrouping - quiet for {fmt_time(g.grace)}", (170, 176, 205)))
+        elif not g.frontier():
+            tlines.append(("No enemy territory borders yours.", (170, 176, 205)))
+        else:
+            tlines.append(("Raids and counter-offensives come more often when your fleet or planets look weak.", (170, 176, 205)))
+        rr = pygame.Rect(PANEL.x, y, PANEL.w, 84)
+        self.row(scr, fonts, rr, f"Threat level: {director.LEVELS[lvl]}", "Enemy aggression", None, None, True, tcol, None,
+                 frac=agg, glyph="!", lines=tlines)
+        y += 92
+        ilv = director.intel(g)
+        if not g.incoming:
+            msg = ("No enemy fleets detected." if ilv >= 1 else
+                   "Buy the Intel upgrade in the Armory to get early warnings of enemy attacks.")
+            self.txt(scr, tiny, msg, (PANEL.x + 8, y), (150, 158, 190))
+            y += 22
+        for inc in g.incoming:
+            if ilv < 1:
+                continue
+            left = max(0.0, inc["eta"] - inc["t"])
+            name = "Enemy counter-offensive" if inc["kind"] == "offensive" else director.TIERS[inc["tier"]]["name"]
+            cost = director.fortify_cost(g, inc)
+            if inc["kind"] == "offensive":
+                done = bool(inc["fort"])
+                label = "FORTIFIED" if done else f"FORTIFY  {fmt(cost)} cr"
+                can = ilv >= 2 and not done and g.credits >= cost
+            else:
+                done_n = len(inc["fort"])
+                label = (f"FORTIFIED {done_n}/{len(inc['targets'])}" if done_n == len(inc["targets"]) else
+                         f"FORTIFY  {fmt(cost)} cr  ({done_n}/{len(inc['targets'])})")
+                can = ilv >= 2 and done_n < len(inc["targets"]) and g.credits >= cost
+            rr = pygame.Rect(PANEL.x, y, PANEL.w, 76)
+            self.row(scr, fonts, rr, f"Incoming: {name}", director.describe(g, inc), fmt_time(left), label if ilv >= 2 else None,
+                     can, (255, 110, 100), (lambda i=inc["id"]: director.fortify(g, i)) if can else None,
+                     frac=inc["t"] / max(0.1, inc["eta"]), glyph="!")
+            y += 84
+        # ---- faction hostility
+        facs = [f for f in FACTIONS if any(SECTORS[k]["faction"] == f and k not in g.conquered for k in range(1, NSEC))]
+        if facs:
+            hl = [(f"{FACTIONS[f]['name']}:  attack power x{director.hostility_mult(g, f):.2f}   "
+                   f"(hostility {g.hostility.get(f, 0.0):.1f})", FACTIONS[f]["col"]) for f in facs]
+            rr = pygame.Rect(PANEL.x, y, PANEL.w, 50 + 15 * len(hl))
+            self.row(scr, fonts, rr, "Faction hostility", "Every campaign against a faction makes its attacks stronger for a while.",
+                     None, None, True, (255, 150, 110), None, glyph="H", lines=hl)
+            y += rr.h + 8
+        if g.director_log:
+            ll = [(f"{fmt_time(max(0, g.play_time - t))} ago  -  {text}"[:78], (190, 196, 220)) for t, text in reversed(g.director_log[-5:])]
+            rr = pygame.Rect(PANEL.x, y, PANEL.w, 50 + 15 * len(ll))
+            self.row(scr, fonts, rr, "Recent enemy activity", "", None, None, True, (150, 160, 200), None, glyph="L", lines=ll)
+            y += rr.h + 8
         fr_list = g.frontier()
         sel = self.sel_sector
         if sel not in fr_list and sel not in g.conquered:
@@ -1677,6 +1782,9 @@ class App:
             ("Sectors liberated", f"{len(g.conquered) - 1}/{NSEC - 1}"),
             ("Battles won / lost", f"{g.battles_won:,} / {g.battles_lost:,}"),
             ("Raids repelled / lost", f"{g.raids_repelled:,} / {g.raids_lost:,}"),
+            ("Big raids repelled (regional / system)", f"{g.tier_wins[1]:,} / {g.tier_wins[2]:,}"),
+            ("Counter-offensives held", f"{g.offensives_repelled:,}"),
+            ("Sectors lost / retaken", f"{g.sectors_lost:,} / {g.sectors_retaken:,}"),
             ("Fleet power", fmt(g.fleet_power())),
             ("Colony levels built", f"{g.bldg:,}"),
             ("Megaprojects", f"{len(g.projects)}/{NSITE}"),
@@ -1987,6 +2095,15 @@ def selftest_step(app, g, frames, shot):
         app.view = "galaxy"
         app.sel_sector = 3
         assert g.start_campaign(3), "campaign failed to start"
+    if frames == 64:
+        g.armory[director.INTEL] = 6
+        g.credits = 1e15
+        director.schedule_raid(g, tier=1, lead=60.0)
+        director.schedule_raid(g, tier=2, lead=90.0)
+        director.schedule_offensive(g, lead=70.0)
+        assert len(g.incoming) == 3
+        for inc in g.incoming:
+            assert director.fortify(g, inc["id"]) or director.intel(g) < 2
     if frames == 66:
         shot("galaxy_map")
     if frames == 68:
@@ -1996,6 +2113,8 @@ def selftest_step(app, g, frames, shot):
         shot("raid")
     if frames == 74:
         g.campaign["t"] = g.campaign["dur"]
+        for inc in list(g.incoming):
+            inc["t"] = inc["eta"] - 0.1
     if frames == 76 and app.dev:
         app.tab = T_DEV
         app.draw(app_scr(), app_fonts())
