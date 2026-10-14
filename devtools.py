@@ -7,7 +7,7 @@ These are only reachable when the game is started from a terminal with the --dev
 Using any cheat marks the save as having cheated (which unlocks a secret achievement).
 """
 import core
-from core import BMAX, NB, NSH, NSITE, PERKS, PROJECTS, SC, SITES, TECHS, UPGRADES, ACHIEVEMENTS, fmt
+from core import BMAX, NB, NSH, NSITE, NSEC, ARMORY, PERKS, PROJECTS, SC, SITES, TECHS, UPGRADES, ACHIEVEMENTS, fmt
 
 EVENT_NAMES = [("Meteor shower", "meteor"), ("Pirate raid", "pirates"), ("Solar flare", "flare"),
                ("Cosmic lottery", "lottery"), ("Derelict ship", "derelict"), ("Alien trader", "trader"),
@@ -152,6 +152,33 @@ def sections(app):
             g.event["left"] = 90.0
         return run
 
+    def conquer_next():
+        fr = g.frontier()
+        if fr:
+            k = min(fr)
+            g.conquered.add(k)
+            g.fx("conquer", k)
+
+    def conquer_all():
+        for k in range(1, NSEC):
+            g.conquered.add(k)
+
+    def reset_galaxy():
+        g.conquered = {0}
+        g.campaign = None
+
+    def finish_campaign():
+        if g.campaign:
+            g.campaign["t"] = g.campaign["dur"]
+
+    def sure_win():
+        if g.campaign:
+            g.campaign["chance"] = 1.0
+            g.campaign["fp"] = max(g.campaign["fp"], 1.0)
+
+    def max_armory():
+        g.armory = [a[3] for a in ARMORY]
+
     def set_speed(k):
         def run():
             d.speed = k
@@ -231,6 +258,16 @@ def sections(app):
         ("Events & crates", [("Event: " + n, cheat(force_event(k)), False) for n, k in EVENT_NAMES] + [
             ("Spawn a supply crate", cheat(spawn_crate), False),
             ("Mining Frenzy x7 (60s)", cheat(frenzy), False),
+        ]),
+        ("Galaxy & enemies", [
+            ("Liberate next sector", cheat(conquer_next), False),
+            ("Liberate ALL sectors", cheat(conquer_all), False),
+            ("Reset galaxy to Sol only", cheat(reset_galaxy), False),
+            ("Finish current campaign now", cheat(finish_campaign), False),
+            ("Current campaign: guaranteed win", cheat(sure_win), False),
+            ("Max armory", cheat(max_armory), False),
+            ("Enemy raid here (repelled)", cheat(lambda: g.raid(g.cur, force=True)), False),
+            ("Enemy raid here (lost)", cheat(lambda: g.raid(g.cur, force=False)), False),
         ]),
         ("Achievements & warp", [
             ("Unlock ALL achievements", cheat(ach_all), False),

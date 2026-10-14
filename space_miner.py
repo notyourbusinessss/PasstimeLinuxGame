@@ -19,7 +19,8 @@ import devtools
 import gfx
 import sounds
 from core import (BMAX, BUILDINGS, NB, NSH, NSITE, PERKS, PROJECTS, SC, SHIPS, SITES, TECHS, TECH_BY_ID,
-                  UPGRADES, ACHIEVEMENTS, ACH_BY_ID, ACH_CATS, TIER_BONUS, TIER_NAMES, QUEST_TXT, fmt, geo_cost)
+                  UPGRADES, ACHIEVEMENTS, ACH_BY_ID, ACH_CATS, TIER_BONUS, TIER_NAMES, QUEST_TXT, fmt, geo_cost,
+                  SECTORS, NSEC, SECTOR_EDGES, SECTOR_LINKS, FACTIONS, ARMORY, armory_cost, win_chance)
 from gfx import glow, scale_c, lerp_c
 
 W, H = 1280, 720
@@ -28,7 +29,15 @@ CX, CY = 325, 392                    # centre of the planet view
 PLANET_R = 58
 ADD = pygame.BLEND_RGB_ADD
 STRIP_Y = H - 30
-BASE_TABS = ["Ships", "Upgrades", "Colony", "Planets", "Tech", "Quests", "Warp", "Awards"]
+STRIP_X0, STRIP_DX = 96, 46
+BASE_TABS = ["Ships", "Upgrades", "Colony", "Planets", "Galaxy", "Tech", "Quests", "Warp", "Awards"]
+T_SHIPS, T_UPG, T_COLONY, T_PLANETS, T_GALAXY, T_TECH, T_QUESTS, T_WARP, T_AWARDS, T_DEV = range(10)
+MAP = pygame.Rect(36, 232, 590, 384)          # where the galaxy map is drawn
+
+
+def sec_pos(k):
+    px, py = SECTORS[k]["pos"]
+    return MAP.x + px * MAP.w, MAP.y + py * MAP.h
 MEDAL = {"bronze": (205, 127, 50), "silver": (205, 210, 222), "gold": (255, 208, 70), "platinum": (140, 230, 255)}
 AWARD_CHIPS = ["All"] + ACH_CATS + ["Stats"]
 
@@ -59,7 +68,11 @@ class App:
         self.dev = dev                       # developer mode: only ever enabled by the --dev command-line flag
         self.dev_state = devtools.DevState()
         self.tabs = BASE_TABS + (["Dev"] if dev else [])
-        self.ach_popups = []
+        self.banners = []
+        self.view = "system"
+        self.sel_sector = 1
+        self.raiders = []
+        self.hover_sector = None
         self.ach_new = False
         self.awards_cat = "All"
         self.fps = 0.0
@@ -102,6 +115,19 @@ class App:
         self.ship_rot = {}
         self.ast_sprites = {}
         self.crate_spr = gfx.make_crate()
+        self.enemy_small = {f: gfx.make_enemy(f, 24) for f in FACTIONS}
+        self.enemy_big = {f: gfx.make_enemy(f, 40) for f in FACTIONS}
+        self.galaxy_bg = pygame.Surface((660, H))
+        self.galaxy_bg.fill((0, 0, 0))
+        for arm in range(2):
+            for i in range(90):
+                t = i / 90
+                ang = arm * math.pi + t * 4.4
+                rad = 24 + t * 340
+                x, y = 380 + math.cos(ang) * rad, 380 + math.sin(ang) * rad * 0.55
+                r = 16 + int(t * 22)
+                self.galaxy_bg.blit(glow(r, (16, 20, 46)), (x - r, y - r), special_flags=ADD)
+        self.galaxy_bg.blit(glow(170, (70, 52, 34)), (380 - 170, 380 - 170), special_flags=ADD)
         self.bg = gfx.make_background(W, H)
         self.vig = gfx.make_vignette(W, H)
         self.panel_bg = gfx.make_panel_bg(PANEL.w + 24, H - 8)
@@ -196,6 +222,14 @@ class App:
             if rect.collidepoint(pos):
                 self.strip_click(k)
                 return
+        if self.view == "galaxy":
+            for k in range(1, NSEC):
+                x, y = sec_pos(k)
+                if math.hypot(pos[0] - x, pos[1] - y) < 20 and self.sector_known(k):
+                    self.sel_sector = k
+                    self.tab = T_GALAXY
+                    return
+            return
         best, bd = None, 1e9
         for a in self.asts:
             if a["hp"] <= 0:
@@ -208,15 +242,31 @@ class App:
             x, y, _ = self.ast_pos(best)
             self.mine_at((x, y) if bd > 14 else pos, best)
 
+    def sector_known(self, k):
+        g = self.g
+        return k in g.conquered or k in g.frontier()
+
     def strip_click(self, k):
         g = self.g
+        if k < 0:                                   # galaxy map button
+            if not g.galaxy_open:
+                g.toast("Unlock Mars to open the galaxy map.", 3)
+                return
+            self.view = "system" if self.view == "galaxy" else "galaxy"
+            if self.view == "galaxy":
+                fr = g.frontier()
+                if self.sel_sector in g.conquered and fr:
+                    self.sel_sector = min(fr)
+                self.tab = T_GALAXY
+            return
+        self.view = "system"
         if g.unlocked[k]:
             if k != g.cur:
                 g.start_travel(k)
             else:
-                self.tab = 3
+                self.tab = T_PLANETS
         else:
-            self.tab = 3
+            self.tab = T_PLANETS
 
     def set_tab(self, k):
         self.tab = k
@@ -237,6 +287,42 @@ class App:
             return
         self.reset_confirm = 0
         self.g.hard_reset()
+
+    def add_banner(self, b):
+        b.setdefault("dur", 3.6)
+        b["t"] = 0.0
+        if len(self.banners) < 8:
+            self.banners.append(b)
+
+    def spawn_raid(self, data):
+        n = random.randint(6, 10)
+        for i in range(n):
+            a = random.uniform(0, math.tau)
+            d = random.uniform(330, 420)
+            self.raiders.append(dict(x=CX + math.cos(a) * d, y=CY + math.sin(a) * d * 0.8, fac=data["faction"],
+                                     win=data["win"], stop=random.uniform(115, 190) if data["win"] else 62,
+                                     spd=random.uniform(70, 110), hp=1.0, lost=data["lost"], first=(i == 0)))
+
+    def update_raiders(self, dt):
+        keep = []
+        for r in self.raiders:
+            dx, dy = CX - r["x"], CY - r["y"]
+            d = math.hypot(dx, dy) or 1.0
+            if d > r["stop"]:
+                r["x"] += dx / d * r["spd"] * dt
+                r["y"] += dy / d * r["spd"] * dt
+                keep.append(r)
+                continue
+            col = FACTIONS[r["fac"]]["col"]
+            if r["win"]:
+                self.burst(r["x"], r["y"], col, 14)
+                self.rings.append([r["x"], r["y"], 0.3, col])
+            else:
+                self.burst(r["x"], r["y"], (255, 120, 80), 10)
+                self.shake = 0.5
+                if r["first"]:
+                    self.floats.append([CX, CY - 80, f"RAID!  -{fmt(r['lost'])}", 1.2, (255, 120, 100)])
+        self.raiders = keep
 
     # ---------------- update -----------------
     def update(self, dt):
@@ -275,18 +361,40 @@ class App:
                 self.snd.play("travel")
             elif kind == "ach":
                 self.ach_new = True
-                if len(self.ach_popups) < 8:
-                    self.ach_popups.append(dict(id=data, t=0.0, dur=3.6))
+                a = ACH_BY_ID.get(data)
+                if a:
+                    self.add_banner(dict(header="ACHIEVEMENT UNLOCKED", title=a["name"], sub=a["desc"],
+                                         right=f"+{TIER_BONUS[a['tier']] * 100:g}%", tier=a["tier"], sound="ach",
+                                         col=MEDAL[a["tier"]]))
+            elif kind == "campaign":
+                self.snd.play("buy")
+            elif kind == "conquer":
+                sec = SECTORS[data]
+                col = FACTIONS[sec["faction"]]["col"]
+                self.add_banner(dict(header="SECTOR LIBERATED", title=sec["name"], sub=sec["desc"], right="",
+                                     sound="win", col=col, glyph="!", dur=5.0))
+                x, y = sec_pos(data)
+                self.burst(x, y, col, 50)
+                self.rings.append([x, y, 0.0, col])
+            elif kind == "defeat":
+                sec = SECTORS[data]
+                self.add_banner(dict(header="DEFEAT", title=sec["name"], sub="Your fleet was beaten back and lost ships.",
+                                     right="", sound="lose", col=(255, 110, 100), glyph="x", dur=4.5))
+            elif kind == "raid":
+                self.snd.play("raid")
+                if data["p"] == g.cur and self.view == "system":
+                    self.spawn_raid(data)
         g.fx_events.clear()
-        if self.ach_popups:
-            pop = self.ach_popups[0]
-            if pop["t"] == 0.0:
-                self.snd.play("ach")
-            pop["t"] += dt
-            if len(self.ach_popups) > 3:
-                pop["dur"] = 1.6
-            if pop["t"] >= pop["dur"]:
-                self.ach_popups.pop(0)
+        if self.banners:
+            b = self.banners[0]
+            if b["t"] == 0.0:
+                self.snd.play(b.get("sound", "ach"))
+            b["t"] += dt
+            if len(self.banners) > 3:
+                b["dur"] = min(b["dur"], 1.6)
+            if b["t"] >= b["dur"]:
+                self.banners.pop(0)
+        self.update_raiders(dt)
         if g.event and not self.had_event:
             self.snd.play("event")
         self.had_event = bool(g.event)
@@ -347,12 +455,17 @@ class App:
         scr.blit(self.bg, (0, 0))
         self.draw_stars(scr)
         site = SITES[g.cur]
-        scr.blit(glow(280, scale_c(site["col"], 0.22)), (CX - 280, CY - 280), special_flags=ADD)
-        if g.buff_mult > 1.5:
+        if self.view == "system":
+            scr.blit(glow(280, scale_c(site["col"], 0.22)), (CX - 280, CY - 280), special_flags=ADD)
+        if g.buff_mult > 1.5 and self.view == "system":
             k = 0.6 + 0.4 * math.sin(self.t * 6)
             scr.blit(glow(260, scale_c((140, 100, 20), k)), (CX - 260, CY - 260), special_flags=ADD)
-        self.draw_scene(scr)
-        self.draw_crate(scr)
+        if self.view == "galaxy":
+            self.draw_galaxy_view(scr, fonts)
+        else:
+            self.draw_scene(scr)
+            self.draw_raiders(scr)
+            self.draw_crate(scr)
         self.draw_fx(scr, fonts[1])
         scr.blit(self.vig, (0, 0), special_flags=pygame.BLEND_RGB_MULT)
         self.draw_hud(scr, fonts)
@@ -361,7 +474,7 @@ class App:
         self.draw_strip(scr, fonts)
         self.draw_panel(scr, fonts)
         self.draw_toasts(scr, fonts[2])
-        self.draw_ach_banner(scr, fonts)
+        self.draw_banner(scr, fonts)
         if g.event:
             self.draw_event(scr, fonts)
         if g.travel:
@@ -592,6 +705,13 @@ class App:
             self.txt(scr, tiny, f"Next planet: {SITES[k]['name']}", (22, y + 2), (190, 196, 220), shadow=True)
             pygame.draw.rect(scr, (24, 28, 56), (22, y + 20, 150, 6), border_radius=3)
             pygame.draw.rect(scr, SITES[k]["col"], (22, y + 20, 150 * fr, 6), border_radius=3)
+            y += 34
+        if g.campaign:
+            c = g.campaign
+            self.txt(scr, tiny, f"Campaign: {SECTORS[c['k']]['name']}  {c['chance'] * 100:.0f}%  "
+                     f"({fmt_time(max(0, c['dur'] - c['t']))} left)", (22, y + 2), (255, 175, 150), shadow=True)
+            pygame.draw.rect(scr, (40, 24, 28), (22, y + 20, 150, 6), border_radius=3)
+            pygame.draw.rect(scr, (255, 120, 100), (22, y + 20, 150 * c["t"] / c["dur"], 6), border_radius=3)
         yb = 84
         for b in g.buffs:
             self.txt(scr, sm, f"{b['name']} x{b['mult']:g}  {b['t']:.0f}s", (640, yb), (255, 222, 90), "topright", True)
@@ -618,17 +738,41 @@ class App:
         g = self.g
         self.strip_hits = []
         n = NSITE
-        x0 = CX - (n - 1) * 25
-        pygame.draw.line(scr, (34, 40, 78), (x0, STRIP_Y), (x0 + (n - 1) * 50, STRIP_Y), 2)
+        x0 = STRIP_X0
+        pygame.draw.line(scr, (34, 40, 78), (x0, STRIP_Y), (x0 + (n - 1) * STRIP_DX, STRIP_Y), 2)
         nxt = next((i for i in range(1, NSITE) if not g.unlocked[i]), None)
         hover = None
+        # galaxy map button
+        gx = 44
+        grect = pygame.Rect(gx - 19, STRIP_Y - 19, 38, 38)
+        self.strip_hits.append((grect, -1))
+        opened = g.galaxy_open
+        active = self.view == "galaxy"
+        col = (255, 215, 110) if active else ((130, 170, 255) if opened else (70, 76, 110))
+        if opened:
+            scr.blit(glow(26, scale_c(col, 0.5 if active else 0.3)), (gx - 26, STRIP_Y - 26), special_flags=ADD)
+        pygame.draw.circle(scr, (14, 18, 40), (gx, STRIP_Y), 19)
+        pygame.draw.circle(scr, col, (gx, STRIP_Y), 19, 2)
+        for arm in range(2):
+            pts = []
+            for i in range(14):
+                t = i / 13
+                ang = arm * math.pi + t * 3.6 + (self.t * 0.6 if opened else 0)
+                pts.append((gx + math.cos(ang) * (2 + 13 * t), STRIP_Y + math.sin(ang) * (2 + 13 * t)))
+            pygame.draw.lines(scr, col, False, pts, 2)
+        if opened and g.campaign is None and any(g.can_attack(k) and win_chance(g.fleet_power(), g.sector_power(k)) >= 0.8
+                                                  for k in g.frontier()):
+            scr.blit(glow(8, (255, 200, 60)), (gx + 8, STRIP_Y - 24), special_flags=ADD)
+            pygame.draw.circle(scr, (255, 220, 90), (gx + 15, STRIP_Y - 15), 3)
+        if grect.collidepoint(self.mouse) and self.mouse[0] < PANEL.x - 10:
+            hover = -1
         for k in range(n):
-            x = x0 + k * 50
+            x = x0 + k * STRIP_DX
             rect = pygame.Rect(x - 19, STRIP_Y - 19, 38, 38)
             self.strip_hits.append((rect, k))
             site = SITES[k]
             if g.unlocked[k]:
-                if k == g.cur:
+                if k == g.cur and self.view == "system":
                     scr.blit(glow(30, scale_c(site["col"], 0.8)), (x - 30, STRIP_Y - 30), special_flags=ADD)
                     pygame.draw.circle(scr, (255, 215, 110), (x, STRIP_Y), 20, 2)
                 ic = self.strip_icons[k]
@@ -640,8 +784,8 @@ class App:
                 scr.blit(ic, ic.get_rect(center=(x, STRIP_Y)))
                 if k == nxt:
                     can = g.can_unlock(k)
-                    col = (255, 215, 110) if can else (90, 100, 150)
-                    pygame.draw.circle(scr, col, (x, STRIP_Y), 20, 1)
+                    colr = (255, 215, 110) if can else (90, 100, 150)
+                    pygame.draw.circle(scr, colr, (x, STRIP_Y), 20, 1)
                     if can:
                         scr.blit(glow(26, scale_c((255, 200, 60), 0.5 + 0.4 * math.sin(self.t * 5))), (x - 26, STRIP_Y - 26),
                                  special_flags=ADD)
@@ -654,9 +798,20 @@ class App:
     def draw_tooltip(self, scr, fonts, k):
         big, med, sm, tiny = fonts
         g = self.g
-        site = SITES[k]
         lines = []
-        if g.unlocked[k]:
+        if k < 0:
+            if g.galaxy_open:
+                lines.append(("Galaxy map", (130, 170, 255)))
+                lines.append((f"Fleet power {fmt(g.fleet_power())}   {len(g.conquered) - 1}/{NSEC - 1} sectors", (225, 225, 240)))
+                lines.append(("Click to " + ("return to the solar system" if self.view == "galaxy" else "open the map"),
+                              (255, 215, 110)))
+            else:
+                lines.append(("Galaxy map  (locked)", (120, 128, 170)))
+                lines.append(("Unlock Mars to open it", (170, 175, 205)))
+        site = SITES[k] if k >= 0 else SITES[0]
+        if k < 0:
+            pass
+        elif g.unlocked[k]:
             lines.append((f"{site['name']}  -  {site['ore']}", site["col"]))
             lines.append((f"{fmt(g.ore[k])} stock   +{fmt(g.s_ops[k])}/s", (225, 225, 240)))
             lines.append((site["perk"], (170, 175, 205)))
@@ -675,7 +830,8 @@ class App:
             lines.append(("???  (locked)", (140, 146, 180)))
         w = max(sm.size(t)[0] for t, _ in lines) + 24
         h = len(lines) * 20 + 14
-        x = max(8, min(CX - w // 2 + (k - 5.5) * 38, PANEL.x - 20 - w))
+        cx = 44 if k < 0 else STRIP_X0 + k * STRIP_DX
+        x = max(8, min(cx - w // 2, PANEL.x - 20 - w))
         r = pygame.Rect(x, STRIP_Y - 44 - h, w, h)
         bg = pygame.Surface(r.size, pygame.SRCALPHA)
         pygame.draw.rect(bg, (14, 16, 36, 235), bg.get_rect(), border_radius=8)
@@ -760,19 +916,23 @@ class App:
     def tab_alert(self, k):
         g = self.g
         p = g.cur
-        if k == 1:
+        if k == T_UPG:
             return any(g.ore[p] >= u["cost"] * SC[p] for u in g.avail_upgrades(p))
-        if k == 2:
+        if k == T_COLONY:
             return g.can_buy_project(p)
-        if k == 3:
+        if k == T_PLANETS:
             return any(g.can_unlock(i) for i in range(1, NSITE))
-        if k == 4:
+        if k == T_GALAXY:
+            fp = g.fleet_power()
+            return g.galaxy_open and g.campaign is None and any(
+                win_chance(fp, g.sector_power(c)) >= 0.8 for c in g.frontier())
+        if k == T_TECH:
             return any(t[0] not in g.techs and all(q in g.techs for q in t[3]) and g.science >= t[2] for t in TECHS)
-        if k == 5:
+        if k == T_QUESTS:
             return any(g.quest_prog(q) >= q["tgt"] for q in g.quests)
-        if k == 6:
+        if k == T_WARP:
             return g.warp_gain() >= 1 or any(pk[0] not in g.perks and g.dm_avail() >= pk[2] for pk in PERKS)
-        if k == 7:
+        if k == T_AWARDS:
             return self.ach_new
         return False
 
@@ -786,22 +946,22 @@ class App:
             self.button(scr, r, n, tiny if sm.size(n)[0] > tw - 10 else sm, (lambda k=k: self.set_tab(k)),
                         col=(78, 100, 176) if self.tab == k else (34, 42, 74), dot=self.tab != k and self.tab_alert(k),
                         selected=self.tab == k, danger=(n == "Dev"))
-        if self.tab in (0, 2):
+        if self.tab in (T_SHIPS, T_COLONY):
             self.txt(scr, tiny, "Buy:", (PANEL.x + 2, 70), (170, 175, 200))
             for k, (lab, m) in enumerate([("x1", 1), ("x10", 10), ("x100", 100), ("Max", 0)]):
                 r = pygame.Rect(PANEL.x + 40 + k * 62, 58, 56, 26)
                 self.button(scr, r, lab, sm, (lambda m=m: setattr(g, "buy_mode", m)),
                             col=(66, 128, 92) if g.buy_mode == m else (34, 42, 74))
         site = SITES[g.cur]
-        if self.tab in (0, 1, 2):
+        if self.tab in (T_SHIPS, T_UPG, T_COLONY):
             self.txt(scr, tiny, f"{site['name']}  -  paid in {site['ore']}", (PANEL.right, 70), site["col"], "topright")
         pygame.draw.line(scr, (50, 58, 100), (PANEL.x, PANEL.y - 7), (PANEL.right, PANEL.y - 7))
-        if self.tab == 7:
+        if self.tab == T_AWARDS:
             self.ach_new = False
         scr.set_clip(PANEL)
         sy = PANEL.y - self.scroll[self.tab]
-        end = [self.draw_ships, self.draw_upgrades, self.draw_colony, self.draw_planets, self.draw_tech,
-               self.draw_quests, self.draw_warp, self.draw_awards, self.draw_dev][self.tab](scr, fonts, sy)
+        end = [self.draw_ships, self.draw_upgrades, self.draw_colony, self.draw_planets, self.draw_galaxy_tab,
+               self.draw_tech, self.draw_quests, self.draw_warp, self.draw_awards, self.draw_dev][self.tab](scr, fonts, sy)
         scr.set_clip(None)
         self.content_h = end - sy
         maxs = max(0, self.content_h - PANEL.h)
@@ -1047,6 +1207,246 @@ class App:
                          lambda pid=pid: g.buy_perk(pid), glyph="D")
         return y
 
+    # ---------------- galaxy -----------------
+    def sector_color(self, k):
+        fac = SECTORS[k]["faction"]
+        return FACTIONS[fac]["col"] if fac else (255, 210, 120)
+
+    def dashed(self, scr, col, p1, p2, width=2, dash=9, gap=7, offset=0.0):
+        x1, y1 = p1
+        x2, y2 = p2
+        dist = math.hypot(x2 - x1, y2 - y1) or 1.0
+        ux, uy = (x2 - x1) / dist, (y2 - y1) / dist
+        d = -(offset % (dash + gap))
+        while d < dist:
+            a, b = max(0.0, d), min(dist, d + dash)
+            if b > a:
+                pygame.draw.line(scr, col, (x1 + ux * a, y1 + uy * a), (x1 + ux * b, y1 + uy * b), width)
+            d += dash + gap
+
+    def chance_color(self, ch):
+        return (120, 255, 150) if ch >= 0.7 else ((255, 220, 110) if ch >= 0.4 else (255, 120, 110))
+
+    def draw_galaxy_view(self, scr, fonts):
+        big, med, sm, tiny = fonts
+        g = self.g
+        scr.blit(self.galaxy_bg, (0, 0), special_flags=ADD)
+        self.txt(scr, med, "GALAXY MAP", (MAP.right, 104), (190, 200, 235), "topright", True)
+        self.txt(scr, tiny, "Liberate sectors to claim their bonuses", (MAP.right, 126), (140, 150, 185), "topright")
+        conq = g.conquered
+        front = set(g.frontier())
+        fp = g.fleet_power()
+        for a, b in SECTOR_EDGES:
+            pa, pb = sec_pos(a), sec_pos(b)
+            if a in conq and b in conq:
+                pygame.draw.line(scr, (40, 80, 130), pa, pb, 6)
+                pygame.draw.line(scr, (140, 200, 255), pa, pb, 2)
+            elif a in conq or b in conq:
+                other = b if a in conq else a
+                if other in front:
+                    self.dashed(scr, scale_c(self.sector_color(other), 0.85), pa, pb, 2, offset=self.t * 22)
+            elif a in front or b in front:
+                pygame.draw.line(scr, (38, 44, 78), pa, pb, 1)
+        camp = g.campaign
+        mouse = self.mouse
+        hover = None
+        for k in range(NSEC):
+            x, y = sec_pos(k)
+            if k in conq:
+                col = self.sector_color(k)
+                scr.blit(glow(34 if k else 46, scale_c((130, 190, 255) if k else (255, 190, 90), 0.55)),
+                         (x - (34 if k else 46), y - (34 if k else 46)), special_flags=ADD)
+                pygame.draw.circle(scr, (20, 36, 72), (x, y), 14 if k else 19)
+                pygame.draw.circle(scr, (140, 205, 255) if k else (255, 215, 120), (x, y), 14 if k else 19, 2)
+                if k:
+                    pygame.draw.circle(scr, col, (x, y), 5)
+                else:
+                    pygame.draw.circle(scr, (255, 230, 160), (x, y), 9)
+                self.txt(scr, tiny, SECTORS[k]["name"], (x, y + (19 if k else 24)), (190, 215, 245), "midtop", True)
+            elif k in front:
+                fac = SECTORS[k]["faction"]
+                col = FACTIONS[fac]["col"]
+                pulse = 0.55 + 0.45 * math.sin(self.t * 3 + k)
+                scr.blit(glow(36, scale_c(col, 0.4 * pulse + 0.2)), (x - 36, y - 36), special_flags=ADD)
+                pygame.draw.circle(scr, scale_c(col, 0.22), (x, y), 14)
+                pygame.draw.circle(scr, col, (x, y), 14, 2)
+                spr = self.enemy_small[fac]
+                for j in range(3):
+                    a = self.t * 0.9 + j * math.tau / 3 + k
+                    ex, ey = x + math.cos(a) * 25, y + math.sin(a) * 18
+                    ang = -math.degrees(a + math.pi / 2)
+                    img = pygame.transform.rotate(spr, ang)
+                    scr.blit(img, img.get_rect(center=(ex, ey)))
+                ch = win_chance(fp, g.sector_power(k))
+                self.txt(scr, tiny, SECTORS[k]["name"], (x, y + 31), (235, 225, 225), "midtop", True)
+                self.txt(scr, tiny, f"{ch * 100:.0f}%", (x, y + 45), self.chance_color(ch), "midtop", True)
+            else:
+                pygame.draw.circle(scr, (52, 58, 96), (x, y), 4)
+            if k and self.sector_known(k):
+                if self.sel_sector == k:
+                    for q in range(12):
+                        a0 = self.t * 1.5 + q * math.tau / 12
+                        pygame.draw.arc(scr, (255, 255, 255), (x - 23, y - 23, 46, 46), a0, a0 + 0.3, 2)
+                if math.hypot(mouse[0] - x, mouse[1] - y) < 20 and mouse[0] < PANEL.x - 10:
+                    hover = k
+        if camp:                                   # your fleet travelling to the target
+            k = camp["k"]
+            tx, ty = sec_pos(k)
+            srcs = [n for n in SECTOR_LINKS[k] if n in conq]
+            sx, sy = min((sec_pos(n) for n in srcs), key=lambda q: math.hypot(q[0] - tx, q[1] - ty)) if srcs else (tx, ty)
+            f = max(0.0, min(1.0, camp["t"] / camp["dur"]))
+            fx_, fy_ = sx + (tx - sx) * f, sy + (ty - sy) * f
+            col = FACTIONS[SECTORS[k]["faction"]]["col"]
+            r = 20 + 6 * math.sin(self.t * 6)
+            pygame.draw.circle(scr, scale_c(col, 0.9), (tx, ty), int(r), 2)
+            ang = math.atan2(ty - sy, tx - sx)
+            for tc in range(1, 5):
+                scr.blit(glow(10 - tc, scale_c((130, 200, 255), 0.6 / tc)),
+                         (fx_ - math.cos(ang) * tc * 9 - (10 - tc), fy_ - math.sin(ang) * tc * 9 - (10 - tc)), special_flags=ADD)
+            spr = pygame.transform.rotate(self.ship_sprites[5], -math.degrees(ang))
+            scr.blit(spr, spr.get_rect(center=(fx_, fy_)))
+        self.hover_sector = hover
+        if hover is not None:
+            self.draw_sector_tooltip(scr, fonts, hover, fp)
+
+    def draw_sector_tooltip(self, scr, fonts, k, fp):
+        big, med, sm, tiny = fonts
+        g = self.g
+        sec = SECTORS[k]
+        lines = []
+        if k in g.conquered:
+            lines.append((f"{sec['name']}  (liberated)", (140, 205, 255)))
+            lines.append((sec["desc"], (130, 255, 150)))
+        else:
+            fac = FACTIONS[sec["faction"]]
+            ep = g.sector_power(k)
+            ch = win_chance(fp, ep)
+            lines.append((f"{sec['name']}  -  {fac['name']}", fac["col"]))
+            lines.append((f"Enemy power {fmt(ep)}   yours {fmt(fp)}", (225, 225, 240)))
+            lines.append((f"Win chance {ch * 100:.0f}%", self.chance_color(ch)))
+            lines.append((f"Reward: {sec['desc']}", (170, 175, 205)))
+        w = max(sm.size(t)[0] for t, _ in lines) + 24
+        h = len(lines) * 20 + 14
+        x, y = sec_pos(k)
+        r = pygame.Rect(0, 0, w, h)
+        r.midbottom = (x, y - 28)
+        r.clamp_ip(pygame.Rect(6, 6, PANEL.x - 24, H - 12))
+        bg = pygame.Surface(r.size, pygame.SRCALPHA)
+        pygame.draw.rect(bg, (14, 16, 36, 240), bg.get_rect(), border_radius=8)
+        pygame.draw.rect(bg, (110, 130, 195, 255), bg.get_rect(), 1, border_radius=8)
+        scr.blit(bg, r)
+        for i, (t, col) in enumerate(lines):
+            self.txt(scr, sm, t, (r.x + 12, r.y + 8 + i * 20), col)
+
+    def draw_raiders(self, scr):
+        if not self.raiders:
+            return
+        for idx, r in enumerate(self.raiders):
+            dx, dy = CX - r["x"], CY - r["y"]
+            ang = math.degrees(math.atan2(-dy, dx))
+            col = FACTIONS[r["fac"]]["col"]
+            scr.blit(glow(12, scale_c(col, 0.5)), (r["x"] - 12, r["y"] - 12), special_flags=ADD)
+            img = pygame.transform.rotate(self.enemy_big[r["fac"]], ang)
+            scr.blit(img, img.get_rect(center=(r["x"], r["y"])))
+            d = math.hypot(dx, dy) or 1.0
+            if d < 300 and math.sin(self.t * 16 + idx * 1.7) > 0.2:      # your defences open fire
+                ox, oy = CX - dx / d * 95, CY - dy / d * 95
+                pygame.draw.line(scr, (255, 120, 90), (ox, oy), (r["x"], r["y"]), 3)
+                pygame.draw.line(scr, (255, 245, 220), (ox, oy), (r["x"], r["y"]), 1)
+        if any(not r["win"] for r in self.raiders):
+            scr.blit(glow(80, (90, 20, 10)), (CX - 80, CY - 80), special_flags=ADD)
+
+    def draw_galaxy_tab(self, scr, fonts, y):
+        big, med, sm, tiny = fonts
+        g = self.g
+        if not g.galaxy_open:
+            self.txt(scr, big, "The galaxy awaits", (PANEL.x + 8, y))
+            for i, line in enumerate(["Unlock Mars to open the galaxy map. Beyond the solar system lie",
+                                      "15 sectors held by hostile factions. Liberate them with your fleet",
+                                      "to claim permanent bonuses - but watch out for enemy raids."]):
+                self.txt(scr, sm, line, (PANEL.x + 8, y + 46 + i * 22), (170, 176, 205))
+            return y + 140
+        fp = g.fleet_power()
+        self.txt(scr, med, f"Fleet power  {fmt(fp)}", (PANEL.x + 4, y), (255, 215, 140))
+        self.txt(scr, sm, f"{len(g.conquered) - 1}/{NSEC - 1} sectors liberated", (PANEL.right - 4, y + 2), (130, 255, 150), "topright")
+        y += 26
+        self.txt(scr, tiny, f"Battles {g.battles_won} won / {g.battles_lost} lost   -   Raids {g.raids_repelled} repelled / "
+                 f"{g.raids_lost} lost   -   Press G to toggle the map", (PANEL.x + 4, y), (150, 158, 190))
+        y += 20
+        r = pygame.Rect(PANEL.x, y, PANEL.w, 32)
+        self.button(scr, r, "Back to the solar system" if self.view == "galaxy" else "Open the galaxy map", sm,
+                    lambda: self.strip_click(-1), panel=True, col=(60, 84, 150))
+        y += 42
+        if g.campaign:
+            c = g.campaign
+            sec = SECTORS[c["k"]]
+            fr = c["t"] / c["dur"]
+            rr = pygame.Rect(PANEL.x, y, PANEL.w, 66)
+            self.row(scr, fonts, rr, f"Campaign: {sec['name']}", f"{fmt_time(max(0, c['dur'] - c['t']))} left   -   "
+                     f"{c['chance'] * 100:.0f}% to win   -   committed power {fmt(c['fp'])}", None, None, True,
+                     FACTIONS[sec["faction"]]["col"], None, frac=fr, icon=self.enemy_big[sec["faction"]])
+            y += 74
+        fr_list = g.frontier()
+        sel = self.sel_sector
+        if sel not in fr_list and sel not in g.conquered:
+            sel = min(fr_list) if fr_list else 1
+        k = sel
+        sec = SECTORS[k]
+        fac = FACTIONS[sec["faction"]]
+        ep = g.sector_power(k)
+        ch = win_chance(fp, ep)
+        good, bad = (130, 255, 150), (230, 130, 130)
+        rr = pygame.Rect(PANEL.x, y, PANEL.w, 126)
+        y += 134
+        if k in g.conquered:
+            self.row(scr, fonts, rr, f"{sec['name']}  -  {fac['name']}", f"Reward: {sec['desc']}", "LIBERATED", None, True,
+                     fac["col"], None, icon=self.enemy_big[sec["faction"]],
+                     lines=[("This sector is yours.", (140, 205, 255))])
+        elif k not in fr_list:
+            self.row(scr, fonts, rr, "Unscouted sector", "Liberate a neighbouring sector first.", None, None, False,
+                     (62, 66, 92), None, dim=True, icon=self.enemy_big[sec["faction"]])
+        else:
+            can = g.can_attack(k) and fp > 0
+            lines = [(f"Enemy power {fmt(ep)}    your fleet {fmt(fp)}", (205, 210, 230)),
+                     (f"Win chance {ch * 100:.0f}%    campaign time {fmt_time(g.campaign_duration(k))}", self.chance_color(ch)),
+                     (f"Losses: victory {g.loss_fraction(core.WIN_LOSSES) * 100:.1f}% of ships, defeat "
+                      f"{g.loss_fraction(core.LOSE_LOSSES) * 100:.1f}%", (170, 176, 205))]
+            label = "ATTACK" if g.campaign is None else "BUSY"
+            self.row(scr, fonts, rr, f"{sec['name']}  -  {fac['name']}", f"Reward: {sec['desc']}", label, None,
+                     can, fac["col"], (lambda k=k: g.start_campaign(k)) if can else None,
+                     icon=self.enemy_big[sec["faction"]], lines=lines)
+        self.txt(scr, med, "Armory", (PANEL.x + 4, y), (255, 225, 140))
+        y += 28
+        for i, (key, name, desc, mx, base) in enumerate(ARMORY):
+            rr = pygame.Rect(PANEL.x, y, PANEL.w, 58)
+            y += 64
+            L = g.armory[i]
+            if L >= mx:
+                self.row(scr, fonts, rr, f"{name}  Lv {L} (MAX)", desc, None, None, True, (255, 220, 100), None, glyph=name[0])
+                continue
+            cr, sci = armory_cost(i, L)
+            ok = g.credits >= cr and g.science >= sci
+            self.row(scr, fonts, rr, f"{name}  Lv {L}/{mx}", desc, f"{fmt(cr)} cr + {fmt(sci)} sci", None, ok,
+                     (230, 150, 110), (lambda i=i: g.buy_armory(i)), glyph=name[0])
+        y += 6
+        self.txt(scr, med, "Sectors", (PANEL.x + 4, y), (255, 225, 140))
+        y += 28
+        for k in range(1, NSEC):
+            rr = pygame.Rect(PANEL.x, y, PANEL.w, 52)
+            y += 58
+            sec = SECTORS[k]
+            fac = FACTIONS[sec["faction"]]
+            if k in g.conquered:
+                self.row(scr, fonts, rr, sec["name"], sec["desc"], "LIBERATED", None, True, (120, 190, 255),
+                         (lambda k=k: setattr(self, "sel_sector", k)), icon=self.enemy_small[sec["faction"]])
+            elif k in fr_list:
+                c2 = win_chance(fp, g.sector_power(k))
+                self.row(scr, fonts, rr, sec["name"], f"{fac['name']}  -  reward: {sec['desc']}", f"{c2 * 100:.0f}%", None,
+                         True, fac["col"], (lambda k=k: setattr(self, "sel_sector", k)), icon=self.enemy_small[sec["faction"]])
+            else:
+                self.row(scr, fonts, rr, "???", "Not scouted yet", None, None, False, (62, 66, 92), None, dim=True)
+        return y
+
     # ---------------- achievements, stats, dev -----------------
     def ach_progress(self, a):
         if not a["prog"]:
@@ -1148,6 +1548,10 @@ class App:
             ("Planets unlocked", f"{g.n_unlocked}/{NSITE}"),
             ("Planets visited", f"{len(g.visited)}/{NSITE}"),
             ("Trips between planets", f"{g.travels:,}"),
+            ("Sectors liberated", f"{len(g.conquered) - 1}/{NSEC - 1}"),
+            ("Battles won / lost", f"{g.battles_won:,} / {g.battles_lost:,}"),
+            ("Raids repelled / lost", f"{g.raids_repelled:,} / {g.raids_lost:,}"),
+            ("Fleet power", fmt(g.fleet_power())),
             ("Colony levels built", f"{g.bldg:,}"),
             ("Megaprojects", f"{len(g.projects)}/{NSITE}"),
             ("Techs researched", f"{len(g.techs)}/{len(TECHS)}"),
@@ -1222,31 +1626,36 @@ class App:
                     y += 40
         return y + 20
 
-    def draw_ach_banner(self, scr, fonts):
-        if not self.ach_popups:
+    def draw_banner(self, scr, fonts):
+        if not self.banners:
             return
         big, med, sm, tiny = fonts
-        pop = self.ach_popups[0]
-        a = ACH_BY_ID.get(pop["id"])
-        if a is None:
-            return
-        t, dur = pop["t"], pop["dur"]
+        bn = self.banners[0]
+        t, dur = bn["t"], bn["dur"]
         k = max(0.0, min(1.0, t / 0.35, (dur - t) / 0.35))
         ease = 1 - (1 - k) ** 3
         w, h = 430, 68
         x = 225
         y = -h + (h + 12) * ease
-        col = MEDAL[a["tier"]]
+        col = bn["col"]
         scr.blit(glow(150, scale_c(col, 0.18)), (x + w // 2 - 150, y + h // 2 - 150), special_flags=ADD)
         bg = pygame.Surface((w, h), pygame.SRCALPHA)
         pygame.draw.rect(bg, (14, 16, 38, 238), bg.get_rect(), border_radius=12)
         pygame.draw.rect(bg, (*col, 255), bg.get_rect(), 2, border_radius=12)
         scr.blit(bg, (x, y))
-        self.draw_medal(scr, int(x + 36), int(y + h // 2), a["tier"], True)
-        self.txt(scr, tiny, "ACHIEVEMENT UNLOCKED", (x + 70, y + 8), col)
-        self.txt(scr, med, a["name"], (x + 70, y + 24), (255, 245, 215))
-        self.txt(scr, tiny, a["desc"], (x + 70, y + 48), (175, 180, 205))
-        self.txt(scr, sm, f"+{TIER_BONUS[a['tier']] * 100:g}%", (x + w - 14, y + 10), (130, 255, 150), "topright")
+        if bn.get("tier"):
+            self.draw_medal(scr, int(x + 36), int(y + h // 2), bn["tier"], True)
+        else:
+            cx, cy = int(x + 36), int(y + h // 2)
+            scr.blit(glow(26, scale_c(col, 0.55)), (cx - 26, cy - 26), special_flags=ADD)
+            pygame.draw.circle(scr, scale_c(col, 0.3), (cx, cy), 19)
+            pygame.draw.circle(scr, col, (cx, cy), 19, 2)
+            self.txt(scr, med, bn.get("glyph", "!"), (cx, cy), (255, 255, 255), "center")
+        self.txt(scr, tiny, bn["header"], (x + 70, y + 8), col)
+        self.txt(scr, med, bn["title"], (x + 70, y + 24), (255, 245, 215))
+        self.txt(scr, tiny, bn["sub"][:62], (x + 70, y + 48), (175, 180, 205))
+        if bn.get("right"):
+            self.txt(scr, sm, bn["right"], (x + w - 14, y + 10), (130, 255, 150), "topright")
 
     def draw_event(self, scr, fonts):
         big, med, sm, tiny = fonts
@@ -1330,6 +1739,10 @@ def main():
                     app.space_click()
                 elif pygame.K_1 <= e.key <= pygame.K_9 and e.key - pygame.K_1 < len(app.tabs):
                     app.set_tab(e.key - pygame.K_1)
+                elif e.key == pygame.K_0 and len(app.tabs) >= 10:
+                    app.set_tab(9)
+                elif e.key == pygame.K_g:
+                    app.strip_click(-1)
                 elif e.key == pygame.K_F1 and dev:
                     app.set_tab(len(app.tabs) - 1 if app.tab != len(app.tabs) - 1 else 0)
             elif e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
@@ -1342,7 +1755,7 @@ def main():
         frames += 1
         if selftest:
             selftest_step(app, g, frames, shot)
-            if frames >= (95 if dev else 80):
+            if frames >= (100 if dev else 95):
                 running = False
     g.save()
     pygame.quit()
@@ -1391,30 +1804,30 @@ def selftest_step(app, g, frames, shot):
         g.cur = 7
         for t in TECHS[:12]:
             g.research(t[0])
-        app.tab = 0
+        app.tab = T_SHIPS
     if frames == 44:
         shot("saturn_ships")
-        app.tab = 3
+        app.tab = T_PLANETS
     if frames == 46:
         shot("planets")
-        app.tab = 2
+        app.tab = T_COLONY
     if frames == 48:
         shot("colony")
-        app.tab = 4
+        app.tab = T_TECH
     if frames == 50:
         shot("tech")
-        app.tab = 1
+        app.tab = T_UPG
     if frames == 52:
         shot("upgrades")
-        app.tab = 6
+        app.tab = T_WARP
         g.event = g.pick_event(); g.event["left"] = 60
     if frames == 54:
         shot("event")
         g.resolve_event(g.event["opts"][0][1])
-        app.scroll[6] = 300
+        app.scroll[T_WARP] = 300
     if frames == 56:
         shot("warp")
-        app.scroll[6] = 0
+        app.scroll[T_WARP] = 0
         for q in g.quests:
             q["base"] = -1e30
         for _ in range(3):
@@ -1436,19 +1849,37 @@ def selftest_step(app, g, frames, shot):
         assert g.warps == 1 and sum(g.owned[3]) == 0 and g.unlocked[11], "warp failed"
     if frames == 60:
         shot("warpfx")
-    if frames == 62 and app.dev:
-        app.tab = 8
+    if frames == 62:
+        # galaxy: campaign, map view, raid
+        g.owned = [[40 + k, 30, 20, 10, 5, 2, 1, 0] for k in range(NSITE)]
+        g.conquered = {0, 1, 2}
+        g.recalc()
+        app.tab = T_GALAXY
+        app.view = "galaxy"
+        app.sel_sector = 3
+        assert g.start_campaign(3), "campaign failed to start"
+    if frames == 66:
+        shot("galaxy_map")
+    if frames == 68:
+        app.view = "system"
+        g.raid(g.cur, force=True)
+    if frames == 72:
+        shot("raid")
+    if frames == 74:
+        g.campaign["t"] = g.campaign["dur"]
+    if frames == 76 and app.dev:
+        app.tab = T_DEV
         app.draw(app_scr(), app_fonts())
         shot("dev")
         for title, items in devtools.sections(app):
             for label, fn, active in items:
-                if "Wipe" in label or "Lock ALL" in label or "Relock" in label:
+                if "Wipe" in label or "Lock ALL" in label or "Relock" in label or "Reset galaxy" in label:
                     continue
                 fn()
         g.event = None
         app.dev_state.infinite = False
         devtools.tick(app, 0.05)
-    if frames == 70:
+    if frames == 90:
         g.hard_reset()
 
 
