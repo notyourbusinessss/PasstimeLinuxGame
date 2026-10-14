@@ -49,7 +49,10 @@ Missing Python or pip? Debian/Ubuntu: `sudo apt install python3 python3-pip pyth
 | Mouse wheel over the panel | Scroll the list |
 | Click a golden supply crate | Grab it before it drifts off |
 | **0** / **F1** | Jump to the Dev tab (only in [developer mode](#developer-mode)) |
-| **Esc** | Quit (the game saves on exit) |
+| **F11** or **Alt+Enter** | Toggle fullscreen |
+| **Esc** | Leave fullscreen; in a window it quits (the game saves on exit) |
+
+**Big screen.** The window is resizable: drag its edges, maximise it with your window manager, or press **F11** (or start with `./play.sh --fullscreen`). The whole game scales smoothly to fit, with black bars if the shape of your screen is different. On a large monitor it opens bigger than 1280x720 by itself, and the fullscreen setting is remembered.
 
 Your save lives in `~/.space_miner_save.json`. Delete it (or use *Awards -> Stats -> Hard reset*) to start over.
 
@@ -360,9 +363,13 @@ There are **162 achievements** in 12 categories: Mining, Fleet, Planets, Colony,
 
 ### 11. Stats and settings
 
-The **Stats** chip in the Awards tab lists everything you have done (play time, clicks, ore mined, trips, warps, Dark Matter...) and has the settings: **sound on/off**, **volume**, **save now** and **hard reset**.
+The **Stats** chip in the Awards tab lists everything you have done (play time, clicks, ore mined, trips, warps, Dark Matter...) and has the settings: **sound on/off**, **volume**, **fullscreen**, **save now** and **hard reset**.
 
 ![Stats](screenshots/15-stats-and-settings.png)
+
+The settings are at the bottom of the page, including the **Fullscreen** button (the same as **F11**):
+
+![Settings with the Fullscreen button](screenshots/38-fullscreen-setting.png)
 
 Sound effects (clicks, purchases, unlocks, crates, achievements, travel and warp) are synthesised by `sounds.py`, so there are no audio files. If there is no audio device the game just stays silent.
 
@@ -471,12 +478,13 @@ The knobs live in `core.py` (`UNLOCK_LOG`, `PROJECT_LOG`, `SECTOR_LOG`, `TUNE` -
 
 ### Self-test
 
-`python3 space_miner.py --selftest` runs the game headless for a few seconds and exercises buying, unlocking, travelling, events, quests, warping and saving. It writes a few `shot_*.png` images next to the script. Add `--dev` to also fire every developer cheat once.
+`python3 space_miner.py --selftest` runs the game headless for a few seconds and exercises buying, unlocking, travelling, events, quests, warping and saving. It writes a few `shot_*.png` images next to the script and uses a temporary save, so it never touches your real one. Add `--dev` to also fire every developer cheat once.
 
 ## Troubleshooting
 
 - **`ModuleNotFoundError: No module named 'pygame'`** - run `pip install pygame` (or use `./play.sh`).
 - **No window appears over SSH / in a container** - the game needs a display. Run it from a desktop session.
+- **The window is small / fullscreen does not work** - the game needs a desktop session with a graphics renderer for the resizable, scaled window; otherwise it falls back to a fixed 1280x720 window and the Fullscreen button is greyed out. Try running it under X11 or Wayland (not over a plain SSH session), and make sure your graphics drivers are installed.
 - **Text looks off** - the game asks for DejaVu Sans, Liberation Sans or Arial and falls back to pygame's default font.
 - **Reset everything** - delete `~/.space_miner_save.json`.
 

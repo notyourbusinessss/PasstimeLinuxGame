@@ -9,7 +9,9 @@ Autosaves to ~/.space_miner_save.json; your empire keeps working while you're aw
 import math
 import os
 import random
+import shutil
 import sys
+import tempfile
 import time
 
 import pygame
@@ -79,6 +81,8 @@ class App:
         self.ach_new = False
         self.awards_cat = "All"
         self.fps = 0.0
+        self.can_scale = False               # True when the window is resizable and scales the game to fit
+        self.fullscreen = False
         self.had_event = False
         self.snd = sounds.Sounds(self.g.settings)
         self.t = 0.0
@@ -269,6 +273,24 @@ class App:
 
     def set_tab(self, k):
         self.tab = k
+
+    def toggle_fullscreen(self):
+        """F11 / Alt+Enter / the Stats page button. The 1280x720 game is scaled to fit the screen (black bars if the
+        aspect ratio differs)."""
+        g = self.g
+        if not self.can_scale:
+            g.toast("Fullscreen is not available on this display.", 3)
+            return False
+        try:
+            pygame.display.toggle_fullscreen()
+            self.fullscreen = pygame.display.is_fullscreen() if hasattr(pygame.display, "is_fullscreen") else not self.fullscreen
+        except (pygame.error, NotImplementedError):
+            g.settings["fullscreen"] = self.fullscreen = False
+            g.toast("Fullscreen is not supported by this display.", 3)
+            return False
+        g.settings["fullscreen"] = self.fullscreen
+        g.toast("Fullscreen on - press F11 or Esc to leave it." if self.fullscreen else "Back to the window.", 3)
+        return True
 
     def select_sector(self, k):
         """Select a sector (from the Galaxy tab); if the map is zoomed in, the camera follows."""
@@ -1746,6 +1768,11 @@ class App:
         if not self.snd.ok:
             self.txt(scr, tiny, "(no audio device found)", (PANEL.x + 420, y + 12), (160, 120, 120))
         y += 48
+        self.button(scr, pygame.Rect(PANEL.x, y, 180, 36), f"Fullscreen: {'ON' if self.fullscreen else 'OFF'}", sm,
+                    self.toggle_fullscreen, enabled=self.can_scale, panel=True,
+                    col=(60, 120, 90) if self.fullscreen else (50, 70, 110))
+        self.txt(scr, tiny, "F11 or Alt+Enter. You can also resize or maximise the window.", (PANEL.x + 192, y + 11), (150, 158, 190))
+        y += 48
         self.button(scr, pygame.Rect(PANEL.x, y, 200, 40), "Save now", sm,
                     lambda: (g.save(), g.toast("Game saved.", 2)), panel=True)
         self.button(scr, pygame.Rect(PANEL.x + 220, y, 280, 40),
@@ -1828,11 +1855,31 @@ class App:
 
 USAGE = """Space Miner
 
-usage: python3 space_miner.py [--dev] [--selftest]
+usage: python3 space_miner.py [--fullscreen] [--dev] [--selftest]
 
+  --fullscreen start in fullscreen (F11 toggles it any time; the window can also be resized or maximised)
   --dev        developer mode: adds a Dev tab with cheats (F1 jumps to it). Terminal only.
   --selftest   run headless for a few seconds and exercise the game (used for testing)
 """
+
+
+def open_window():
+    """Open the game window: resizable (so it can be maximised or dragged bigger) and scaled to fit, with black bars
+    if the shape differs. Returns (surface, can_scale); without a scaling renderer it is a plain fixed-size window."""
+    os.environ.setdefault("SDL_HINT_RENDER_SCALE_QUALITY", "linear")          # smooth scaling when it is not 1280x720
+    try:
+        scr = pygame.display.set_mode((W, H), pygame.SCALED | pygame.RESIZABLE)
+    except pygame.error:
+        return pygame.display.set_mode((W, H)), False
+    try:                                                                       # start as big as comfortably fits the desktop
+        from pygame._sdl2 import video
+        dw, dh = pygame.display.get_desktop_sizes()[0]
+        fit = min(dw * 0.92 / W, dh * 0.85 / H)
+        k = max(0.6, min(3.0, int(fit * 20) / 20))
+        video.Window.from_display_module().size = (int(W * k), int(H * k))
+    except Exception:
+        pass
+    return scr, True
 
 
 def main():
@@ -1841,13 +1888,16 @@ def main():
         return
     selftest = "--selftest" in sys.argv
     dev = "--dev" in sys.argv
+    test_dir = None
     if selftest:
         os.environ["SDL_VIDEODRIVER"] = "dummy"
         os.environ["SDL_AUDIODRIVER"] = "dummy"
+        test_dir = tempfile.mkdtemp(prefix="space_miner_selftest_")
+        core.SAVE = os.path.join(test_dir, "save.json")              # the self-test never touches your real save
     pygame.display.init()
     pygame.font.init()
     pygame.display.set_caption("Space Miner")
-    scr = pygame.display.set_mode((W, H))
+    scr, can_scale = open_window()
     clock = pygame.time.Clock()
 
     def font(size, bold=False):
@@ -1857,6 +1907,9 @@ def main():
     t0 = time.time()
     app = App(dev=dev)
     g = app.g
+    app.can_scale = can_scale
+    if can_scale and not selftest and ("--fullscreen" in sys.argv or g.settings.get("fullscreen")):
+        app.toggle_fullscreen()
     if dev:
         print("Developer mode ON (cheats are in the Dev tab; F1 jumps to it).")
     if selftest:
@@ -1882,7 +1935,12 @@ def main():
                 running = False
             elif e.type == pygame.KEYDOWN:
                 if e.key == pygame.K_ESCAPE:
-                    running = False
+                    if app.fullscreen:
+                        app.toggle_fullscreen()
+                    else:
+                        running = False
+                elif e.key == pygame.K_F11 or (e.key == pygame.K_RETURN and e.mod & pygame.KMOD_ALT):
+                    app.toggle_fullscreen()
                 elif e.key == pygame.K_SPACE and not g.event:
                     app.space_click()
                 elif pygame.K_1 <= e.key <= pygame.K_9 and e.key - pygame.K_1 < len(app.tabs):
@@ -1919,6 +1977,8 @@ def main():
                 running = False
     g.save()
     pygame.quit()
+    if test_dir:
+        shutil.rmtree(test_dir, ignore_errors=True)
 
 
 _SCR = {}
@@ -1951,6 +2011,14 @@ def selftest_step(app, g, frames, shot):
         g.start_travel(1)
     if frames == 14:
         shot("travel")
+    if frames == 16:
+        app.toggle_fullscreen()                      # the dummy video driver refuses; that must not crash
+        assert not app.fullscreen
+        app.tab = T_AWARDS
+        app.awards_cat = "Stats"                     # draw the settings page once
+    if frames == 18:
+        app.awards_cat = "All"
+        app.tab = T_SHIPS
     if frames == 40:
         g.ore = [1e15 * SC[i] for i in range(NSITE)]
         g.run_ore = list(g.ore); g.all_norm = g.run_norm = 1e20
