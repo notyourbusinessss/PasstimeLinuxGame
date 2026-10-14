@@ -462,6 +462,8 @@ def build_achievements():
        lambda t: f"Repel {t} enemy raids", lambda g: g.raids_repelled)
     add("Forewarned", "Get an enemy attack warning that names the target (Intel armory)", "Galaxy", "bronze",
         lambda g: "forewarned" in g.flags)
+    add("Close Look", "Zoom in on a frontline in the galaxy view", "Galaxy", "bronze",
+        lambda g: "closeup" in g.flags)
     add("Dig In", "Fortify a planet or sector against an incoming attack", "Galaxy", "bronze", lambda g: "fortified" in g.flags)
     add("Hold the Line", "Repel a Regional assault", "Galaxy", "silver", lambda g: g.tier_wins[1] >= 1,
         lambda g: (g.tier_wins[1], 1))
