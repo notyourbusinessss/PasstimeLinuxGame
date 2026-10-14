@@ -134,7 +134,24 @@ The planet you are visiting sits in the middle of the screen with asteroids orbi
 
 ![A developed fleet on Mars](screenshots/03-mars-fleet.png)
 
-There are 8 ship **classes**, from the humble Drone to the Black Hole Engine, and **every planet has its own fleet of them**: a Dune Rover on Mars and a Ring Skipper on Saturn are both Drones (same price and output), but they have their own names, descriptions and look. Moon and Mars ships are wheeled rovers, Venus's float in gas balloons, Mercury's carry solar wings, Ceres's wear welded-on rocks, Jupiter's are painted with storms, Saturn's circle in rings, the ice giants' bristle with frozen spikes and Proxima b's are alien, with tendrils. A new ship type shows up as `???` once you own the one before it.
+There are 8 ship **classes**, from the humble Drone to the Black Hole Engine, and **every planet has its own fleet of them**: a Dune Rover on Mars and a Ring Skipper on Saturn are both Drones (same price and output), but they have their own names, descriptions, **hulls, colours, flight paths and lasers**, so you can tell where you are by the fleet alone. A new ship type shows up as `???` once you own the one before it.
+
+| Planet | The ships | How they fly | Their laser |
+|---|---|---|---|
+| Earth | Classic angular hulls | Round the planet | A straight beam |
+| Moon | Silver landers on spindly legs | Hop in the low gravity | A stream of shots |
+| Mars | Rust-red wheeled rovers | Drive over the face of the planet | A thick, jolting drill beam with sparks |
+| Venus | Cream airships and balloons | Float and bob | A wide, soft beam |
+| Mercury | Black and gold sun-shields and solar wings | A lopsided orbit: fast and close, slow and far | A white-hot lens beam with a flare |
+| Ceres | Tumbling rocks with claws and drills | Wander about, wobbling | A ragged, flickering charge |
+| Jupiter | Striped storm hulls | Spiral in and out | Lightning |
+| Saturn | Discs with tilted rings | All in one flat ring plane | Twin parallel beams |
+| Uranus | Ice-blue crystals | Over the poles, round the sideways planet | A beam that splits into a fan |
+| Neptune | Deep-sea creatures: fish, manta rays, tridents, squid | Weave through the dark | A wavy beam |
+| Pluto | Pale ice sleds, snowballs and hearts | A slow, wide, lonely drift | Slow ice shards |
+| Proxima b | Living spores, jellies and tendrils | A figure of eight over the planet | A living tendril |
+
+![Every planet flies its own way](screenshots/59-planet-scenes.png)
 
 ![Saturn's fleet: Ring Skipper, Ice-Ring Laser, Ring Barge...](screenshots/46-ships-saturn.png)
 
@@ -149,7 +166,7 @@ There are 8 ship **classes**, from the humble Drone to the Black Hole Engine, an
 | Tap | 20.0M | 7.8K | Neutron Tap | Valles Tap | Pressure Tap | Titan Tap |
 | Engine | 330.0M | 44.0K | Black Hole Engine | Red Planet Engine | Deep-Crush Engine | Hex-Storm Engine |
 
-All twelve rosters (`ships.py`):
+All twelve rosters (`ships.py`; `python tools/ship_sheet.py out.png --names` draws this picture):
 
 ![Every planet's ships](screenshots/48-ship-rosters.png)
 
@@ -581,8 +598,9 @@ Enemy raids and counter-offensives are included in these numbers (the bot defend
 | `main.py`, `buildozer.spec` | The Android entry point and build settings |
 | `devtools.py` | The developer-mode cheats (only reachable with `--dev`) |
 | `sounds.py` | Procedural sound effects |
-| `gfx.py` | Procedural graphics: planets, asteroids, ships (with a hull style per planet), backdrops |
-| `ships.py` | The twelve per-planet ship rosters: names, descriptions, hull styles and colours |
+| `gfx.py` | Procedural graphics: planets, asteroids, Earth's classic ships, backdrops |
+| `shipart.py` | The ships of the other eleven planets (a hull family each) and their mining lasers |
+| `ships.py` | The twelve per-planet ship rosters: names, descriptions, colours and how the ships fly. No pygame |
 | `sim.py` | A greedy bot that plays the game headless and prints a pacing timeline |
 | `calibrate.py` | Searches for planet, megaproject and enemy-strength values that hit a target timeline using the bot |
 | `version.py` | The version number |
@@ -590,7 +608,7 @@ Enemy raids and counter-offensives are included in these numbers (the bot defend
 | `gamelog.py` | Logging, crash reports and the native-crash dump |
 | `assets/` | The bundled DejaVu Sans font (with its license) and the app icon |
 | `packaging/` | `build_linux.sh` (the release build), the installer and the menu entry |
-| `tools/` | `make_icon.py` (draws the icon) and `fuzz.py` (random-input crash hunting) |
+| `tools/` | `make_icon.py` (draws the icon), `fuzz.py` (random-input crash hunting) and `ship_sheet.py` (a contact sheet of every ship) |
 | `CHANGELOG.md`, `.github/workflows/` | Release notes; CI (self-test on every push) and the release workflow |
 | `play.sh` | Launcher that installs pygame if needed |
 | `screenshots/` | Images used in this README |

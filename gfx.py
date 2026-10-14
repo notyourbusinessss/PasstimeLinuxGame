@@ -223,61 +223,11 @@ def make_asteroid(size, seed, tint=(255, 255, 255)):
 
 
 # ------------------------------------------------------------------ ships
-SHIP_STYLES = ["classic", "rover", "balloon", "solar", "belt", "storm", "ring", "ice", "xeno"]
-
-
-def _decorate(style, under, over, c, R, lw, color):
-    """Hull accessories that make each planet's ships look different: wheels, balloons, solar wings, rocks..."""
-    hot = lerp_c(color, (255, 255, 255), 0.85)
-    edge = lerp_c(color, (255, 255, 255), 0.35)
-    if style == "rover":                                        # wheels under the hull
-        for x in (-.55, 0.0, .55):
-            for y in (-.74, .74):
-                pygame.draw.circle(under, (18, 18, 24), (c + x * R, c + y * R), .2 * R)
-                pygame.draw.circle(under, edge, (c + x * R, c + y * R), .2 * R, lw)
-                pygame.draw.circle(under, hot, (c + x * R, c + y * R), .06 * R)
-    elif style == "balloon":                                    # a gas envelope behind and around the hull
-        env = pygame.Surface(under.get_size(), pygame.SRCALPHA)
-        pygame.draw.ellipse(env, (*lerp_c(color, (255, 255, 255), 0.55), 95), (c - 1.0 * R, c - .82 * R, 1.7 * R, 1.64 * R))
-        pygame.draw.ellipse(env, (*lerp_c(color, (255, 255, 255), 0.8), 220), (c - 1.0 * R, c - .82 * R, 1.7 * R, 1.64 * R), lw)
-        under.blit(env, (0, 0))
-    elif style == "solar":                                      # solar wings
-        for sgn in (-1, 1):
-            r = pygame.Rect(c - .5 * R, c + (.5 if sgn > 0 else -1.05) * R, .5 * R, .55 * R)
-            pygame.draw.rect(under, (36, 66, 140), r)
-            pygame.draw.rect(under, (255, 205, 90), r, lw)
-            pygame.draw.line(under, (255, 205, 90), (r.centerx, r.top), (r.centerx, r.bottom), max(1, lw // 2))
-            pygame.draw.line(under, (255, 205, 90), (r.left, r.centery), (r.right, r.centery), max(1, lw // 2))
-    elif style == "belt":                                       # rocks welded to the hull
-        for x, y, rad in ((-.15, .5, .17), (.35, -.52, .15), (-.62, -.4, .14), (.5, .45, .11)):
-            pygame.draw.circle(over, (112, 102, 96), (c + x * R, c + y * R), rad * R)
-            pygame.draw.circle(over, (176, 166, 156), (c + x * R, c + y * R), rad * R, lw)
-    elif style == "storm":                                      # a little storm painted on the hull
-        for k, rad in enumerate((.42, .27)):
-            pygame.draw.arc(over, lerp_c(color, (255, 255, 255), 0.5), (c - rad * R, c - rad * R, 2 * rad * R, 2 * rad * R),
-                            .4 + k, 4.6 + k, lw)
-        pygame.draw.circle(over, (255, 90, 60), (c + .22 * R, c + .12 * R), .1 * R)
-    elif style == "ring":                                       # a ring round the hull, half behind it and half in front
-        box = (c - 1.08 * R, c - .46 * R, 2.16 * R, .92 * R)
-        pygame.draw.arc(under, lerp_c(color, (255, 255, 255), 0.6), box, math.pi, math.tau, lw * 2)
-        pygame.draw.arc(over, lerp_c(color, (255, 255, 255), 0.7), box, 0, math.pi, lw * 2)
-    elif style == "ice":                                        # frozen spikes and glints
-        for a in (math.pi / 4, 3 * math.pi / 4, 5 * math.pi / 4, 7 * math.pi / 4):
-            tip = (c + math.cos(a) * .95 * R, c + math.sin(a) * .95 * R)
-            b1 = (c + math.cos(a - .28) * .5 * R, c + math.sin(a - .28) * .5 * R)
-            b2 = (c + math.cos(a + .28) * .5 * R, c + math.sin(a + .28) * .5 * R)
-            pygame.draw.polygon(under, (205, 240, 255), [tip, b1, b2])
-            pygame.draw.polygon(under, (255, 255, 255), [tip, b1, b2], lw)
-        pygame.draw.circle(over, (255, 255, 255), (c + .3 * R, c - .12 * R), .06 * R)
-    elif style == "xeno":                                       # tendrils and glowing spots
-        for k, y0 in enumerate((-.35, 0.0, .35)):
-            pts = [(c + (-.45 - t * .075) * R, c + (y0 + .12 * math.sin(t * .9 + k)) * R) for t in range(8)]
-            pygame.draw.lines(under, lerp_c(color, (180, 255, 200), 0.6), False, pts, lw * 2)
-        for x, y in ((.1, .22), (-.2, -.2)):
-            pygame.draw.circle(over, (190, 255, 210), (c + x * R, c + y * R), .09 * R)
-
-
-def make_ship(tier, color, size=40, style="classic"):
+def make_ship(tier, color, size=40, style="classic", pal=None):
+    """Ship class `tier` in `color`; Earth's classic hulls are drawn here, every other planet's in shipart.py."""
+    if style != "classic":
+        import shipart
+        return shipart.make(style, tier, color, size, pal)
     ss = 4
     S = size * ss
     c = S / 2
@@ -375,13 +325,6 @@ def make_ship(tier, color, size=40, style="classic"):
         pygame.draw.line(surf, edge, P([(1, 0)])[0], P([(-1, 0)])[0], lw)
         pygame.draw.line(surf, edge, P([(0, .72)])[0], P([(0, -.72)])[0], lw)
         dot(0, 0, .2, (255, 255, 255))
-    if style != "classic":
-        under = pygame.Surface((S, S), pygame.SRCALPHA)
-        over = pygame.Surface((S, S), pygame.SRCALPHA)
-        _decorate(style, under, over, c, R, lw, color)
-        under.blit(surf, (0, 0))
-        under.blit(over, (0, 0))
-        surf = under
     return pygame.transform.smoothscale(surf, (size, size))
 
 

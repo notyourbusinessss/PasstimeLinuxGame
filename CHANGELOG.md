@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Every planet's ships look and move differently.** Each planet now has its own design language instead of the same hulls with extras bolted on: silver landers on spindly legs (Moon), wheeled rovers (Mars), airships (Venus), sun-shields and solar wings (Mercury), tumbling rocks with claws (Ceres), striped storm hulls (Jupiter), discs with tilted rings (Saturn), crystals (Uranus), deep-sea creatures (Neptune), ice sleds and hearts (Pluto) and living spores (Proxima b), each in its own colours. They also fly their own paths (hopping, driving over the planet, floating, swinging round a lopsided orbit, spiralling, a flat ring plane, over the poles, weaving, drifting, a figure of eight) and fire their own mining lasers. Prices, output and balance are unchanged.
+- `tools/ship_sheet.py` draws a contact sheet of every ship.
+
 ## 1.0.0
 
 The first release.
