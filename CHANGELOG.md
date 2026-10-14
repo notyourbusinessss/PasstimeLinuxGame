@@ -9,6 +9,7 @@ The first release.
 - Warp (prestige) with Dark Matter and 22 perks; **New Game+** (Ascension) with Stardust and 21 perks.
 - The **galaxy**: 15 enemy-held sectors in 6 factions, campaigns, an armory (weapons, armor, engines, shields, intel) and permanent sector bonuses.
 - The **Threat Director**: adaptive raids and counter-offensives, Intel warnings, Fortify, faction hostility.
+- **A galaxy screen of its own**: a star-chart background, a slim top bar, a map that fills the window (a *wide* layout with a command bar for the selected sector, or beside the side panel), incoming-attack chips with Fortify.
 - **Frontline close-up**: a zoomable galaxy map with battle lines, fleets, garrison shields and a mini-map.
 - 165 achievements, a stats page, procedural graphics and sound (no asset files for those).
 

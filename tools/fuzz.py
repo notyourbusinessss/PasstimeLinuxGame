@@ -139,6 +139,8 @@ def main():
                             app.galaxy_key(k)
                     elif r < 0.95 and dev:
                         app.set_tab(len(app.tabs) - 1)
+                    elif r < 0.955:
+                        rng.choice((app.toggle_gal_wide, app.leave_galaxy, lambda: app.strip_click(-1)))()
                     elif r < 0.97:
                         app.set_resolution_choice(rng.choice(["auto", "1280x720", "1600x900", "1920x1080", "1600x720", "2560x1440"]))
                     else:

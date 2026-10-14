@@ -385,6 +385,52 @@ def make_ship(tier, color, size=40, style="classic"):
     return pygame.transform.smoothscale(surf, (size, size))
 
 
+def make_galaxy_backdrop(W, H):
+    """The backdrop of the galaxy map: a deep-space star chart (dark blue-black, dense coloured stars, distant galaxies, a
+    faint grid of rings and bearings) - clearly a different place from the starfield around a planet."""
+    s = pygame.Surface((W, H))
+    for y in range(H):
+        k = y / H
+        pygame.draw.line(s, (int(2 + 4 * k), int(5 + 8 * k), int(14 + 16 * k)), (0, y), (W, y))
+    rng = random.Random(21)
+    for _ in range(9):                                            # soft cold nebulae for depth
+        x, y, r = rng.uniform(0, W), rng.uniform(0, H), rng.uniform(0.18, 0.4) * max(W, H)
+        s.blit(glow(int(r), rng.choice([(10, 22, 44), (8, 26, 40), (18, 16, 44), (10, 30, 34)])), (x - r, y - r), special_flags=ADD)
+    tints = [(255, 255, 255), (190, 210, 255), (255, 240, 200), (255, 200, 170), (170, 230, 255)]
+    for _ in range(W * H // 700):                                 # a dense field of faint stars
+        x, y = rng.randrange(W), rng.randrange(H)
+        v = rng.choice((60, 90, 130, 180))
+        t = rng.choice(tints)
+        s.set_at((x, y), (v * t[0] // 255, v * t[1] // 255, v * t[2] // 255))
+    for _ in range(W * H // 18000):                               # and some bright ones
+        x, y = rng.randrange(W), rng.randrange(H)
+        t = rng.choice(tints)
+        s.blit(glow(rng.choice((4, 6, 9)), (t[0] // 2, t[1] // 2, t[2] // 2)), (x - 9, y - 9), special_flags=ADD)
+        pygame.draw.circle(s, t, (x, y), 1)
+    for _ in range(7):                                            # distant galaxies
+        x, y = rng.uniform(0, W), rng.uniform(0, H)
+        r = rng.randrange(14, 34)
+        blob = glow(r, rng.choice([(60, 70, 110), (90, 70, 60), (60, 90, 100)]))
+        blob = pygame.transform.rotate(pygame.transform.smoothscale(blob, (2 * r, r)), rng.uniform(0, 180))
+        s.blit(blob, blob.get_rect(center=(x, y)), special_flags=ADD)
+    grid = pygame.Surface((W, H), pygame.SRCALPHA)                # the star chart: rings and bearings around the galactic centre
+    cx, cy = W * 0.46, H * 0.52
+    for i in range(1, 9):
+        rad = i * max(W, H) * 0.115
+        pygame.draw.circle(grid, (70, 110, 180, 34), (cx, cy), rad, 1)
+    for i in range(12):
+        a = i * math.pi / 6
+        pygame.draw.line(grid, (70, 110, 180, 26), (cx, cy), (cx + math.cos(a) * W, cy + math.sin(a) * W), 1)
+    for x in range(0, W, 80):
+        pygame.draw.line(grid, (90, 130, 200, 40), (x, 0), (x, 8), 1)
+        pygame.draw.line(grid, (90, 130, 200, 40), (x, H - 8), (x, H), 1)
+    for y in range(0, H, 80):
+        pygame.draw.line(grid, (90, 130, 200, 40), (0, y), (8, y), 1)
+        pygame.draw.line(grid, (90, 130, 200, 40), (W - 8, y), (W, y), 1)
+    s.blit(grid, (0, 0))
+    return s
+
+
 def make_crate(size=34):
     ss = 4
     S = size * ss
