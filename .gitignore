@@ -2,3 +2,8 @@ __pycache__/
 *.pyc
 shot_*.png
 venv/
+
+# release builds
+build/
+dist/
+*.spec

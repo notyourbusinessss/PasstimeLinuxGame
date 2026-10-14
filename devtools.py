@@ -342,6 +342,8 @@ def sections(app):
             ("Reload save from disk", cheat(reload_save, "Reloaded"), False),
             ("Wipe save (hard reset)", wipe, False),
             ("Show FPS counter", toggle("fps"), d.fps),
+            ("Test: raise one error (check the log)", lambda: setattr(app, "test_fault", 1), False),
+            ("Test: fail every frame (crash report)", lambda: setattr(app, "test_fault", 10 ** 9), False),
         ]),
     ]
     return S
