@@ -63,7 +63,7 @@ def make_state(name):
 def main():
     pygame.display.init()
     pygame.font.init()
-    scr = pygame.display.set_mode((sm.W, sm.H), pygame.SCALED | pygame.RESIZABLE)
+    scr = pygame.display.set_mode((sm.W, sm.H))
     fonts = tuple(pygame.font.Font(sm.resources.resource("assets/fonts/DejaVuSans%s.ttf" % ("-Bold" if b else "")), s)
                   for s, b in ((30, True), (18, True), (15, False), (12, False)))
     tmp = tempfile.mkdtemp(prefix="space_miner_fuzz_")
@@ -77,6 +77,9 @@ def main():
         app = sm.App(dev=dev)
         app.g = g
         app.can_scale = True
+        app.scr = pygame.display.get_surface()
+        sm.apply_layout(1280, 720)
+        app.set_resolution(1280, 720)
         rng = random.Random(SEED)
         keys = [pygame.K_1 + i for i in range(9)] + [pygame.K_g, pygame.K_z, pygame.K_PLUS, pygame.K_MINUS, pygame.K_UP,
                                                     pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT, pygame.K_SPACE]
@@ -85,7 +88,7 @@ def main():
             try:
                 for _ in range(rng.choice((0, 1, 1, 2, 3))):
                     r = rng.random()
-                    pos = (rng.randrange(0, sm.W), rng.randrange(0, sm.H))
+                    pos = (rng.randrange(0, sm.W), rng.randrange(0, sm.H))      # sm.W / sm.H follow the current canvas
                     app.mouse = pos
                     if r < 0.40:
                         if not (app.view == "galaxy" and not g.event and app.fv.down(pos)):
@@ -114,13 +117,15 @@ def main():
                             app.galaxy_key(k)
                     elif r < 0.95 and dev:
                         app.set_tab(len(app.tabs) - 1)
+                    elif r < 0.97:
+                        app.set_resolution_choice(rng.choice(["auto", "1280x720", "1600x900", "1920x1080", "1600x720", "2560x1440"]))
                     else:
                         app.select_sector(rng.randrange(1, core.NSEC))
                 dt = rng.choice((0.016, 0.016, 0.033, 0.1, 0.25, 5.0, 60.0)) if rng.random() < 0.97 else rng.choice((600.0, 3600.0))
                 app.update(min(dt, 0.25) if rng.random() < 0.9 else dt)
-                app.draw(scr, fonts)
+                app.draw(app.scr, fonts)
             except Exception:
-                scr.set_clip(None)
+                app.scr.set_clip(None)
                 errors += 1
                 if gamelog.report("fuzz", sys.exc_info()):
                     sig = "".join(traceback.format_exception_only(*sys.exc_info()[:2])).strip()

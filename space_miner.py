@@ -35,10 +35,24 @@ from core import (BMAX, BUILDINGS, NB, NSH, NSITE, PERKS, PROJECTS, SC, SHIPS, S
                   STARDUST_PERKS, sd_bonus)
 from gfx import glow, scale_c, lerp_c
 
-W, H = 1280, 720
+BASE_W, BASE_H = 1280, 720
+W, H = BASE_W, BASE_H
 PANEL = pygame.Rect(660, 104, 600, 608)
 CX, CY = 325, 392                    # centre of the planet view
 PLANET_R = 58
+RESOLUTIONS = [(1280, 720), (1600, 900), (1920, 1080), (2560, 1440)]      # the choices in the settings ("auto" picks one)
+
+
+def apply_layout(w, h):
+    """Lay the window out for a w x h canvas: the side panel sits on the right (a little wider on big canvases and as tall
+    as the window), the planet / galaxy view takes the rest. 1280x720 is exactly the original layout."""
+    global W, H, CX, CY, STRIP_Y
+    W, H = int(w), int(h)
+    pw = 600 + min(120, max(0, (W - BASE_W) // 8))
+    PANEL.update(W - pw - 20, 104, pw, H - 112)
+    CX, CY = (PANEL.x - 12) // 2 + 1, round(H * 0.5444)
+    STRIP_Y = H - 30
+    frontview.set_layout(PANEL.x, W, H)
 ADD = pygame.BLEND_RGB_ADD
 STRIP_Y = H - 30
 STRIP_X0, STRIP_DX = 96, 46
@@ -90,8 +104,11 @@ class App:
         self.can_scale = False               # True when the window is resizable and scales the game to fit
         self.fullscreen = False
         self.test_fault = 0
+        self.scr = None
+        self.res_override = None            # --resolution WxH from the command line (not saved)
         self.war_confirm = 0.0
         self.war_confirm_k = None
+        self.g.stage_w, self.g.stage_h = PANEL.x - 12, H
         self.had_event = False
         self.snd = sounds.Sounds(self.g.settings)
         self.t = 0.0
@@ -133,26 +150,49 @@ class App:
         self.crate_spr = gfx.make_crate()
         self.enemy_small = {f: gfx.make_enemy(f, 24) for f in FACTIONS}
         self.enemy_big = {f: gfx.make_enemy(f, 40) for f in FACTIONS}
-        self.galaxy_bg = pygame.Surface((1200, 1000))      # the nebula behind the galaxy map; it shifts a little when you pan
-        self.galaxy_bg.fill((0, 0, 0))
-        for arm in range(2):
-            for i in range(90):
-                t = i / 90
-                ang = arm * math.pi + t * 4.4
-                rad = 24 + t * 340
-                x, y = 600 + math.cos(ang) * rad, 500 + math.sin(ang) * rad * 0.55
-                r = 16 + int(t * 22)
-                self.galaxy_bg.blit(glow(r, (16, 20, 46)), (x - r, y - r), special_flags=ADD)
-        self.galaxy_bg.blit(glow(170, (70, 52, 34)), (600 - 170, 500 - 170), special_flags=ADD)
-        self.bg = gfx.make_background(W, H)
-        self.vig = gfx.make_vignette(W, H)
-        self.panel_bg = gfx.make_panel_bg(PANEL.w + 24, H - 8)
+        self.layout_cache = {}
+        self.build_layout_assets()
         self.modal_bg = gfx.make_panel_bg(560, 290)
-        rng = random.Random(5)
-        self.stars = [[rng.uniform(0, W), rng.uniform(0, H), rng.choice([0.4, 0.7, 1.0, 1.6]),
-                       rng.uniform(0, math.tau), rng.choice([(150, 170, 255), (255, 235, 200), (200, 220, 255)])]
-                      for _ in range(190)]
+        rng = random.Random(6)
         self.streaks = [(rng.uniform(0, math.tau), rng.uniform(0.5, 1.4)) for _ in range(110)]
+
+    def build_layout_assets(self):
+        """Backdrops, vignette, side panel, galaxy nebula and stars for the current canvas size (cached per size)."""
+        key = (W, H, PANEL.w)
+        cached = self.layout_cache.get(key)
+        if cached is None:
+            sc = min((PANEL.x - 12) / 648, H / 720)
+            gb = pygame.Surface((int(PANEL.x + 560), int(H + 280)))                  # the nebula behind the galaxy map
+            gb.fill((0, 0, 0))
+            bx, by = gb.get_width() / 2, gb.get_height() / 2
+            for arm in range(2):
+                for i in range(90):
+                    t = i / 90
+                    ang = arm * math.pi + t * 4.4
+                    rad = (24 + t * 340) * sc
+                    x, y = bx + math.cos(ang) * rad, by + math.sin(ang) * rad * 0.55
+                    r = int((16 + int(t * 22)) * sc)
+                    gb.blit(glow(r, (16, 20, 46)), (x - r, y - r), special_flags=ADD)
+            gb.blit(glow(int(170 * sc), (70, 52, 34)), (bx - 170 * sc, by - 170 * sc), special_flags=ADD)
+            rng = random.Random(5)
+            stars = [[rng.uniform(0, W), rng.uniform(0, H), rng.choice([0.4, 0.7, 1.0, 1.6]),
+                      rng.uniform(0, math.tau), rng.choice([(150, 170, 255), (255, 235, 200), (200, 220, 255)])]
+                     for _ in range(int(190 * W * H / (BASE_W * BASE_H)))]
+            cached = self.layout_cache[key] = (gfx.make_background(W, H), gfx.make_vignette(W, H),
+                                               gfx.make_panel_bg(PANEL.w + 24, H - 8), gb, stars)
+            if len(self.layout_cache) > 3:
+                self.layout_cache.pop(next(iter(self.layout_cache)))
+        self.bg, self.vig, self.panel_bg, self.galaxy_bg, self.stars = cached
+
+    def set_resolution(self, w, h):
+        """Switch the canvas to w x h (the window is recreated by the caller): re-lay out everything."""
+        apply_layout(w, h)
+        self.g.stage_w, self.g.stage_h = PANEL.x - 12, H
+        self.build_layout_assets()
+        self.fv.relayout()
+        self.rebuild_view()
+        self.raiders = []
+        self.floats, self.parts, self.rings, self.shooting = [], [], [], []
 
     def ship_color(self, p, i):
         """Tier colour, tinted towards the planet's own colour (Earth keeps the classic colours)."""
@@ -184,7 +224,13 @@ class App:
         self.view_site = p
         rng = random.Random(p * 977 + 3)
         self.asts = []
-        for ring, (r, n, spd) in enumerate([(176, 5, 0.11), (218, 6, -0.085), (258, 7, 0.065)]):
+        rings = [(176, 5, 0.11), (218, 6, -0.085), (258, 7, 0.065)]
+        rmax = min((PANEL.x - 12) / 2 - 30, (CY - 150) / 0.84)              # a bigger canvas gets more rings of asteroids
+        r = 308
+        while r <= rmax:
+            rings.append((r, int(r / 42), (0.055 - 0.004 * len(rings)) * (1 if len(rings) % 2 else -1)))
+            r += 50
+        for ring, (r, n, spd) in enumerate(rings):
             for k in range(n):
                 self.asts.append(dict(r=r + rng.uniform(-8, 8), a0=k / n * math.tau + rng.uniform(-0.2, 0.2),
                                       spd=spd * rng.uniform(0.85, 1.15), spr=rng.randrange(9),
@@ -338,24 +384,56 @@ class App:
             return
         self.g.toast(f"Log folder: {d}", 8)
 
+    def display_setting(self):
+        return self.res_override or self.g.settings.get("resolution", "auto")
+
+    def apply_display(self, fullscreen=None):
+        """(Re)create the window for the current fullscreen / resolution settings and re-lay out the game. Returns True
+        if it worked."""
+        g = self.g
+        want_fs = self.fullscreen if fullscreen is None else fullscreen
+        w, h = choose_resolution(self.display_setting(), want_fs)
+        if (w, h) == (W, H) and self.can_scale and want_fs != self.fullscreen:      # same canvas: only toggle fullscreen
+            try:
+                pygame.display.toggle_fullscreen()
+                self.fullscreen = pygame.display.is_fullscreen() if hasattr(pygame.display, "is_fullscreen") else want_fs
+                return True
+            except (pygame.error, NotImplementedError):
+                pass                                                                  # fall through: recreate the window
+        if (w, h) == (W, H) and want_fs == self.fullscreen and self.scr is not None:
+            return True
+        self.scr, self.can_scale, self.fullscreen = open_window(w, h, want_fs)
+        self.set_resolution(w, h)
+        gamelog.LOG.info("Display: %dx%d, fullscreen %s, window %s", w, h, self.fullscreen, pygame.display.get_window_size())
+        return True
+
     def toggle_fullscreen(self):
-        """F11 / Alt+Enter / the Stats page button. The 1280x720 game is scaled to fit the screen (black bars if the
-        aspect ratio differs)."""
+        """F11 / Alt+Enter / the Stats page button. The canvas is scaled to fit the screen (black bars if the aspect
+        ratio differs); with the automatic resolution a fullscreen game uses the whole desktop's resolution."""
         g = self.g
         if not self.can_scale:
             g.toast("Fullscreen is not available on this display.", 3)
             return False
+        before = self.fullscreen
         try:
-            pygame.display.toggle_fullscreen()
-            self.fullscreen = pygame.display.is_fullscreen() if hasattr(pygame.display, "is_fullscreen") else not self.fullscreen
-        except (pygame.error, NotImplementedError):
-            g.settings["fullscreen"] = self.fullscreen = False
+            self.apply_display(fullscreen=not self.fullscreen)
+        except (pygame.error, NotImplementedError) as e:
+            gamelog.LOG.warning("Could not switch fullscreen: %s", e)
+        if self.fullscreen == before:
             g.toast("Fullscreen is not supported by this display.", 3)
             return False
         g.settings["fullscreen"] = self.fullscreen
         gamelog.LOG.info("Fullscreen %s", "on" if self.fullscreen else "off")
         g.toast("Fullscreen on - press F11 or Esc to leave it." if self.fullscreen else "Back to the window.", 3)
         return True
+
+    def set_resolution_choice(self, value):
+        """Settings button: 'auto' or 'WxH'."""
+        self.g.settings["resolution"] = value
+        self.res_override = None
+        self.apply_display()
+        w, h = choose_resolution(value, self.fullscreen)
+        self.g.toast(f"Resolution: {w}x{h}" + (" (auto)" if value == "auto" else ""), 3)
 
     def select_sector(self, k):
         """Select a sector (from the Galaxy tab); if the map is zoomed in, the camera follows."""
@@ -603,7 +681,7 @@ class App:
             if s[0] < 0:
                 s[0] = W; s[1] = random.uniform(0, H)
         if random.random() < dt * 0.15:
-            self.shooting.append([random.uniform(0, 560), random.uniform(0, 250), 0.0])
+            self.shooting.append([random.uniform(0, PANEL.x - 90), random.uniform(0, 250), 0.0])
         for s in self.shooting:
             s[2] += dt
         self.shooting = [s for s in self.shooting if s[2] < 0.7]
@@ -814,12 +892,12 @@ class App:
             v = int(230 * k)
             pygame.draw.line(scr, (v // 2 + 20, v // 2 + 40, v), (CX + math.cos(a) * d0, CY + math.sin(a) * d0),
                              (CX + math.cos(a) * d1, CY + math.sin(a) * d1), 2)
-        fx = pygame.Surface((660, H), pygame.SRCALPHA)
+        fx = pygame.Surface((PANEL.x, H), pygame.SRCALPHA)
         fx.fill((190, 210, 255, int(k * 70)))
         scr.blit(fx, (0, 0))
-        self.txt(scr, fonts[0], f"Travelling to {to['name']}", (CX, 262), (255, 255, 255), "midtop", True)
-        pygame.draw.rect(scr, (30, 36, 70), (CX - 130, 306, 260, 6), border_radius=3)
-        pygame.draw.rect(scr, to["col"], (CX - 130, 306, 260 * prog, 6), border_radius=3)
+        self.txt(scr, fonts[0], f"Travelling to {to['name']}", (CX, CY - 130), (255, 255, 255), "midtop", True)
+        pygame.draw.rect(scr, (30, 36, 70), (CX - 130, CY - 86, 260, 6), border_radius=3)
+        pygame.draw.rect(scr, to["col"], (CX - 130, CY - 86, 260 * prog, 6), border_radius=3)
         scr.set_clip(None)
 
     def draw_toasts(self, scr, sm):
@@ -907,10 +985,10 @@ class App:
                 y += 18
         yb = 84
         for b in g.buffs:
-            self.txt(scr, sm, f"{b['name']} x{b['mult']:g}  {b['t']:.0f}s", (640, yb), (255, 222, 90), "topright", True)
+            self.txt(scr, sm, f"{b['name']} x{b['mult']:g}  {b['t']:.0f}s", (PANEL.x - 20, yb), (255, 222, 90), "topright", True)
             frac = b["t"] / b["dur"]
-            pygame.draw.rect(scr, (40, 34, 12), (490, yb + 21, 150, 5), border_radius=2)
-            pygame.draw.rect(scr, (255, 200, 60), (640 - 150 * frac, yb + 21, 150 * frac, 5), border_radius=2)
+            pygame.draw.rect(scr, (40, 34, 12), (PANEL.x - 170, yb + 21, 150, 5), border_radius=2)
+            pygame.draw.rect(scr, (255, 200, 60), (PANEL.x - 20 - 150 * frac, yb + 21, 150 * frac, 5), border_radius=2)
             yb += 34
 
     def draw_dev_badge(self, scr, fonts):
@@ -1888,6 +1966,14 @@ class App:
                     col=(60, 120, 90) if self.fullscreen else (50, 70, 110))
         self.txt(scr, tiny, "F11 or Alt+Enter. You can also resize or maximise the window.", (PANEL.x + 192, y + 11), (150, 158, 190))
         y += 48
+        opts = ["auto"] + [f"{w}x{h}" for w, h in RESOLUTIONS]
+        cur = st.get("resolution", "auto")
+        nxt = opts[(opts.index(cur) + 1) % len(opts)] if cur in opts else "auto"
+        shown = "Auto" if cur == "auto" else cur
+        self.button(scr, pygame.Rect(PANEL.x, y, 180, 36), f"Size: {shown}", sm, lambda nxt=nxt: self.set_resolution_choice(nxt),
+                    enabled=self.can_scale, panel=True, col=(50, 70, 110))
+        self.txt(scr, tiny, f"Now {W}x{H}. Bigger = sharper and roomier, but needs a faster computer.", (PANEL.x + 192, y + 11), (150, 158, 190))
+        y += 48
         self.button(scr, pygame.Rect(PANEL.x, y, 200, 40), "Save now", sm,
                     lambda: (g.save(), g.toast("Game saved.", 2)), panel=True)
         self.button(scr, pygame.Rect(PANEL.x + 220, y, 280, 40),
@@ -1937,7 +2023,7 @@ class App:
         k = max(0.0, min(1.0, t / 0.35, (dur - t) / 0.35))
         ease = 1 - (1 - k) ** 3
         w, h = 430, 68
-        x = 225
+        x = PANEL.x - 5 - w
         y = -h + (h + 12) * ease
         col = bn["col"]
         scr.blit(glow(150, scale_c(col, 0.18)), (x + w // 2 - 150, y + h // 2 - 150), special_flags=ADD)
@@ -1966,7 +2052,7 @@ class App:
         dim.fill((0, 0, 10, 150))
         scr.blit(dim, (0, 0))
         box = pygame.Rect(0, 0, 560, 290)
-        box.center = (CX, 330)
+        box.center = (CX, int(H * 0.458))
         scr.blit(glow(330, (24, 20, 6)), (box.centerx - 330, box.centery - 330), special_flags=ADD)
         scr.blit(self.modal_bg, box)
         pygame.draw.rect(scr, (255, 215, 110), box, 2, border_radius=14)
@@ -1982,9 +2068,10 @@ class App:
 
 USAGE = """Space Miner
 
-usage: space-miner [--fullscreen] [--debug] [--dev] [--selftest] [--version]
+usage: space-miner [--fullscreen] [--resolution WxH] [--debug] [--dev] [--selftest] [--version]
 
   --fullscreen start in fullscreen (F11 toggles it any time; the window can also be resized or maximised)
+  --resolution WxH   canvas size for this run, e.g. 1920x1080 (the Stats page saves a choice; the default is automatic)
   --debug      verbose log (also printed in the terminal)
   --dev        developer mode: adds a Dev tab with cheats (F1 jumps to it). Terminal only.
   --selftest   run headless for a few seconds and exercise the game (used for testing)
@@ -1992,23 +2079,52 @@ usage: space-miner [--fullscreen] [--debug] [--dev] [--selftest] [--version]
 """
 
 
-def open_window():
-    """Open the game window: resizable (so it can be maximised or dragged bigger) and scaled to fit, with black bars
-    if the shape differs. Returns (surface, can_scale); without a scaling renderer it is a plain fixed-size window."""
-    os.environ.setdefault("SDL_HINT_RENDER_SCALE_QUALITY", "linear")          # smooth scaling when it is not 1280x720
+def open_window(w, h, fullscreen=False):
+    """Open the game window as a w x h canvas: resizable (so it can be maximised or dragged bigger) and scaled to fit,
+    with black bars if the shape differs. Returns (surface, can_scale, fullscreen); without a scaling renderer it is a
+    plain fixed-size window."""
+    os.environ.setdefault("SDL_HINT_RENDER_SCALE_QUALITY", "linear")          # smooth scaling when the window is not w x h
+    if pygame.display.get_driver() == "dummy":                                  # the headless test driver has no renderer
+        return pygame.display.set_mode((w, h)), True, False
+    flags = pygame.SCALED | pygame.RESIZABLE
+    if fullscreen:
+        try:
+            return pygame.display.set_mode((w, h), flags | pygame.FULLSCREEN), True, True
+        except pygame.error as e:
+            gamelog.LOG.warning("Fullscreen is not available (%s); using a window.", e)
     try:
-        scr = pygame.display.set_mode((W, H), pygame.SCALED | pygame.RESIZABLE)
-    except pygame.error:
-        return pygame.display.set_mode((W, H)), False
-    try:                                                                       # start as big as comfortably fits the desktop
-        from pygame._sdl2 import video
+        scr = pygame.display.set_mode((w, h), flags)
+        try:                                                                   # the window can keep an older, bigger size
+            from pygame._sdl2 import video
+            video.Window.from_display_module().size = (w, h)
+        except Exception:
+            pass
+        return scr, True, False
+    except pygame.error as e:
+        gamelog.LOG.warning("No scaling window (%s); using a fixed-size window.", e)
+        return pygame.display.set_mode((w, h)), False, False
+
+
+def choose_resolution(setting, fullscreen):
+    """The canvas size to use: the one picked in the settings, or ("auto") the biggest preset that suits the screen -
+    the whole desktop when fullscreen, otherwise what fits in a window."""
+    if setting and setting != "auto":
+        try:
+            w, h = (int(v) for v in str(setting).lower().split("x"))
+            if 640 <= w <= 7680 and 360 <= h <= 4320:
+                return w, h
+        except ValueError:
+            pass
+    try:
         dw, dh = pygame.display.get_desktop_sizes()[0]
-        fit = min(dw * 0.92 / W, dh * 0.85 / H)
-        k = max(0.6, min(3.0, int(fit * 20) / 20))
-        video.Window.from_display_module().size = (int(W * k), int(H * k))
-    except Exception:
-        pass
-    return scr, True
+    except (pygame.error, IndexError):
+        dw, dh = 1920, 1080
+    lim = (dw, dh) if fullscreen else (dw * 0.92, dh * 0.85)
+    best = RESOLUTIONS[0]
+    for r in RESOLUTIONS:
+        if r[0] <= lim[0] and r[1] <= lim[1]:
+            best = r
+    return best
 
 
 def main():
@@ -2034,7 +2150,14 @@ def main():
         pygame.display.set_icon(pygame.image.load(resources.resource("assets/icon.png")))
     except (FileNotFoundError, pygame.error) as e:
         gamelog.LOG.warning("Could not load the window icon: %s", e)
-    scr, can_scale = open_window()
+    saved = core.peek_settings()
+    cli_res = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--resolution=")), None)
+    if cli_res is None and "--resolution" in sys.argv and sys.argv.index("--resolution") + 1 < len(sys.argv):
+        cli_res = sys.argv[sys.argv.index("--resolution") + 1]
+    want_fs = (not selftest) and ("--fullscreen" in sys.argv or bool(saved.get("fullscreen")))
+    start_w, start_h = choose_resolution(cli_res or saved.get("resolution", "auto"), want_fs)
+    apply_layout(start_w, start_h)
+    scr, can_scale, is_fs = open_window(start_w, start_h, want_fs)
     if not can_scale:
         gamelog.LOG.warning("No scaling renderer: using a fixed-size window (no resizing or fullscreen).")
     gamelog.log_session()
@@ -2052,9 +2175,9 @@ def main():
     app = App(dev=dev)
     g = app.g
     gamelog.set_context(app.describe)
-    app.can_scale = can_scale
-    if can_scale and not selftest and ("--fullscreen" in sys.argv or g.settings.get("fullscreen")):
-        app.toggle_fullscreen()
+    app.scr, app.can_scale, app.fullscreen = scr, can_scale, is_fs
+    app.res_override = cli_res
+    gamelog.LOG.info("Display: %dx%d, fullscreen %s", start_w, start_h, is_fs)
     if dev:
         print("Developer mode ON (cheats are in the Dev tab; F1 jumps to it).")
         gamelog.LOG.info("Developer mode is ON")
@@ -2072,7 +2195,7 @@ def main():
     slowest = 0.0
 
     def shot(n):
-        pygame.image.save(scr, os.path.join(here, f"shot_{n}.png"))
+        pygame.image.save(app.scr, os.path.join(here, f"shot_{n}.png"))
 
     try:
         while running:
@@ -2127,7 +2250,7 @@ def main():
                         elif app.view == "galaxy" and not g.event:
                             app.fv.wheel(app.mouse, e.y)
                 app.update(dt)
-                app.draw(scr, fonts)
+                app.draw(app.scr, fonts)
                 pygame.display.flip()
                 frames += 1
                 beat_frames += 1
@@ -2144,7 +2267,7 @@ def main():
             except Exception:
                 if selftest:
                     raise                                    # the self-test must fail loudly
-                scr.set_clip(None)                           # a half-finished frame can leave a clip rectangle behind
+                app.scr.set_clip(None)                       # a half-finished frame can leave a clip rectangle behind
                 fail_streak += 1
                 if gamelog.report("the game loop"):
                     try:
@@ -2173,7 +2296,7 @@ _SCR = {}
 
 
 def app_scr():
-    return _SCR["scr"]
+    return pygame.display.get_surface()
 
 
 def app_fonts():
@@ -2207,6 +2330,19 @@ def selftest_step(app, g, frames, shot):
     if frames == 18:
         app.awards_cat = "All"
         app.tab = T_SHIPS
+    if frames == 20:                                 # other canvas sizes: re-layout and draw every view
+        for res in ("1920x1080", "1600x720", "2560x1440", "1280x720"):
+            app.set_resolution_choice(res)
+            assert (W, H) == tuple(int(v) for v in res.split("x")) and app.scr.get_size() == (W, H), res
+            assert PANEL.right <= W and PANEL.bottom <= H and 0 < CX < PANEL.x and 0 < CY < H
+            for view in ("system", "galaxy"):
+                for tab in range(len(app.tabs)):
+                    app.view, app.tab = view, tab
+                    app.update(0.016)
+                    app.draw(app.scr, app_fonts())
+        app.view, app.tab = "system", T_SHIPS
+        app.set_resolution_choice("auto")
+        assert (W, H) == (1280, 720)
     if frames == 40:
         g.ore = [1e15 * SC[i] for i in range(NSITE)]
         g.run_ore = list(g.ore); g.all_norm = g.run_norm = 1e20

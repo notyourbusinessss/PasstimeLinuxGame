@@ -26,6 +26,16 @@ MINE = (120, 190, 255)
 LASER_MINE = (150, 225, 255)
 
 
+def set_layout(panel_x, w, h):
+    """Re-fit the map to the window: its viewport is everything left of the side panel below the HUD. (At 1280x720 this
+    gives the original VIEW, GC and map size.)"""
+    global VIEW, GC, MAPW, MAPH, STAGE_W
+    STAGE_W = panel_x - 12
+    VIEW = pygame.Rect(8, 256, STAGE_W - 8, h - 256 - 52)
+    MAPW, MAPH = VIEW.w * 0.9219, VIEW.h * 0.932
+    GC = (VIEW.x + VIEW.w * 0.505, VIEW.centery)
+
+
 def hrand(*a):
     """Deterministic pseudo-random number in 0..1 from some integers (so swarms do not jitter between frames)."""
     h = 0
@@ -50,7 +60,11 @@ class FrontView:
         self.rot_cache = {}
         self.hover = None
         self.last_click = (-9.0, None)
+        self.relayout()
+
+    def relayout(self):
         self.minimap = pygame.Rect(VIEW.x + 8, VIEW.bottom - 86, 132, 78)
+        self.clamp(snap=True)
 
     # ------------------------------------------------------------------ camera
     def pt(self, px, py):
@@ -368,9 +382,10 @@ class FrontView:
         mouse = app.mouse
         stage = pygame.Rect(0, 0, STAGE_W, scr.get_height())
         scr.set_clip(stage)
-        ox = max(-200, min(200, -(self.x - 0.5) * MAPW * z * 0.14))
-        oy = max(-110, min(110, -(self.y - 0.5) * MAPH * z * 0.14))
-        scr.blit(app.galaxy_bg, (-220 + ox, -120 + oy), special_flags=ADD)
+        ox = max(-150, min(150, -(self.x - 0.5) * MAPW * z * 0.14))
+        oy = max(-90, min(90, -(self.y - 0.5) * MAPH * z * 0.14))
+        gbw, gbh = app.galaxy_bg.get_size()
+        scr.blit(app.galaxy_bg, (STAGE_W * 0.586 - gbw / 2 + ox, scr.get_height() * 0.528 - gbh / 2 + oy), special_flags=ADD)
         app.txt(scr, med, "GALAXY MAP", (VIEW.right, 104), (190, 200, 235), "topright", True)
         app.txt(scr, tiny, "Liberate sectors to claim their bonuses", (VIEW.right, 126), (140, 150, 185), "topright")
         scr.set_clip(VIEW)

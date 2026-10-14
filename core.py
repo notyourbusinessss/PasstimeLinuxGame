@@ -533,6 +533,17 @@ QUEST_TXT = {"clicks": "Click asteroids {} times", "bought": "Buy {} ships",
              "events_done": "Resolve {} events"}
 
 
+def peek_settings():
+    """The saved settings, read before the game (and its window) exist."""
+    try:
+        with open(SAVE) as f:
+            d = json.load(f)
+        s = d.get("settings")
+        return dict(s) if isinstance(s, dict) else {}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
 class Game:
     def __init__(self, load=True, sim=False):
         self.sim = sim                      # headless balancing mode: no events / crates
@@ -550,11 +561,12 @@ class Game:
         self.autosave_t = 0.0
         self.toasts = []
         self.fx_events = []                 # (kind, data) for the UI to animate
-        self.settings = dict(sound=True, volume=0.6, fullscreen=False)
+        self.settings = dict(sound=True, volume=0.6, fullscreen=False, resolution="auto")
         self.dev_mult = 1.0                 # developer cheat: production multiplier
         self.click_times = deque()
         self.raid_t = random.uniform(420, 780)
         self.warned = set()                # factions whose "war is near" warning was shown
+        self.stage_w, self.stage_h = 650, 720      # the play area the supply crates drift across (set by the window layout)
         self.offensive_t = random.uniform(1500, 2400)
         self.notified_unlock = -1
         self.recalc()
@@ -1669,7 +1681,7 @@ class Game:
             self.next_crate -= dt * self.crate_rate
             if self.next_crate <= 0 and not self.travel:
                 left = random.random() < 0.5
-                self.crate = dict(x=-30 if left else 650, y=random.uniform(190, 600),
+                self.crate = dict(x=-30 if left else self.stage_w, y=random.uniform(190, self.stage_h - 120),
                                   vx=(90 if left else -90), ph=random.uniform(0, 6), life=0)
                 self.next_crate = random.uniform(45, 100)
         else:
@@ -1677,7 +1689,7 @@ class Game:
             c["x"] += c["vx"] * dt
             c["life"] += dt
             c["yy"] = c["y"] + math.sin(c["life"] * 2 + c["ph"]) * 35
-            if c["x"] < -50 or c["x"] > 700:
+            if c["x"] < -50 or c["x"] > self.stage_w + 50:
                 self.crate = None
             elif self.E["autocrate"] and c["life"] > 1.5:
                 self.grab_crate()

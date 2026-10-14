@@ -67,9 +67,26 @@ Missing Python or pip? Debian/Ubuntu: `sudo apt install python3 python3-pip pyth
 | **F11** or **Alt+Enter** | Toggle fullscreen |
 | **Esc** | Leave fullscreen; in a window it quits (the game saves on exit) |
 
-**Big screen.** The window is resizable: drag its edges, maximise it with your window manager, or press **F11** (or start with `./play.sh --fullscreen`). The whole game scales smoothly to fit, with black bars if the shape of your screen is different. On a large monitor it opens bigger than 1280x720 by itself, and the fullscreen setting is remembered.
+### Window, resolution and fullscreen
 
-Command-line options: `--fullscreen`, `--debug` (verbose log, also printed in the terminal), `--dev` ([developer mode](#developer-mode)), `--version`, `--help`.
+The window is resizable: drag its edges, maximise it with your window manager, or press **F11** (or start with `./play.sh --fullscreen`). The game scales smoothly to fit, with black bars if the shape of your screen is different.
+
+The game can also be played at a **higher resolution**. A bigger canvas is not just a bigger picture - everything is laid out again, so you get more room: a taller and slightly wider side panel (more rows at once), a bigger and crisper galaxy map, and a larger field of asteroids around the planet.
+
+| Size | Good for |
+|---|---|
+| 1280x720 | small screens and slower computers (the original layout) |
+| 1600x900 | a window on a 1080p screen |
+| 1920x1080 | fullscreen on a 1080p screen, or a window on 1440p / 4K |
+| 2560x1440 | fullscreen on a 1440p screen, or a window on 4K |
+
+**Auto** (the default) picks the biggest size that fits your screen - what fits in a window, or the whole desktop's resolution when you go fullscreen, so F11 on a 1080p monitor gives you a native 1920x1080 picture. Choose a fixed size with the **Size** button in *Awards -> Stats -> Settings* (it is remembered) or for one run with `--resolution 1920x1080`. Bigger sizes need a faster computer: on the test machine a frame takes about 6 ms at 1280x720, 10 ms at 1920x1080 and 18 ms at 2560x1440.
+
+![1920x1080: a taller panel, more asteroids around the planet](screenshots/49-hires-planet.png)
+
+![The galaxy map at 1920x1080](screenshots/50-hires-galaxy.png)
+
+Command-line options: `--fullscreen`, `--resolution WxH`, `--debug` (verbose log, also printed in the terminal), `--dev` ([developer mode](#developer-mode)), `--version`, `--help`.
 
 Your save lives in `~/.space_miner_save.json`. Delete it (or use *Awards -> Stats -> Hard reset*) to start over.
 
@@ -414,11 +431,11 @@ There are **165 achievements** in 12 categories: Mining, Fleet, Planets, Colony,
 
 ### 11. Stats and settings
 
-The **Stats** chip in the Awards tab lists everything you have done (play time, clicks, ore mined, trips, warps, Dark Matter...) and has the settings: **sound on/off**, **volume**, **fullscreen**, **save now** and **hard reset**.
+The **Stats** chip in the Awards tab lists everything you have done (play time, clicks, ore mined, trips, warps, Dark Matter...) and has the settings: **sound on/off**, **volume**, **fullscreen**, the **size** (resolution) of the game, **save now** and **hard reset**.
 
 ![Stats](screenshots/15-stats-and-settings.png)
 
-The settings are at the bottom of the page: sound, the **Fullscreen** button (the same as **F11**), saving, and **Open log folder** (see Troubleshooting):
+The settings are at the bottom of the page: sound, the **Fullscreen** button (the same as **F11**), the **Size** button (the resolution, see above), saving, and **Open log folder** (see Troubleshooting):
 
 ![Settings with the Fullscreen button](screenshots/38-fullscreen-setting.png)
 
@@ -559,6 +576,7 @@ The knobs live in `core.py` (`UNLOCK_LOG`, `PROJECT_LOG`, `SECTOR_LOG`, `TUNE` -
 
 - **`ModuleNotFoundError: No module named 'pygame'`** - run `pip install pygame` (or use `./play.sh`).
 - **No window appears over SSH / in a container** - the game needs a display. Run it from a desktop session.
+- **The window is bigger than my screen / everything is tiny or huge** - choose another size with the **Size** button in the Stats page, or start with `--resolution 1280x720`. *Auto* normally picks a size that fits.
 - **The window is small / fullscreen does not work** - the game needs a desktop session with a graphics renderer for the resizable, scaled window; otherwise it falls back to a fixed 1280x720 window and the Fullscreen button is greyed out. Try running it under X11 or Wayland (not over a plain SSH session), and make sure your graphics drivers are installed.
 - **Text looks off** - the game asks for DejaVu Sans, Liberation Sans or Arial and falls back to pygame's default font.
 - **Reset everything** - delete `~/.space_miner_save.json` (and `~/.space_miner_save.json.bak`), or use *Awards -> Stats -> Hard reset*.
