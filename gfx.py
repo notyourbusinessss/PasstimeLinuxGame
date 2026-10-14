@@ -495,3 +495,59 @@ def make_enemy(faction, size=26):
             pygame.draw.polygon(surf, hot, [(x1, y1), (x2, y2), (x3, y3)])
         dot(0, 0, .2, (10, 0, 12))
     return pygame.transform.smoothscale(surf, (size, size))
+
+
+# ------------------------------------------------------------------ the Milky Way seen from above
+MW_SPAN = 124000.0                   # light-years across the picture (the galaxy's disc is about 105,000 across)
+
+
+def make_milky_way(size=1300, grid=200):
+    """The galaxy painted from milkyway.density(): a bright warm bulge and bar, blue-white spiral arms with pink star-forming
+    knots, dark lanes and thousands of faint stars. Meant to be blitted additively onto a dark background; one pixel is
+    MW_SPAN / size light-years."""
+    import milkyway
+    rng = random.Random(5)
+    small = pygame.Surface((grid, grid))
+    dens = []
+    for j in range(grid):
+        row = []
+        for i in range(grid):
+            x = ((i + 0.5) / grid - 0.5) * MW_SPAN
+            y = ((j + 0.5) / grid - 0.5) * MW_SPAN
+            d = milkyway.density(x, y)
+            arm, _ = milkyway.arm_strength(x, y)
+            row.append((d, arm))
+            R = math.hypot(x, y)
+            v = 1.0 - math.exp(-1.15 * d)
+            bulge = math.exp(-(R / 3800.0) ** 2)
+            col = lerp_c((4, 6, 16), (96, 124, 214), min(1.0, v * 1.15))
+            col = lerp_c(col, (255, 222, 160), min(1.0, bulge * 1.05 + 0.25 * milkyway.bar_strength(x, y)))
+            if arm > 0.55 and R > 4000:
+                col = lerp_c(col, (210, 120, 200), 0.18 * (arm - 0.55) / 0.45 * min(1.0, v * 3))
+            small.set_at((i, j), col)
+        dens.append(row)
+    img = pygame.transform.smoothscale(small, (size, size))
+    dust = noise_gray(size // 5, size // 5, 5, 77, 4)
+    dust = pygame.transform.smoothscale(dust, (size, size))
+    dust.fill((165, 165, 165), special_flags=MULT)               # 0..165, then +90: arms get dark lanes and bright clumps
+    dust.fill((90, 90, 90), special_flags=ADD)
+    img.blit(dust, (0, 0), special_flags=MULT)
+    img.fill((255, 255, 255), special_flags=MULT)
+    boost = pygame.Surface((size, size))
+    boost.fill((70, 70, 70))
+    img.blit(img.copy(), (0, 0), special_flags=ADD)              # brighten the arms (the black background stays black)
+    for _ in range(26000):                                      # faint stars, thickest where the galaxy is
+        i, j = rng.randrange(size), rng.randrange(size)
+        d = dens[min(grid - 1, j * grid // size)][min(grid - 1, i * grid // size)][0]
+        if rng.random() < min(1.0, d * 0.9) ** 1.3:
+            b = rng.randint(70, 200)
+            c = img.get_at((i, j))
+            img.set_at((i, j), (min(255, c[0] + b), min(255, c[1] + b), min(255, c[2] + b)))
+    fade = pygame.Surface((64, 64))                              # a round fade-out so the picture has no visible edge
+    for j in range(64):
+        for i in range(64):
+            r = math.hypot(i - 31.5, j - 31.5) / 31.5
+            v = 1.0 if r < 0.78 else max(0.0, 1.0 - (r - 0.78) / 0.2)
+            fade.set_at((i, j), (int(255 * v),) * 3)
+    img.blit(pygame.transform.smoothscale(fade, (size, size)), (0, 0), special_flags=MULT)
+    return img

@@ -7,6 +7,7 @@ import shutil
 import time
 from collections import deque
 
+import galaxy
 import gamelog
 import resources
 import ships
@@ -14,6 +15,7 @@ import ships
 log = gamelog.LOG
 
 SAVE_VER = 2
+GALAXY_VER = 1           # 1: the Milky Way (systems are indices into galaxy.STARS); saves without it use the old 16 sectors
 SAVE = resources.save_path()
 
 GROWTH = 1.15            # ship price growth per owned ship
@@ -117,6 +119,8 @@ TECHS = [  # id, name, science cost, prereqs, description, effects
      [("gen", i, 2) for i in range(NSH)] + [("ore", 2)]),
     ("t29", "Dark Matter Harvesters", 1e12, ["t23", "t28"], "Dark Matter gain x2", [("dm", 2)]),
     ("t30", "Transcendence", 1e13, ["t27", "t29"], "All ore production x10", [("ore", 10)]),
+    ("t31", "Fleet Admiral AI", 3e6, ["t6", "t14"], "Your fleet launches campaigns by itself against enemies at war with you (switch it on in the Galaxy tab)",
+     [("autowar", 1)]),
 ]
 _TECH_BASE = {t[0]: t[2] for t in TECHS}
 TECH_BY_ID = {t[0]: t for t in TECHS}
@@ -234,42 +238,22 @@ FACTIONS = {
 }
 SHIP_POWER = [1, 3, 9, 27, 81, 243, 729, 2187]          # fleet power of one ship of each type
 GALAXY_UNLOCK_PLANET = 2                                # the galaxy map opens when you unlock Mars
-SECTORS = [  # name, faction, map position (0..1), reward description, reward effects
-    dict(name="Sol", faction=None, pos=(0.10, 0.52), desc="Your home system", fx=[]),
-    dict(name="Oort Cloud", faction="pirates", pos=(0.24, 0.34), desc="Ships 5% cheaper everywhere", fx=[("disc", 0.05)]),
-    dict(name="Alpha Centauri", faction="pirates", pos=(0.27, 0.68), desc="All production x1.3", fx=[("ore", 1.3)]),
-    dict(name="Barnard's Star", faction="pirates", pos=(0.38, 0.20), desc="Credit income x2", fx=[("cred", 2)]),
-    dict(name="Wolf 359", faction="hive", pos=(0.43, 0.48), desc="Fleet power x1.5", fx=[("fp", 1.5)]),
-    dict(name="Sirius", faction="hive", pos=(0.46, 0.80), desc="Science income x2", fx=[("sci", 2)]),
-    dict(name="Epsilon Eridani", faction="hive", pos=(0.55, 0.26), desc="All production x1.5", fx=[("ore", 1.5)]),
-    dict(name="Tau Ceti", faction="crystal", pos=(0.60, 0.60), desc="Crates 50% more often, pay x2",
-         fx=[("crate", 0.5), ("crate_pay", 2)]),
-    dict(name="Vega", faction="crystal", pos=(0.67, 0.36), desc="Dark Matter gain x1.25", fx=[("dm", 1.25)]),
-    dict(name="Procyon", faction="crystal", pos=(0.67, 0.86), desc="Clicks x10", fx=[("click", 10)]),
-    dict(name="Altair", faction="iron", pos=(0.77, 0.50), desc="All production x2", fx=[("ore", 2)]),
-    dict(name="Betelgeuse", faction="iron", pos=(0.80, 0.72), desc="Ships 10% cheaper everywhere", fx=[("disc", 0.10)]),
-    dict(name="Orion Nebula", faction="iron", pos=(0.80, 0.18), desc="Dark Matter gain x1.5, fleet power x1.5",
-         fx=[("dm", 1.5), ("fp", 1.5)]),
-    dict(name="Crab Nebula", faction="void", pos=(0.90, 0.60), desc="All production x2", fx=[("ore", 2)]),
-    dict(name="Galactic Core", faction="void", pos=(0.92, 0.34), desc="All production x3, fleet power x2",
-         fx=[("ore", 3), ("fp", 2)]),
-    dict(name="The Void Throne", faction="devourer", pos=(0.95, 0.86), desc="All production x5, Stardust gain x1.5  -  the final boss",
-         fx=[("ore", 5), ("sd", 1.5)]),
-]
-NSEC = len(SECTORS)
-SECTOR_EDGES = [(0, 1), (0, 2), (1, 3), (1, 4), (2, 4), (2, 5), (3, 6), (4, 6), (4, 7), (5, 7), (5, 9), (6, 8), (7, 8),
-                (7, 10), (7, 11), (9, 11), (8, 12), (10, 12), (10, 13), (11, 13), (12, 14), (13, 14), (14, 15), (13, 15)]
-SECTOR_LINKS = [[] for _ in range(NSEC)]
-for _a, _b in SECTOR_EDGES:
-    SECTOR_LINKS[_a].append(_b)
-    SECTOR_LINKS[_b].append(_a)
-SECTOR_LOG = [2.52, 5.14, 6.81, 7.96, 8.53, 8.86, 9.44, 9.79, 10.25, 10.33, 10.72, 11.18, 12.09, 12.3, 12.78]   # log10 enemy fleet power, sectors 1..15
+SECTORS = galaxy.STARS            # the Milky Way: thousands of systems (name, faction, position in light-years, power, reward...)
+NSEC = galaxy.N
+BOSS = galaxy.BOSS                # The Void Throne, at the Galactic Centre: defeat the Devourer there to Ascend
+SECTOR_EDGES = galaxy.EDGES       # lanes: every system is joined to its nearest neighbours
+SECTOR_LINKS = galaxy.LINKS
+JUMP = 5                          # index of the Jump Drive track in ARMORY
+FAC_TOTAL = {}                    # faction -> how many systems it holds at the start
+for _s in SECTORS[1:]:
+    FAC_TOTAL[_s["faction"]] = FAC_TOTAL.get(_s["faction"], 0) + 1
 ARMORY = [  # key, name, description, max level, base credit cost
     ("weapons", "Weapons", "Fleet power x1.2 per level", 20, 5e3),
     ("armor", "Armor", "Fleet losses -6% per level", 12, 8e3),
     ("engines", "Engines", "Campaigns 8% faster per level", 15, 8e3),
     ("shields", "Shields", "Raid losses -8% per level", 10, 5e3),
     ("intel", "Intel", "Enemy attacks are announced earlier and in more detail", 8, 6e3),
+    ("jump", "Jump Drive", "Jump range x1.5 per level: you can attack any system within range of one you hold", 22, 3e3),
 ]
 ARMORY_GROWTH = 2.4
 WIN_LOSSES, LOSE_LOSSES = 0.01, 0.08                    # fraction of your ships lost after a victory / defeat
@@ -308,8 +292,8 @@ STARDUST_PERKS = [  # id, name, Stardust cost, description, effects
     ("s17", "Stardust Siphon", 100, "Stardust gain x1.5", [("sd", 1.5)]),
     ("s18", "Quantum Keys", 120, "Start every cycle with 1,000 Dark Matter", [("startdm", 1000)]),
     ("s19", "Armory Archive", 90, "Keep your armory upgrades when you Ascend", [("keeparm", 1)]),
-    ("s20", "Galactic Charter", 500, "Keep your first 5 liberated sectors when you Ascend", [("keepsec", 5)]),
-    ("s21", "Stellar Dominion", 1600, "Keep your first 10 liberated sectors when you Ascend", [("keepsec", 10)]),
+    ("s20", "Galactic Charter", 500, "Keep your 25 nearest liberated systems when you Ascend", [("keepsec", 25)]),
+    ("s21", "Stellar Dominion", 1600, "Keep your 100 nearest liberated systems when you Ascend", [("keepsec", 100)]),
 ]
 SD_BY_ID = {p[0]: p for p in STARDUST_PERKS}
 
@@ -465,17 +449,25 @@ def build_achievements():
     ms("Warp", [("Archivist", 5, "silver"), ("Keeper of Stars", len(STARDUST_PERKS), "platinum")],
        lambda t: f"Buy {t} Stardust perks", lambda g: len(g.sd_perks))
     # --- Galaxy
-    ms("Galaxy", [("First Blood", 1, "bronze"), ("Frontier", 4, "silver"), ("Warlord", 8, "gold"),
-                  ("Conqueror", 12, "gold"), ("Galactic Emperor", NSEC - 1, "platinum")],
-       lambda t: f"Liberate {t} enemy sector{'s' if t > 1 else ''}", lambda g: len(g.conquered) - 1)
+    ms("Galaxy", [("First Blood", 1, "bronze"), ("Frontier", 10, "bronze"), ("Warlord", 25, "silver"), ("Conqueror", 50, "silver"),
+                  ("Star Baron", 100, "gold"), ("Star King", 250, "gold"), ("Galactic Emperor", 500, "gold"),
+                  ("Master of the Milky Way", 1000, "platinum"), ("Lord of a Thousand Suns", 3000, "platinum")],
+       lambda t: f"Hold {t:,} conquered star system{'s' if t > 1 else ''}", lambda g: len(g.conquered) - 1)
     for fac, nm, tier in [("pirates", "Scourge of Pirates", "silver"), ("hive", "Hive Breaker", "silver"),
                           ("crystal", "Crystal Shatterer", "gold"), ("iron", "Ironclad Breaker", "gold"),
                           ("void", "Cult Buster", "platinum")]:
         ids = [k for k in range(1, NSEC) if SECTORS[k]["faction"] == fac]
-        add(nm, f"Liberate every {FACTIONS[fac]['name']} sector", "Galaxy", tier,
-            lambda g, ids=ids: all(k in g.conquered for k in ids),
-            lambda g, ids=ids: (sum(1 for k in ids if k in g.conquered), len(ids)))
-    add("Devourer's Bane", "Defeat The Devourer on The Void Throne", "Galaxy", "platinum", lambda g: NSEC - 1 in g.conquered)
+        add(nm, f"Liberate 100 {FACTIONS[fac]['name']} systems", "Galaxy", tier,
+            lambda g, ids=ids: sum(1 for k in ids if k in g.conquered) >= 100,
+            lambda g, ids=ids: (min(100, sum(1 for k in ids if k in g.conquered)), 100))
+    add("Devourer's Bane", "Defeat The Devourer on The Void Throne", "Galaxy", "platinum", lambda g: BOSS in g.conquered)
+    ms("Galaxy", [("Stargazer", 5, "bronze"), ("Constellation Hunter", 25, "silver"), ("Skywatcher", 60, "gold"),
+                  ("Keeper of the Sky", 120, "platinum")],
+       lambda t: f"Liberate {t} famous places: real stars, nebulae, pulsars and clusters",
+       lambda g: sum(1 for k in g.conquered if k and SECTORS[k]["real"]))
+    ms("Galaxy", [("Jump Start", 3, "bronze"), ("Long Haul", 10, "silver"), ("Across the Arm", 16, "gold"),
+                  ("Beyond the Core", 22, "platinum")],
+       lambda t: f"Upgrade the Jump Drive to level {t} (range {galaxy.fmt_ly(galaxy.jump_range(t))})", lambda g: g.armory[JUMP])
     ms("Galaxy", [("Veteran", 10, "bronze"), ("War Hero", 50, "silver"), ("Living Legend", 200, "gold")],
        lambda t: f"Win {t} battles", lambda g: g.battles_won)
     ms("Galaxy", [("Home Guard", 5, "bronze"), ("Fortress Planet", 25, "silver"), ("Unbreakable", 100, "gold")],
@@ -598,6 +590,17 @@ class Game:
         self.ach = set()
         self.ach_bonus = 0.0
         self.conquered = {0}
+        self.reach = galaxy.Reach()
+        self._reach_sig = None
+        self._src_cache = {}
+        self._weak, self._weak_key = None, None
+        self._targets_key = self._border_key = self._gal_sig = None
+        self._targets, self._tset, self._border, self._gal_fx, self._gal_sums = [], set(), [], [], {}
+        self._border_facs = set()
+        self._gal_facs = {}
+        self._auto_t = 0.0
+        self.auto_war = False              # the Fleet Admiral tech launches campaigns by itself when this is on
+        self.auto_odds = 0.85              # ... against enemies at war with you that it beats with at least this chance
         self.campaign = None
         self.cycle = 1
         self.ascensions = 0
@@ -632,7 +635,7 @@ class Game:
         return sum(sum(o) for o in self.owned)
 
     def save(self):
-        d = dict(ver=SAVE_VER, ore=self.ore, run_ore=self.run_ore, all_ore=self.all_ore, owned=self.owned,
+        d = dict(ver=SAVE_VER, gal=GALAXY_VER, auto_war=self.auto_war, auto_odds=self.auto_odds, ore=self.ore, run_ore=self.run_ore, all_ore=self.all_ore, owned=self.owned,
                  ups=[sorted(u) for u in self.ups], unlocked=self.unlocked, bld=self.bld,
                  credits=self.credits, all_cred=self.all_cred, science=self.science, all_sci=self.all_sci,
                  all_norm=self.all_norm, run_norm=self.run_norm, techs=sorted(self.techs),
@@ -727,9 +730,26 @@ class Game:
             self.away_max = float(d.get("away_max", 0)); self.night_secs = float(d.get("night_secs", 0))
             self.visited = {int(v) for v in d.get("visited", [0]) if 0 <= int(v) < NSITE} | {0}
             self.flags = {str(f) for f in d.get("flags", [])}
-            self.conquered = {int(k) for k in d.get("conquered", [0]) if 0 <= int(k) < NSEC} | {0}
+            old_map = None
+            if d.get("gal") != GALAXY_VER:        # a save from before the Milky Way: its sectors are the first systems of the new map
+                old_map = [galaxy.BY_NAME[nm] for nm in galaxy.OLD_SECTORS]
+
+            def sec(k):
+                k = int(k)
+                if old_map is not None:
+                    return old_map[k] if 0 <= k < len(old_map) else -1
+                return k if 0 <= k < NSEC else -1
+            self.conquered = {sec(k) for k in d.get("conquered", [0]) if sec(k) >= 0} | {0}
             camp = d.get("campaign")
             self.campaign = camp if isinstance(camp, dict) and all(x in camp for x in ("k", "t", "dur", "fp", "chance")) else None
+            if self.campaign is not None:
+                self.campaign["k"] = sec(self.campaign["k"])
+                if self.campaign["k"] < 0 or self.campaign["k"] in self.conquered:
+                    self.campaign = None
+                else:
+                    self.campaign.setdefault("src", 0)
+            self.auto_war = bool(d.get("auto_war", False))
+            self.auto_odds = max(0.5, min(0.99, float(d.get("auto_odds", 0.85))))
             arm = list(d.get("armory", []))[:len(ARMORY)]
             self.armory = [max(0, min(ARMORY[i][3], int(v))) for i, v in enumerate(arm)] + [0] * (len(ARMORY) - len(arm))
             self.battles_won = int(d.get("battles_won", 0)); self.battles_lost = int(d.get("battles_lost", 0))
@@ -742,8 +762,8 @@ class Game:
             self.truce = {str(k): max(0.0, float(v)) for k, v in dict(d.get("truce", {})).items() if k in FACTIONS}
             self.wars_declared = int(d.get("wars_declared", 0)); self.wars_suffered = int(d.get("wars_suffered", 0))
             self.peaces_made = int(d.get("peaces_made", 0))
-            self.garrison = {int(k): float(v) for k, v in dict(d.get("garrison", {})).items() if 0 < int(k) < NSEC}
-            self.lost_sectors = {int(k) for k in d.get("lost_sectors", []) if 0 < int(k) < NSEC}
+            self.garrison = {sec(k): float(v) for k, v in dict(d.get("garrison", {})).items() if sec(k) > 0}
+            self.lost_sectors = {sec(k) for k in d.get("lost_sectors", []) if sec(k) > 0}
             self.director_log = [(float(a), str(b)) for a, b in list(d.get("director_log", []))[-8:]]
             self.director_id = int(d.get("director_id", 0))
             tw = list(d.get("tier_wins", []))[:3]
@@ -807,10 +827,27 @@ class Game:
     def dm_avail(self):
         return self.dm - self.dm_spent
 
+    def galaxy_effects(self):
+        """(effects of the landmark systems you hold, sums of the generated systems' small bonuses per category); cached."""
+        sig = (len(self.conquered), sum(self.conquered))
+        if sig != self._gal_sig:
+            fx, sums, facs = [], {}, {}
+            for k in self.conquered:
+                if k:
+                    f = SECTORS[k]["faction"]
+                    facs[f] = facs.get(f, 0) + 1
+                for e in SECTORS[k]["fx"]:
+                    if e[0].startswith("gal_"):
+                        sums[e[0][4:]] = sums.get(e[0][4:], 0.0) + e[1]
+                    else:
+                        fx.append(e)
+            self._gal_sig, self._gal_fx, self._gal_sums, self._gal_facs = sig, fx, sums, facs
+        return self._gal_fx, self._gal_sums
+
     def recalc(self):
         E = dict(ore=1.0, click=1.0, cred=1.0, sci=1.0, disc=0.0, crate=0.0, crate_pay=1.0,
                  dm=1.0, auto=0, autoup=0, autocrate=0, start=0.0, offline=OFFLINE_EFF, minebonus=1.0,
-                 clickops=0.0, frenzy=0.0, dmbase=TUNE["dmbase"], travel=1.0, fp=1.0, techcost=1.0, sd=1.0, startplanets=0, keepproj=0, keepsec=0, keeparm=0, startdm=0.0)
+                 clickops=0.0, frenzy=0.0, dmbase=TUNE["dmbase"], travel=1.0, fp=1.0, techcost=1.0, sd=1.0, startplanets=0, keepproj=0, keepsec=0, keeparm=0, startdm=0.0, jump=1.0, autowar=0)
         gm = [1.0] * NSH
         effects = []
         for t in self.techs:
@@ -822,22 +859,26 @@ class Game:
                 effects += s["fx"]
         for k in self.projects:
             effects += PROJECTS[k][2]
-        for k in self.conquered:
-            effects += SECTORS[k]["fx"]
+        gal_fx, gs = self.galaxy_effects()
+        effects += gal_fx
         for pid in self.sd_perks:
             effects += SD_BY_ID[pid][4]
         for e in effects:
             k = e[0]
-            if k in ("ore", "click", "cred", "sci", "crate_pay", "dm", "minebonus", "travel", "fp", "techcost", "sd"):
+            if k in ("ore", "click", "cred", "sci", "crate_pay", "dm", "minebonus", "travel", "fp", "techcost", "sd", "jump"):
                 E[k] *= e[1]
             elif k in ("disc", "crate", "clickops", "frenzy", "start", "dmbase", "startdm"):
                 E[k] += e[1]
             elif k in ("offline", "startplanets", "keepproj", "keepsec", "keeparm"):
                 E[k] = max(E[k], e[1])
-            elif k in ("auto", "autoup", "autocrate"):
+            elif k in ("auto", "autoup", "autocrate", "autowar"):
                 E[k] = 1
             elif k == "gen":
                 gm[e[1]] *= e[2]
+        for cat in ("ore", "cred", "sci", "fp", "click", "dm"):      # the small rewards of the many generated systems add up
+            E[cat] *= 1 + galaxy.empire_mult(cat, gs.get(cat, 0.0))
+        E["crate"] += galaxy.empire_mult("crate", gs.get("crate", 0.0))
+        E["disc"] += min(0.3, galaxy.empire_mult("disc", gs.get("disc", 0.0)))
         self.E = E
         mine = [0.0] * NSITE
         disc = [0.0] * NSITE
@@ -1228,18 +1269,102 @@ class Game:
         return sum(self.planet_power(p) for p in range(NSITE) if self.unlocked[p])
 
     def sector_power(self, k):
-        return 10 ** (SECTOR_LOG[k - 1] + TUNE["sshift"]) * TUNE["cpow"] ** (self.cycle - 1)
+        return 10 ** (SECTORS[k]["lp"] + TUNE["sshift"]) * TUNE["cpow"] ** (self.cycle - 1)
 
-    def frontier(self):
-        """Enemy sectors next to territory you hold."""
-        return [k for k in range(1, NSEC) if k not in self.conquered
-                and any(n in self.conquered for n in SECTOR_LINKS[k])]
+    # ---- which systems you can reach
+    def jump_range(self):
+        """How far (light-years) your jump drive reaches from any system you hold."""
+        return galaxy.jump_range(self.armory[JUMP]) * self.E["jump"]
+
+    def sync_reach(self):
+        """Bring the reach map up to date with the systems you hold and your jump range (cheap when nothing changed)."""
+        held = self.conquered
+        sig = (len(held), sum(held), self.armory[JUMP], self.E["jump"])
+        if sig == self._reach_sig:
+            return self.reach
+        r = self.reach
+        rng = self.jump_range()
+        gone = r.held - held
+        if gone or abs(rng - r.range) > 1e-9:
+            r.set(held, rng)
+        else:
+            for k in held - r.held:
+                r.add(k)
+        self._reach_sig = sig
+        self._src_cache = {}
+        return r
+
+    def targets(self):
+        """Every enemy system within jump range of a system you hold: the ones you can attack."""
+        r = self.sync_reach()
+        key = (r.version, len(self.conquered), sum(self.conquered))
+        if key != self._targets_key:
+            reach, held = r.reach, self.conquered
+            self._targets = [k for k in range(NSEC) if reach[k] and k not in held]
+            self._tset = set(self._targets)
+            self._targets_key = key
+        return self._targets
+
+    def scanned(self, k):
+        """True if the system is on your sensors (within SCAN_FACTOR jump ranges of your territory) or yours."""
+        return k in self.conquered or bool(self.sync_reach().scan[k])
+
+    def border(self):
+        """Enemy systems directly linked to systems you hold: where the fronts are (raids and invasions come from here)."""
+        key = (len(self.conquered), sum(self.conquered))
+        if key != self._border_key:
+            held = self.conquered
+            out = set()
+            for k in held:
+                for n in SECTOR_LINKS[k]:
+                    if n not in held:
+                        out.add(n)
+            self._border = sorted(out)
+            self._border_facs = {SECTORS[k]["faction"] for k in self._border}
+            self._border_key = key
+        return self._border
+
+    def faction_left(self, fac):
+        """How many systems of a faction you have not conquered yet."""
+        self.galaxy_effects()
+        return FAC_TOTAL.get(fac, 0) - self._gal_facs.get(fac, 0)
+
+    def weakest_target(self):
+        """The enemy system in reach with the least power (cached), or None."""
+        t = self.targets()
+        if self._targets_key != self._weak_key:
+            self._weak = min(t, key=lambda k: SECTORS[k]["lp"]) if t else None
+            self._weak_key = self._targets_key
+        return self._weak
+
+    def attack_ready(self):
+        """True when the fleet is idle and there is a target it beats with at least 80%: the Galaxy tab then flashes."""
+        if not self.galaxy_open or self.campaign is not None:
+            return False
+        k = self.weakest_target()
+        return k is not None and win_chance(self.fleet_power(), self.sector_power(k)) >= 0.8
+
+    def source_of(self, k):
+        """(held system the attack on k would launch from, its distance in light-years)."""
+        self.sync_reach()
+        hit = self._src_cache.get(k)
+        if hit is None:
+            hit = self._src_cache[k] = self.reach.nearest_held(k)
+        return hit
 
     def can_attack(self, k):
-        return (self.galaxy_open and self.campaign is None and k in self.frontier())
+        return (self.galaxy_open and self.campaign is None and k not in self.conquered and k in self.targets_set())
+
+    def targets_set(self):
+        self.targets()
+        return self._tset
 
     def campaign_duration(self, k):
-        return (120 + 50 * k) * max(0.25, 0.92 ** self.armory[2])
+        """Seconds: the fight (longer against stronger enemies) plus the flight from your nearest system."""
+        _, d = self.source_of(k)
+        base = 45 + 38 * (SECTORS[k]["lp"] - 2.5)
+        flight = 6 * math.log2(1 + d / 6.0)
+        return (base + flight) * max(0.25, 0.92 ** self.armory[2])
 
     def loss_fraction(self, base):
         return base * max(0.1, 1 - 0.06 * self.armory[1])
@@ -1250,7 +1375,8 @@ class Game:
         fp = self.fleet_power()
         if fp <= 0:
             return False
-        self.campaign = dict(k=k, t=0.0, dur=self.campaign_duration(k), fp=fp,
+        src, _ = self.source_of(k)
+        self.campaign = dict(k=k, t=0.0, dur=self.campaign_duration(k), fp=fp, src=src,
                              chance=win_chance(fp, self.sector_power(k)))
         fac = SECTORS[k]["faction"]
         if fac not in self.war:                                          # invading a faction at peace is a declaration of war
@@ -1266,6 +1392,21 @@ class Game:
                 self.owned[p][i] = int(self.owned[p][i] * (1 - frac))
         self.recalc()
 
+    def auto_target(self):
+        """The system the Fleet Admiral would attack next: the strongest enemy at war with you that you beat with at least the
+        chosen odds (the toggle and the odds are on the Galaxy tab)."""
+        fp = self.fleet_power()
+        best, key = None, None
+        for k in self.targets():
+            if SECTORS[k]["faction"] not in self.war:
+                continue
+            if win_chance(fp, self.sector_power(k)) < self.auto_odds:
+                continue
+            kk = (SECTORS[k]["lp"], -SECTORS[k]["d"])
+            if key is None or kk > key:
+                best, key = k, kk
+        return best
+
     def resolve_campaign(self):
         c = self.campaign
         self.campaign = None
@@ -1279,11 +1420,12 @@ class Game:
             self.battles_won += 1
             if c["chance"] < 0.3:
                 self.flags.add("underdog")
-            self.lose_ships(self.loss_fraction(WIN_LOSSES))
+            hard = min(1.0, self.sector_power(k) / max(c["fp"], 1.0))        # an easy win costs few ships, an even fight the full price
+            self.lose_ships(self.loss_fraction(WIN_LOSSES * (0.1 + 0.9 * math.sqrt(hard))))
             fac = FACTIONS[SECTORS[k]["faction"]]["name"]
-            log.info("Sector liberated: %s", SECTORS[k]["name"])
+            log.info("System liberated: %s", SECTORS[k]["name"])
             self.toast(f"VICTORY! {SECTORS[k]['name']} liberated from the {fac}.  {SECTORS[k]['desc']}", 7)
-            if k == NSEC - 1:
+            if k == BOSS:
                 self.toast("The Devourer is defeated!  You can now ASCEND - see the Warp tab.", 10)
             self.fx("conquer", k)
         else:
@@ -1312,7 +1454,7 @@ class Game:
 
     # ---------------- New Game Plus: Ascension -----------------
     def can_ascend(self):
-        return NSEC - 1 in self.conquered
+        return BOSS in self.conquered
 
     def sd_gain(self):
         x = max(0.0, self.cyc_norm / 1e25) ** TUNE["sdpow"]
@@ -1352,7 +1494,7 @@ class Game:
         self.cycle += 1
         self.ascensions += 1
         keep_proj = {k for k in self.projects if k < self.E["keepproj"]}
-        keep_sec = {k for k in self.conquered if k <= self.E["keepsec"]} | {0}
+        keep_sec = set(sorted((k for k in self.conquered if k), key=lambda k: SECTORS[k]["d"])[:int(self.E["keepsec"])]) | {0}
         keep_arm = list(self.armory) if self.E["keeparm"] else [0] * len(ARMORY)
         n = NSITE
         self.ore = [0.0] * n
@@ -1591,6 +1733,13 @@ class Game:
             self.campaign["t"] += dt
             if self.campaign["t"] >= self.campaign["dur"]:
                 self.resolve_campaign()
+        elif self.E["autowar"] and self.auto_war and self.galaxy_open:
+            self._auto_t -= dt
+            if self._auto_t <= 0:
+                self._auto_t = 3.0
+                k = self.auto_target()
+                if k is not None:
+                    self.start_campaign(k)
         for b in self.buffs:
             b["t"] -= dt
         self.buffs = [b for b in self.buffs if b["t"] > 0]

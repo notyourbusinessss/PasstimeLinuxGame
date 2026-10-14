@@ -154,15 +154,30 @@ def sections(app):
         return run
 
     def conquer_next():
-        fr = g.frontier()
+        fr = g.targets()
         if fr:
-            k = min(fr)
+            k = min(fr, key=lambda q: core.SECTORS[q]["lp"])
             g.conquered.add(k)
             g.fx("conquer", k)
+
+    def conquer_n(n):
+        def run():
+            for _ in range(n):
+                fr = g.targets()
+                if not fr:
+                    break
+                g.conquered.add(min(fr, key=lambda q: core.SECTORS[q]["lp"]))
+        return run
 
     def conquer_all():
         for k in range(1, NSEC):
             g.conquered.add(k)
+
+    def conquer_boss():
+        g.conquered.add(core.BOSS)
+
+    def max_jump():
+        g.armory[core.JUMP] = ARMORY[core.JUMP][3]
 
     def reset_galaxy():
         g.conquered = {0}
@@ -196,8 +211,8 @@ def sections(app):
 
     def force_war():
         """The attack cheats need a faction at war: start one (without its opening strike) if nobody is."""
-        if not director.war_fronts(g) and g.frontier():
-            f = core.SECTORS[min(g.frontier())]["faction"]
+        if not director.war_fronts(g) and g.border():
+            f = core.SECTORS[min(g.border())]["faction"]
             g.war[f] = dict(since=g.play_time, by="enemy")
 
     def war_all():
@@ -237,7 +252,7 @@ def sections(app):
     def lose_sector():
         held = [k for k in g.conquered if k]
         if held:
-            k = max(held)
+            k = max(held, key=lambda q: core.SECTORS[q]["lp"])
             g.conquered.discard(k)
             g.lost_sectors.add(k)
             g.sectors_lost += 1
@@ -331,8 +346,12 @@ def sections(app):
             ("Mining Frenzy x7 (60s)", cheat(frenzy), False),
         ]),
         ("Galaxy & enemies", [
-            ("Liberate next sector", cheat(conquer_next), False),
-            ("Liberate ALL sectors", cheat(conquer_all), False),
+            ("Liberate the weakest reachable system", cheat(conquer_next), False),
+            ("Liberate 25 systems in reach", cheat(conquer_n(25)), False),
+            ("Liberate 250 systems in reach", cheat(conquer_n(250)), False),
+            ("Liberate ALL systems", cheat(conquer_all), False),
+            ("Liberate The Void Throne (can Ascend)", cheat(conquer_boss), False),
+            ("Max Jump Drive", cheat(max_jump), False),
             ("Reset galaxy to Sol only", cheat(reset_galaxy), False),
             ("Finish current campaign now", cheat(finish_campaign), False),
             ("Current campaign: guaranteed win", cheat(sure_win), False),

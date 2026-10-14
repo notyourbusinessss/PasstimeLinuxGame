@@ -114,11 +114,7 @@ class Touch:
                 d0, mid0 = self.pinch
                 if d0 > 8 and d > 8:
                     app.fv.zoom_at(mid, d / d0)
-                if app.fv.zt > 1.0:                                # two fingers also pan
-                    from frontview import MAPH, MAPW
-                    app.fv.xt -= (mid[0] - mid0[0]) / (MAPW * app.fv.zt)
-                    app.fv.yt -= (mid[1] - mid0[1]) / (MAPH * app.fv.zt)
-                    app.fv.clamp()
+                app.fv.pan_px(mid[0] - mid0[0], mid[1] - mid0[1])      # two fingers also pan
                 self.pinch = (d, mid)
         elif kind == "up":
             self.fingers.pop(fid, None)

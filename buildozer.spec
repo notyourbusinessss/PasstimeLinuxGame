@@ -6,7 +6,7 @@ package.name = spaceminer
 package.domain = io.github.notyourbusinessss
 
 source.dir = .
-source.include_exts = py,png,ttf,txt
+source.include_exts = py,png,ttf,txt,json
 source.exclude_dirs = screenshots, tools, packaging, build, dist, bin, .github, .git, .buildozer, __pycache__
 source.exclude_patterns = sim.py, calibrate.py
 

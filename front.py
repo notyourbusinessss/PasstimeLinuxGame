@@ -30,7 +30,7 @@ def ships_for(power, cap=30):
 def lanes(g):
     """Every lane that is a front: (your sector, enemy sector)."""
     out = []
-    for k in g.frontier():
+    for k in g.border():
         for n in SECTOR_LINKS[k]:
             if n in g.conquered:
                 out.append((n, k))
@@ -64,12 +64,9 @@ def status(g, k):
 
 
 def source_sector(g, k):
-    """The sector of yours the attack on k would launch from (the nearest held neighbour)."""
-    held = [n for n in SECTOR_LINKS[k] if n in g.conquered]
-    if not held:
-        return None
-    px, py = SECTORS[k]["pos"]
-    return min(held, key=lambda n: (SECTORS[n]["pos"][0] - px) ** 2 + (SECTORS[n]["pos"][1] - py) ** 2)
+    """The system of yours the attack on k would launch from (the nearest one you hold), or None."""
+    src, _ = g.source_of(k)
+    return src
 
 
 def neighbours(g, k):

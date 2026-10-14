@@ -62,12 +62,13 @@ def at_war(g, fac):
 
 
 def war_fronts(g):
-    """Enemy sectors next to your territory whose faction is at war with you: the only places attacks come from."""
-    return [k for k in g.frontier() if SECTORS[k]["faction"] in g.war]
+    """Enemy systems linked to your territory whose faction is at war with you: the only places attacks come from."""
+    return [k for k in g.border() if SECTORS[k]["faction"] in g.war]
 
 
 def borders(g, fac):
-    return any(SECTORS[k]["faction"] == fac for k in g.frontier())
+    g.border()
+    return fac in g._border_facs
 
 
 def stance(g, fac):
@@ -162,7 +163,7 @@ def step_war(g, dt):
     rate = dt / TENSION_TIME * (1.0 + 0.25 * min(8, len(g.conquered) - 1))      # the more of the galaxy you hold, the more they fear you
     for fac in FACTIONS:
         if fac in g.war:
-            if not any(SECTORS[k]["faction"] == fac and k not in g.conquered for k in range(1, NSEC)):
+            if g.faction_left(fac) <= 0:
                 end_war(g, fac, "nothing of them is left")
             continue
         left = g.truce.get(fac, 0.0)
@@ -437,7 +438,7 @@ def resolve_offensive(g, inc):
 
 def instant_raid(g, p=None, force=None):
     """Developer helper: an immediate small raid on planet p with a chosen outcome."""
-    src = weakest_front(g) or (min(g.frontier(), key=g.sector_power) if g.frontier() else None)
+    src = weakest_front(g) or (min(g.border(), key=g.sector_power) if g.border() else None)
     if src is None:
         return False
     p = p if p is not None else random.choice([q for q in range(NSITE) if g.unlocked[q]])
@@ -474,7 +475,7 @@ def step(g, dt):
     if g.grace > 0:
         g.grace = max(0.0, g.grace - dt)
         return
-    if not g.galaxy_open or not g.frontier():
+    if not g.galaxy_open or not g.border():
         return
     step_war(g, dt)
     if not war_fronts(g):                           # at peace: nothing attacks you

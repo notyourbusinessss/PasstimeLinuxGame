@@ -19,6 +19,7 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")       # no pygame banne
 import pygame
 
 import core
+import galaxy
 import gamelog
 import resources
 import shipart
@@ -94,6 +95,8 @@ class App:
         self.banners = []
         self.view = "system"
         self.sel_sector = 1
+        self.gal_mode = 0                    # which list the Galaxy tab's target browser shows
+        self._gal_cache = {}
         self.raiders = []
         self.hover_sector = None
         self.warp_view = "warp"
@@ -330,7 +333,7 @@ class App:
 
     def sector_known(self, k):
         g = self.g
-        return k in g.conquered or k in g.frontier()
+        return k in g.conquered or g.scanned(k) or SECTORS[k]["real"]
 
     def strip_click(self, k):
         g = self.g
@@ -340,10 +343,15 @@ class App:
                 return
             self.view = "system" if self.view == "galaxy" else "galaxy"
             if self.view == "galaxy":
-                fr = g.frontier()
-                if self.sel_sector in g.conquered and fr:
-                    self.sel_sector = min(fr)
+                w = g.weakest_target()
+                if self.sel_sector in g.conquered and w is not None:
+                    self.sel_sector = w
                 self.tab = T_GALAXY
+                self.fv.opened()
+                if "gal_hint" not in g.flags:
+                    g.flags.add("gal_hint")
+                    g.toast("The Milky Way: attack any system within your jump range of one you hold. "
+                            "Upgrade the Jump Drive in the Galaxy tab to reach further.", 9)
             return
         self.view = "system"
         if g.unlocked[k]:
@@ -418,7 +426,7 @@ class App:
             f"play_time={g.play_time:.0f}s cycle={g.cycle} warps={g.warps} unlocked={g.n_unlocked} sectors={len(g.conquered) - 1} "
             f"campaign={'yes' if g.campaign else 'no'} incoming={len(g.incoming)} event={'yes' if g.event else 'no'} "
             f"travel={'yes' if g.travel else 'no'} cheated={'cheated' in g.flags}",
-            f"galaxy camera: zoom={self.fv.z:.2f} centre=({self.fv.x:.2f},{self.fv.y:.2f}) selected sector={self.sel_sector}",
+            f"galaxy camera: scale={self.fv.s:.4f} px/ly centre=({self.fv.cx:.0f},{self.fv.cy:.0f}) selected system={self.sel_sector}",
         ])
 
     def open_log_folder(self):
@@ -489,7 +497,7 @@ class App:
     def select_sector(self, k):
         """Select a sector (from the Galaxy tab); if the map is zoomed in, the camera follows."""
         self.sel_sector = k
-        if self.view == "galaxy" and self.fv.zt > 1.3:
+        if self.view == "galaxy":
             self.fv.focus(k)
 
     def close_look(self):
@@ -507,6 +515,16 @@ class App:
             return
         self.view = "galaxy"
         self.fv.fit()
+
+    def go_home(self):
+        """Show all your territory on the galaxy map."""
+        if not self.g.galaxy_open:
+            return
+        self.view = "galaxy"
+        self.fv.home()
+
+    def toggle_auto(self):
+        self.g.auto_war = not self.g.auto_war
 
     def galaxy_key(self, key):
         """Z opens (or leaves) the front close-up; in the galaxy view the zoom and pan keys work too."""
@@ -595,6 +613,8 @@ class App:
         self.view_t += dt
         self.update_galaxy_layout()
         self.fv.update(dt)
+        if self.g.galaxy_open:
+            self.fv.prebuild()                # the painted Milky Way is made in the background once the map is open to you
         if self.view_site != g.cur:
             self.rebuild_view()
         self.pulse = max(0, self.pulse - dt * 4)
@@ -1003,11 +1023,11 @@ class App:
         x += sm.size(t)[0] + 24
         self.txt(scr, sm, f"{fmt(g.science)} science (+{fmt(g.sci_ops)}/s)", (x, 13), (125, 238, 255), shadow=True)
         wars = len(g.war)
-        self.txt(scr, tiny, f"Fleet power {fmt(g.fleet_power())}   -   {len(g.conquered) - 1}/{NSEC - 1} sectors liberated   -   "
+        self.txt(scr, tiny, f"Fleet power {fmt(g.fleet_power())}   -   {len(g.conquered) - 1:,} systems held   -   range {galaxy.fmt_ly(g.jump_range())}   -   "
                  + ("at peace" if not wars else f"at war with {wars} faction{'s' if wars > 1 else ''}"),
                  (22, 40), (170, 180, 215), shadow=True)
         c = g.campaign
-        if c:
+        if c and not self.panel_visible():                  # (with the panel open its campaign card shows the same)
             right = frontview.VIEW.right
             self.txt(scr, tiny, f"Campaign: {SECTORS[c['k']]['name']}  {c['chance'] * 100:.0f}% to win  ({fmt_time(max(0, c['dur'] - c['t']))} left)",
                      (right, 14), (255, 175, 150), "topright", True)
@@ -1117,8 +1137,7 @@ class App:
                 ang = arm * math.pi + t * 3.6 + (self.t * 0.6 if opened else 0)
                 pts.append((gx + math.cos(ang) * (2 + 13 * t), STRIP_Y + math.sin(ang) * (2 + 13 * t)))
             pygame.draw.lines(scr, col, False, pts, 2)
-        if opened and g.campaign is None and any(g.can_attack(k) and win_chance(g.fleet_power(), g.sector_power(k)) >= 0.8
-                                                  for k in g.frontier()):
+        if opened and g.attack_ready():
             scr.blit(glow(8, (255, 200, 60)), (gx + 8, STRIP_Y - 24), special_flags=ADD)
             pygame.draw.circle(scr, (255, 220, 90), (gx + 15, STRIP_Y - 15), 3)
         if grect.collidepoint(self.mouse) and self.mouse[0] < PANEL.x - 10:
@@ -1159,7 +1178,7 @@ class App:
         if k < 0:
             if g.galaxy_open:
                 lines.append(("Galaxy map", (130, 170, 255)))
-                lines.append((f"Fleet power {fmt(g.fleet_power())}   {len(g.conquered) - 1}/{NSEC - 1} sectors", (225, 225, 240)))
+                lines.append((f"Fleet power {fmt(g.fleet_power())}   {len(g.conquered) - 1:,} systems held", (225, 225, 240)))
                 lines.append(("Click to " + ("return to the solar system" if self.view == "galaxy" else "open the map"),
                               (255, 215, 110)))
             else:
@@ -1280,9 +1299,7 @@ class App:
         if k == T_PLANETS:
             return any(g.can_unlock(i) for i in range(1, NSITE))
         if k == T_GALAXY:
-            fp = g.fleet_power()
-            return g.galaxy_open and g.campaign is None and any(
-                win_chance(fp, g.sector_power(c)) >= 0.8 for c in g.frontier())
+            return g.attack_ready()
         if k == T_TECH:
             return any(t[0] not in g.techs and all(q in g.techs for q in t[3]) and g.science >= g.tech_cost(t[0]) for t in TECHS)
         if k == T_QUESTS:
@@ -1616,33 +1633,68 @@ class App:
         if any(not r["win"] for r in self.raiders):
             scr.blit(glow(80, (90, 20, 10)), (CX - 80, CY - 80), special_flags=ADD)
 
+    GAL_MODES = ["Strongest you can beat", "Easiest", "Famous places"]
+
+    def gal_list(self, mode):
+        """Up to ten systems for the target browser of the Galaxy tab, by mode (cached for half a second)."""
+        g = self.g
+        key = (mode, g._targets_key, round(math.log10(max(g.fleet_power(), 1.0)) * 8))
+        if self._gal_cache.get("key") == key and self.t - self._gal_cache["t"] < 0.5:
+            return self._gal_cache["rows"]
+        fp = g.fleet_power()
+        tg = g.targets()
+        if mode == 0:
+            ok = [k for k in tg if win_chance(fp, g.sector_power(k)) >= 0.5]
+            rows = sorted(ok, key=lambda k: -SECTORS[k]["lp"])[:10]
+        elif mode == 1:
+            rows = sorted(tg, key=lambda k: SECTORS[k]["lp"])[:10]
+        else:
+            rows = [k for k in galaxy.LANDMARK_IDS if k not in g.conquered][:10]
+            rows = sorted(rows, key=lambda k: (k not in g.targets_set(), SECTORS[k]["d"]))[:10]
+        self._gal_cache = dict(key=key, t=self.t, rows=rows)
+        return rows
+
     def draw_galaxy_tab(self, scr, fonts, y):
         big, med, sm, tiny = fonts
         g = self.g
         if not g.galaxy_open:
             self.txt(scr, big, "The galaxy awaits", (PANEL.x + 8, y))
-            for i, line in enumerate(["Unlock Mars to open the galaxy map. Beyond the solar system lie",
-                                      "15 sectors held by hostile factions. Liberate them with your fleet",
-                                      "to claim permanent bonuses - but watch out for enemy raids."]):
+            for i, line in enumerate(["Unlock Mars to open the galaxy map: the real Milky Way, with thousands of star",
+                                      "systems held by hostile factions. Liberate them with your fleet - you can jump",
+                                      "to any system within range of one you hold - and claim permanent bonuses."]):
                 self.txt(scr, sm, line, (PANEL.x + 8, y + 46 + i * 22), (170, 176, 205))
             return y + 140
         fp = g.fleet_power()
         self.txt(scr, med, f"Fleet power  {fmt(fp)}", (PANEL.x + 4, y), (255, 215, 140))
-        self.txt(scr, sm, f"{len(g.conquered) - 1}/{NSEC - 1} sectors liberated", (PANEL.right - 4, y + 2), (130, 255, 150), "topright")
+        self.txt(scr, sm, f"{len(g.conquered) - 1:,} systems held", (PANEL.right - 4, y + 2), (130, 255, 150), "topright")
         y += 26
-        self.txt(scr, tiny, f"Battles {g.battles_won} won / {g.battles_lost} lost   -   Raids {g.raids_repelled} repelled / "
+        self.txt(scr, tiny, f"Battles {g.battles_won:,} won / {g.battles_lost:,} lost   -   Raids {g.raids_repelled} repelled / "
                  f"{g.raids_lost} lost   -   Press G to toggle the map", (PANEL.x + 4, y), (150, 158, 190))
         y += 20
         r = pygame.Rect(PANEL.x, y, PANEL.w, 32)
         self.button(scr, r, "Back to the solar system" if self.view == "galaxy" else "Open the galaxy map", sm,
                     lambda: self.strip_click(-1), panel=True, col=(60, 84, 150))
         y += 38
-        half = (PANEL.w - 8) // 2
-        self.button(scr, pygame.Rect(PANEL.x, y, half, 30), "Close look at the front", sm, self.close_look, panel=True,
-                    col=(150, 74, 74))
-        self.button(scr, pygame.Rect(PANEL.x + half + 8, y, half, 30), "Zoom out: whole galaxy", sm, self.zoom_out, panel=True,
+        third = (PANEL.w - 16) // 3
+        self.button(scr, pygame.Rect(PANEL.x, y, third, 30), "Close look", sm, self.close_look, panel=True, col=(150, 74, 74))
+        self.button(scr, pygame.Rect(PANEL.x + third + 8, y, third, 30), "Home", sm, self.go_home, panel=True, col=(50, 100, 110))
+        self.button(scr, pygame.Rect(PANEL.x + 2 * (third + 8), y, third, 30), "Whole galaxy", sm, self.zoom_out, panel=True,
                     col=(50, 70, 110))
         y += 40
+        # ---- the jump drive: how far you can reach
+        L, mx = g.armory[core.JUMP], ARMORY[core.JUMP][3]
+        rr = pygame.Rect(PANEL.x, y, PANEL.w, 62)
+        if L >= mx:
+            self.row(scr, fonts, rr, f"Jump range  {galaxy.fmt_ly(g.jump_range())}", "Jump Drive at its maximum: you can reach any system",
+                     "MAX", None, True, (255, 220, 100), None, glyph="J")
+        else:
+            cr, sci = armory_cost(core.JUMP, L)
+            ok = g.credits >= cr and g.science >= sci
+            self.row(scr, fonts, rr, f"Jump range  {galaxy.fmt_ly(g.jump_range())}",
+                     f"Attack anything in range. The next level reaches {galaxy.fmt_ly(galaxy.jump_range(L + 1))}.",
+                     f"Lv {L}/{mx}", f"{fmt(cr)} cr + {fmt(sci)} sci", ok, (120, 190, 255),
+                     (lambda: g.buy_armory(core.JUMP)) if ok else None, glyph="J")
+        y += 70
         if g.campaign:
             c = g.campaign
             sec = SECTORS[c["k"]]
@@ -1650,15 +1702,26 @@ class App:
             rr = pygame.Rect(PANEL.x, y, PANEL.w, 66)
             self.row(scr, fonts, rr, f"Campaign: {sec['name']}", f"{fmt_time(max(0, c['dur'] - c['t']))} left   -   "
                      f"{c['chance'] * 100:.0f}% to win   -   committed power {fmt(c['fp'])}", None, None, True,
-                     FACTIONS[sec["faction"]]["col"], None, frac=fr, icon=self.enemy_big[sec["faction"]])
+                     FACTIONS[sec["faction"]]["col"], (lambda k=c["k"]: self.select_sector(k)), frac=fr,
+                     icon=self.enemy_big[sec["faction"]])
             y += 74
+        if g.E["autowar"]:
+            on = g.auto_war
+            rr = pygame.Rect(PANEL.x, y, PANEL.w - 150, 52)
+            self.row(scr, fonts, rr, "Fleet Admiral: " + ("ON" if on else "OFF"),
+                     f"Attacks enemies at war with you by itself ({g.auto_odds * 100:.0f}%+ win chance)",
+                     None, None, True, (130, 220, 160) if on else (120, 130, 160), self.toggle_auto, glyph="A")
+            odds = {0.7: 0.85, 0.85: 0.95, 0.95: 0.7}.get(round(g.auto_odds, 2), 0.85)
+            self.button(scr, pygame.Rect(PANEL.right - 142, y, 142, 52), f"Odds {g.auto_odds * 100:.0f}%+", sm,
+                        lambda o=odds: setattr(g, "auto_odds", o), panel=True, col=(50, 70, 110))
+            y += 60
         # ---- Threat Director
         lvl = director.level(g)
         agg = director.aggression(g)
         at_peace = not director.war_fronts(g)
         tcol = (120, 220, 140) if at_peace else [(120, 220, 140), (190, 230, 120), (255, 215, 100), (255, 150, 90), (255, 90, 90)][lvl]
         tlines = []
-        if not g.frontier():
+        if not g.border():
             tlines.append(("No enemy territory borders yours.", (170, 176, 205)))
         elif at_peace:
             tlines.append(("Nobody is at war with you. Invade a faction - or wait: tension builds on your borders.", (170, 176, 205)))
@@ -1667,8 +1730,8 @@ class App:
         else:
             tlines.append(("Raids and counter-offensives come more often when your fleet or planets look weak.", (170, 176, 205)))
         rr = pygame.Rect(PANEL.x, y, PANEL.w, 84)
-        self.row(scr, fonts, rr, "Peace" if at_peace and g.frontier() else f"Threat level: {director.LEVELS[lvl]}",
-                 "No faction is at war with you" if at_peace and g.frontier() else "Enemy aggression", None, None, True, tcol, None,
+        self.row(scr, fonts, rr, "Peace" if at_peace and g.border() else f"Threat level: {director.LEVELS[lvl]}",
+                 "No faction is at war with you" if at_peace and g.border() else "Enemy aggression", None, None, True, tcol, None,
                  frac=None if at_peace else agg, glyph="!", lines=tlines)
         y += 92
         ilv = director.intel(g)
@@ -1698,8 +1761,7 @@ class App:
                      frac=inc["t"] / max(0.1, inc["eta"]), glyph="!")
             y += 84
         # ---- factions: war, truce or peace (tension)
-        facs = [f for f in FACTIONS if any(SECTORS[k]["faction"] == f and k not in g.conquered for k in range(1, NSEC))
-                and (f in g.war or g.truce.get(f, 0.0) > 0 or director.borders(g, f))]
+        facs = [f for f in FACTIONS if g.faction_left(f) > 0 and (f in g.war or g.truce.get(f, 0.0) > 0 or director.borders(g, f))]
         if facs:
             self.txt(scr, med, "Factions", (PANEL.x + 4, y), (255, 225, 140))
             y += 28
@@ -1732,36 +1794,45 @@ class App:
             rr = pygame.Rect(PANEL.x, y, PANEL.w, 36 + 15 * len(ll))
             self.row(scr, fonts, rr, "Recent enemy activity", "", None, None, True, (150, 160, 200), None, glyph="L", lines=ll)
             y += rr.h + 8
-        fr_list = g.frontier()
-        sel = self.sel_sector
-        if sel not in fr_list and sel not in g.conquered:
-            sel = min(fr_list) if fr_list else 1
-        k = sel
+        # ---- the selected system
+        k = self.sel_sector
+        if k not in g.conquered and not self.sector_known(k):
+            k = g.weakest_target() or 1
         sec = SECTORS[k]
         fac = FACTIONS[sec["faction"]]
         ep = g.sector_power(k)
         ch = win_chance(fp, ep)
-        good, bad = (130, 255, 150), (230, 130, 130)
         rr = pygame.Rect(PANEL.x, y, PANEL.w, 126)
         y += 134
+        loc = f"{galaxy.fmt_ly(sec['d'])} from the Sun  -  {sec['region']}, {sec['con']}"
         if k in g.conquered:
             self.row(scr, fonts, rr, f"{sec['name']}  -  {fac['name']}", f"Reward: {sec['desc']}", "LIBERATED", None, True,
-                     fac["col"], None, icon=self.enemy_big[sec["faction"]],
-                     lines=[("This sector is yours.", (140, 205, 255))])
-        elif k not in fr_list:
-            self.row(scr, fonts, rr, "Unscouted sector", "Liberate a neighbouring sector first.", None, None, False,
-                     (62, 66, 92), None, dim=True, icon=self.enemy_big[sec["faction"]])
+                     fac["col"], (lambda k=k: self.fv.focus(k)), icon=self.enemy_big[sec["faction"]],
+                     lines=[(f"{sec['kind']}  -  this system is yours", (140, 205, 255)), (loc, (150, 158, 190))])
+        elif not g.scanned(k):
+            self.row(scr, fonts, rr, sec["name"], f"{sec['kind']}  -  {loc}", None, None, False,
+                     (62, 66, 92), (lambda k=k: self.fv.focus(k)), dim=True, icon=self.enemy_big[sec["faction"]],
+                     lines=[("Out of sensor range: hold a system closer, or upgrade the Jump Drive.", (150, 158, 190)),
+                            (f"Reward: {sec['desc']}", (120, 128, 160))])
         else:
+            tgt = k in g.targets_set()
             can = g.can_attack(k) and fp > 0
-            lines = [(f"Enemy power {fmt(ep)}    your fleet {fmt(fp)}", (205, 210, 230)),
-                     (f"Win chance {ch * 100:.0f}%    campaign time {fmt_time(g.campaign_duration(k))}", self.chance_color(ch)),
-                     (f"Losses: victory {g.loss_fraction(core.WIN_LOSSES) * 100:.1f}% of ships, defeat "
-                      f"{g.loss_fraction(core.LOSE_LOSSES) * 100:.1f}%", (170, 176, 205))]
-            at_war = sec["faction"] in g.war
-            if not at_war:
+            lines = [(f"{sec['kind']}  -  {loc}", (150, 158, 190)),
+                     (f"Enemy power {fmt(ep)}    your fleet {fmt(fp)}", (205, 210, 230)),
+                     (f"Win chance {ch * 100:.0f}%    campaign time {fmt_time(g.campaign_duration(k))}", self.chance_color(ch))]
+            if not tgt:
+                _, d = g.source_of(k)
+                lines.insert(0, (f"Out of range: {galaxy.fmt_ly(d)} from your nearest system (range {galaxy.fmt_ly(g.jump_range())})",
+                                 (255, 190, 120)))
+            elif sec["faction"] not in g.war:
                 lines.append(("Invading starts a WAR: their fleets will raid you and counter-attack.", (255, 170, 130)))
+            rr.h = 48 + 15 * len(lines) + 8
+            y += rr.h - 126
+            at_war = sec["faction"] in g.war
             if g.campaign is not None:
                 label = "BUSY"
+            elif not tgt:
+                label = "OUT OF RANGE"
             elif at_war:
                 label = "ATTACK"
             else:
@@ -1771,10 +1842,11 @@ class App:
                      icon=self.enemy_big[sec["faction"]], lines=lines)
         rl, shr = front.report(g, k)
         rr = pygame.Rect(PANEL.x, y, PANEL.w, 56 + 15 * len(rl) + (8 if shr is not None else 0))
-        self.row(scr, fonts, rr, f"Front report: {sec['name']}", "Where the battle line sits and how safe the sector is",
+        self.row(scr, fonts, rr, f"Front report: {sec['name']}", "Where the battle line sits and how safe the system is",
                  None, None, True, (120, 190, 255), lambda k=k: (setattr(self, "sel_sector", k), self.close_look()),
                  frac=shr, glyph="F", lines=rl)
         y += rr.h + 8
+        # ---- armory
         self.txt(scr, med, "Armory", (PANEL.x + 4, y), (255, 225, 140))
         y += 28
         for i, (key, name, desc, mx, base) in enumerate(ARMORY):
@@ -1789,22 +1861,38 @@ class App:
             self.row(scr, fonts, rr, f"{name}  Lv {L}/{mx}", desc, f"{fmt(cr)} cr + {fmt(sci)} sci", None, ok,
                      (230, 150, 110), (lambda i=i: g.buy_armory(i)), glyph=name[0])
         y += 6
-        self.txt(scr, med, "Sectors", (PANEL.x + 4, y), (255, 225, 140))
-        y += 28
-        for k in range(1, NSEC):
+        # ---- the systems you can attack
+        self.txt(scr, med, "Targets", (PANEL.x + 4, y), (255, 225, 140))
+        n_t = len(g.targets())
+        self.txt(scr, tiny, f"{n_t:,} in range   -   {len(g.conquered) - 1:,} held   -   {NSEC - 1:,} in the galaxy",
+                 (PANEL.right - 4, y + 8), (150, 158, 190), "topright")
+        y += 30
+        qw = (PANEL.w - 16) // len(self.GAL_MODES)
+        for i, label in enumerate(self.GAL_MODES):
+            self.button(scr, pygame.Rect(PANEL.x + i * (qw + 8), y, qw, 28), label, tiny,
+                        (lambda i=i: setattr(self, "gal_mode", i)), panel=True,
+                        col=(70, 100, 170) if i == self.gal_mode else (36, 44, 76))
+        y += 36
+        rows = self.gal_list(self.gal_mode)
+        if not rows:
+            self.txt(scr, sm, "Nothing here yet: upgrade the Jump Drive or liberate more systems.", (PANEL.x + 8, y), (150, 158, 190))
+            y += 30
+        for k in rows:
             rr = pygame.Rect(PANEL.x, y, PANEL.w, 52)
             y += 58
             sec = SECTORS[k]
             fac = FACTIONS[sec["faction"]]
-            if k in g.conquered:
-                self.row(scr, fonts, rr, sec["name"], sec["desc"], "LIBERATED", None, True, (120, 190, 255),
-                         (lambda k=k: self.select_sector(k)), icon=self.enemy_small[sec["faction"]])
-            elif k in fr_list:
+            if k in g.targets_set() or g.scanned(k):
                 c2 = win_chance(fp, g.sector_power(k))
-                self.row(scr, fonts, rr, sec["name"], f"{fac['name']}  -  reward: {sec['desc']}", f"{c2 * 100:.0f}%", None,
-                         True, fac["col"], (lambda k=k: self.select_sector(k)), icon=self.enemy_small[sec["faction"]])
+                ok = k in g.targets_set()
+                _, d = g.source_of(k)
+                self.row(scr, fonts, rr, sec["name"], f"{sec['kind']}  -  {fac['name']}  -  {galaxy.fmt_ly(d)} away  -  {sec['desc']}"[:80],
+                         f"{c2 * 100:.0f}%", None, ok, fac["col"], (lambda k=k: self.select_sector(k)),
+                         icon=self.enemy_small[sec["faction"]])
             else:
-                self.row(scr, fonts, rr, "???", "Not scouted yet", None, None, False, (62, 66, 92), None, dim=True)
+                self.row(scr, fonts, rr, sec["name"], f"{sec['kind']}  -  {galaxy.fmt_ly(sec['d'])} from the Sun  -  out of range",
+                         None, None, False, (62, 66, 92), (lambda k=k: self.select_sector(k)), dim=True,
+                         icon=self.enemy_small[sec["faction"]])
         return y
 
     # ---------------- ascension -----------------
@@ -1823,12 +1911,13 @@ class App:
             self.txt(scr, tiny, l, (x, y + i * 17), (175, 180, 205))
         y += 62
         can = g.can_ascend()
-        boss = SECTORS[NSEC - 1]
-        done = NSEC - 1 in g.conquered
+        boss = SECTORS[core.BOSS]
+        done = core.BOSS in g.conquered
         rr = pygame.Rect(PANEL.x, y, PANEL.w, 62)
         self.row(scr, fonts, rr, "The Devourer  -  The Void Throne",
-                 "Defeated! You may Ascend whenever you like." if done else "Liberate sectors until the Void Throne is yours.",
-                 "DEFEATED" if done else f"{len(g.conquered) - 1}/{NSEC - 1} sectors", None, done, FACTIONS["devourer"]["col"],
+                 "Defeated! You may Ascend whenever you like." if done else
+                 f"It sits at the Galactic Centre, {galaxy.fmt_ly(boss['d'])} from the Sun. Fight your way there.",
+                 "DEFEATED" if done else f"{len(g.conquered) - 1:,} systems held", None, done, FACTIONS["devourer"]["col"],
                  None, icon=self.enemy_big["devourer"])
         y += 72
         self.txt(scr, med, f"Stardust: {g.stardust:,} to spend", (x, y), gold)
@@ -1990,13 +2079,14 @@ class App:
             ("Planets unlocked", f"{g.n_unlocked}/{NSITE}"),
             ("Planets visited", f"{len(g.visited)}/{NSITE}"),
             ("Trips between planets", f"{g.travels:,}"),
-            ("Sectors liberated", f"{len(g.conquered) - 1}/{NSEC - 1}"),
+            ("Systems held", f"{len(g.conquered) - 1:,} of {NSEC - 1:,}"),
+            ("Jump range", galaxy.fmt_ly(g.jump_range())),
             ("Battles won / lost", f"{g.battles_won:,} / {g.battles_lost:,}"),
             ("Raids repelled / lost", f"{g.raids_repelled:,} / {g.raids_lost:,}"),
             ("Big raids repelled (regional / system)", f"{g.tier_wins[1]:,} / {g.tier_wins[2]:,}"),
             ("Counter-offensives held", f"{g.offensives_repelled:,}"),
             ("Wars declared / suffered / peace treaties", f"{g.wars_declared} / {g.wars_suffered} / {g.peaces_made}"),
-            ("Sectors lost / retaken", f"{g.sectors_lost:,} / {g.sectors_retaken:,}"),
+            ("Systems lost / retaken", f"{g.sectors_lost:,} / {g.sectors_retaken:,}"),
             ("Fleet power", fmt(g.fleet_power())),
             ("Colony levels built", f"{g.bldg:,}"),
             ("Megaprojects", f"{len(g.projects)}/{NSITE}"),
@@ -2454,9 +2544,42 @@ def check_ship_art(app):
         shipart.beam(canvas, style, (100, 100), (180, 150), (255, 200, 120), 1.5, 3)
 
 
+def check_galaxy():
+    """The Milky Way's data and the reach map agree with a brute-force check."""
+    N = galaxy.N
+    held = {0, 3, 5, 9, 14}
+    inc = galaxy.Reach()
+    inc.set({0}, 9.0)
+    for k in (3, 5, 9, 14):
+        inc.add(k)
+    full = galaxy.Reach()
+    full.set(held, 9.0)
+    assert bytes(inc.reach) == bytes(full.reach) and bytes(inc.scan) == bytes(full.scan), "incremental reach differs"
+    brute = {i for i in range(N) if any(galaxy.dist(h, i) <= 9.0 for h in held)}
+    assert {i for i in range(N) if full.reach[i]} == brute, "reach differs from brute force"
+    assert abs(SECTORS[galaxy.BY_NAME["Alpha Centauri"]]["d"] - 4.4) < 0.3 and abs(SECTORS[galaxy.BY_NAME["Sirius"]]["d"] - 8.6) < 0.3
+    assert 450 < SECTORS[galaxy.BY_NAME["Betelgeuse"]]["d"] < 650                  # real distances are kept
+    assert SECTORS[galaxy.BOSS]["name"] == "The Void Throne" and abs(SECTORS[galaxy.BOSS]["d"] - galaxy.GC_DIST) < 1
+    assert N > 5000 and len({s["name"] for s in SECTORS}) == N, "system names are not unique"
+    assert all(s["faction"] in FACTIONS and s["fx"] is not None and 2 < s["lp"] < 15 for s in SECTORS)
+    assert all(0 <= n < N and n != k for k in range(N) for n in galaxy.LINKS[k]), "bad lane"
+    assert all(SECTORS[galaxy.BY_NAME[nm]]["lp"] == galaxy.ORIGINAL_LP[nm] for nm in galaxy.ORIGINAL_LP)
+    for r in range(23):                                                              # every jump drive level has targets from Sol
+        assert core.ARMORY[core.JUMP][3] == 22
+    assert galaxy.jump_range(22) > galaxy.GC_DIST + 5000, "the last jump drive level must cross the galaxy"
+    # the game's own view of it: a campaign needs the target in range of a held system
+    g = core.Game(load=False, sim=True)
+    assert g.targets() and all(galaxy.dist(0, k) <= g.jump_range() + 1e-6 for k in g.targets())
+    far = galaxy.BY_NAME["Betelgeuse"]
+    assert not g.can_attack(far), "Betelgeuse should be out of range at jump level 0"
+    g.armory[core.JUMP] = 15
+    assert far in g.targets_set() and 0 in g.sync_reach().held
+
+
 def selftest_step(app, g, frames, shot):
     if frames == 1:
         check_ship_art(app)
+        check_galaxy()
     if frames == 3:
         for _ in range(25):
             app.space_click()
@@ -2578,19 +2701,22 @@ def selftest_step(app, g, frames, shot):
     if frames == 66:
         g.war["pirates"]["since"] = g.play_time - 700                 # old enough to sue for peace
         assert director.can_sue(g, "pirates")[0] is False             # ...but the campaign against them is still running
-        app.attack(4)                                                 # the first click only asks for confirmation
-        assert "hive" not in g.war and app.war_confirm > 0
+        g.armory[core.JUMP] = 14                                      # a range of ~1,100 ly reaches other factions' systems
+        other = next(k for k in g.targets() if SECTORS[k]["faction"] not in g.war)
+        app.attack(other)                                             # the first click only asks for confirmation
+        assert SECTORS[other]["faction"] not in g.war and app.war_confirm > 0
     if frames == 67:
         fv = app.fv                                  # zoom, pan and click the galaxy view
         fv.focus(3, snap=True)
-        assert fv.zt >= 2.0 and "closeup" in g.flags
+        assert fv.zt >= 2.0 and "closeup" in g.flags and fv.s > fv.fit_s
         fv.zoom_at((300, 450), 1.2)
         fv.down((300, 450)); fv.move((330, 470)); fv.up((330, 470))
         for key in (pygame.K_LEFT, pygame.K_PLUS, pygame.K_MINUS):
             assert fv.key(key)
         fv.focus(3, snap=True)
+        app.draw(app_scr(), app_fonts())                              # (clicks use where the systems were drawn)
         fv.click(fv.pos(3))
-        assert app.sel_sector == 3
+        assert app.sel_sector == 3, app.sel_sector
         assert all(frontview.hrand(i, 7, 3) < 1.0 for i in range(300000))    # it once returned exactly 1.0 and crashed the close-up
     if frames == 68:
         shot("front")
