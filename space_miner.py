@@ -21,6 +21,7 @@ import pygame
 import core
 import gamelog
 import resources
+import ships
 import devtools
 import director
 import front
@@ -126,8 +127,7 @@ class App:
             d = ic.copy()
             d.fill((24, 28, 46, 255), special_flags=pygame.BLEND_RGBA_MULT)
             self.planet_dark.append(d)
-        self.ship_sprites = [gfx.make_ship(i, SHIPS[i][3], 26 + i * 2) for i in range(NSH)]
-        self.ship_icons = [gfx.make_ship(i, SHIPS[i][3], 46) for i in range(NSH)]
+        self.ship_cache = {}                 # (planet, class, size) -> sprite, made on first use
         self.ship_rot = {}
         self.ast_sprites = {}
         self.crate_spr = gfx.make_crate()
@@ -153,6 +153,23 @@ class App:
                        rng.uniform(0, math.tau), rng.choice([(150, 170, 255), (255, 235, 200), (200, 220, 255)])]
                       for _ in range(190)]
         self.streaks = [(rng.uniform(0, math.tau), rng.uniform(0.5, 1.4)) for _ in range(110)]
+
+    def ship_color(self, p, i):
+        """Tier colour, tinted towards the planet's own colour (Earth keeps the classic colours)."""
+        t = ships.tint(p)
+        return SHIPS[i][3] if t is None else lerp_c(SHIPS[i][3], t, 0.45)
+
+    def ship_sprite(self, p, i, icon=False):
+        """The sprite of ship class i on planet p (every planet's fleet looks different)."""
+        size = 46 if icon else 26 + i * 2
+        key = (p, i, size)
+        spr = self.ship_cache.get(key)
+        if spr is None:
+            spr = self.ship_cache[key] = gfx.make_ship(i, self.ship_color(p, i), size, ships.style(p))
+        return spr
+
+    def ship_icon(self, p, i):
+        return self.ship_sprite(p, i, True)
 
     def get_ast_sprites(self, p):
         if p not in self.ast_sprites:
@@ -738,10 +755,10 @@ class App:
             by = y - math.sin(ta) * tc * 7
             scr.blit(glow(7 - tc, scale_c(col, 0.55 / tc)), (bx - (7 - tc), by - (7 - tc)), special_flags=ADD)
         q = int(round(-math.degrees(ta) / 10)) % 36
-        key = (i, q)
+        key = (g.cur, i, q)
         spr = self.ship_rot.get(key)
         if spr is None:
-            spr = self.ship_rot[key] = pygame.transform.rotate(self.ship_sprites[i], q * 10)
+            spr = self.ship_rot[key] = pygame.transform.rotate(self.ship_sprite(g.cur, i), q * 10)
         scr.blit(spr, spr.get_rect(center=(x, y)))
 
     def draw_crate(self, scr):
@@ -1159,7 +1176,7 @@ class App:
             if i >= shown:
                 if i == shown and r.colliderect(PANEL):
                     pygame.draw.rect(scr, (22, 24, 42), r, border_radius=9)
-                    dark = self.ship_icons[i].copy()
+                    dark = self.ship_icon(p, i).copy()
                     dark.fill((22, 26, 40, 255), special_flags=pygame.BLEND_RGBA_MULT)
                     scr.blit(dark, dark.get_rect(center=(r.x + 36, r.centery)))
                     self.txt(scr, med, "???", (r.x + 66, r.y + 18), (90, 95, 120))
@@ -1168,8 +1185,8 @@ class App:
             cost = g.ship_cost(p, i, n)
             ok = g.ore[p] >= cost
             per = rate * SC[p] * g.s_gm[p][i] * g.G
-            self.row(scr, fonts, r, name, f"{fmt(per, 2)} {SITES[p]['ore']}/s each", None, None, ok, col,
-                     lambda i=i: g.buy_ship(p, i), icon=self.ship_icons[i])
+            self.row(scr, fonts, r, ships.name(p, i), f"{fmt(per, 2)} {SITES[p]['ore']}/s each  -  {ships.blurb(p, i)}", None, None, ok,
+                     col, lambda i=i: g.buy_ship(p, i), icon=self.ship_icon(p, i))
             if r.colliderect(PANEL):
                 self.txt(scr, big, str(g.owned[p][i]), (r.right - 12, r.y + 0), (255, 255, 255), "topright")
                 self.txt(scr, sm, f"x{n}: {fmt(cost)}", (r.right - 12, r.bottom - 8),
@@ -1199,8 +1216,9 @@ class App:
             y += 68
             cost = u["cost"] * SC[p]
             ok = g.ore[p] >= cost
-            kw = dict(icon=self.ship_icons[u["arg"][0]]) if u["kind"] == "gen" else dict(glyph=glyphs[u["kind"]])
-            self.row(scr, fonts, r, u["name"], u["desc"], fmt(cost), None, ok, (200, 160, 255),
+            kw = dict(icon=self.ship_icon(p, u["arg"][0])) if u["kind"] == "gen" else dict(glyph=glyphs[u["kind"]])
+            uname, udesc = core.upgrade_text(u, p)
+            self.row(scr, fonts, r, uname, udesc, fmt(cost), None, ok, (200, 160, 255),
                      lambda uid=u["id"]: g.buy_upgrade(p, uid), **kw)
         return y
 
