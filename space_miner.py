@@ -2221,6 +2221,7 @@ def selftest_step(app, g, frames, shot):
         fv.focus(3, snap=True)
         fv.click(fv.pos(3))
         assert app.sel_sector == 3
+        assert all(frontview.hrand(i, 7, 3) < 1.0 for i in range(300000))    # it once returned exactly 1.0 and crashed the close-up
     if frames == 68:
         shot("front")
         app.fv.fit()

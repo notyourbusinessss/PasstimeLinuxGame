@@ -18,4 +18,5 @@ The first release.
 - The DejaVu Sans font is bundled, so the game looks the same on every system.
 - `--version`, `--help`, `--dev` (cheats, terminal only) and `--selftest` (uses a temporary save).
 - **Logging and crash reports**: a rotating log (`~/.local/state/space-miner/space-miner.log`), a crash report file, a stack dump for native crashes, and errors in a single frame are logged without ending your game. The Stats page has an *Open log folder* button.
+- Fixed a crash in the frontline close-up (a random number could land exactly on the end of a list, about once in 65,000 laser shots).
 - Save safety: a rolling backup, automatic restore of a damaged save, and an unreadable save is copied aside instead of being overwritten.
