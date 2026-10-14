@@ -381,3 +381,67 @@ def make_panel_bg(w, h):
     out.blit(s, (0, 0))
     out.blit(m, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
     return out
+
+
+def make_enemy(faction, size=26):
+    """Hostile ship sprite for each enemy faction (pointing right, like the player's ships)."""
+    ss = 4
+    S = size * ss
+    c = S / 2
+    R = S * 0.42
+    surf = pygame.Surface((S, S), pygame.SRCALPHA)
+    cols = {"pirates": (235, 90, 80), "hive": (130, 220, 90), "crystal": (110, 220, 255),
+            "iron": (225, 150, 80), "void": (175, 110, 255), "devourer": (255, 80, 200)}
+    col = cols.get(faction, (230, 90, 90))
+    dark = lerp_c((14, 12, 20), col, 0.28)
+    edge = lerp_c(col, (255, 255, 255), 0.3)
+    hot = lerp_c(col, (255, 255, 255), 0.85)
+    lw = max(2, ss)
+
+    def P(pts):
+        return [(c + x * R, c + y * R) for x, y in pts]
+
+    def poly(pts, fill, out=edge):
+        pygame.draw.polygon(surf, fill, P(pts))
+        if out:
+            pygame.draw.polygon(surf, out, P(pts), lw)
+
+    def dot(x, y, rad, color):
+        pygame.draw.circle(surf, color, (c + x * R, c + y * R), max(1, rad * R))
+
+    if faction == "pirates":        # jagged dart with side spikes
+        poly([(1, 0), (.2, .35), (-.2, .9), (-.35, .3), (-.8, .2), (-.8, -.2), (-.35, -.3), (-.2, -.9), (.2, -.35)], dark)
+        dot(.35, 0, .13, hot)
+    elif faction == "hive":         # bug: round body, mandibles
+        pygame.draw.ellipse(surf, dark, (c - .75 * R, c - .45 * R, 1.3 * R, .9 * R))
+        pygame.draw.ellipse(surf, edge, (c - .75 * R, c - .45 * R, 1.3 * R, .9 * R), lw)
+        poly([(.55, .15), (1, .5), (.8, .05)], dark)
+        poly([(.55, -.15), (1, -.5), (.8, -.05)], dark)
+        for dy in (-.5, .5):
+            pygame.draw.line(surf, edge, (c - .1 * R, c + dy * .45 * R), (c - .35 * R, c + dy * R), lw)
+        dot(.3, 0, .12, hot)
+    elif faction == "crystal":      # shard cluster
+        poly([(1, 0), (0, .5), (-.6, .2), (-.9, 0), (-.6, -.2), (0, -.5)], dark)
+        poly([(.2, .3), (.1, .95), (-.3, .4)], dark)
+        poly([(.2, -.3), (.1, -.95), (-.3, -.4)], dark)
+        dot(.1, 0, .12, hot)
+    elif faction == "iron":         # blocky battleship
+        poly([(1, 0), (.5, .35), (-.9, .45), (-.9, -.45), (.5, -.35)], dark)
+        for x in (-.55, -.1, .35):
+            pygame.draw.rect(surf, edge, (c + x * R, c - .12 * R, .24 * R, .24 * R))
+        dot(.8, 0, .1, hot)
+    elif faction == "void":         # swirling crescent
+        pygame.draw.arc(surf, edge, (c - R, c - R, 2 * R, 2 * R), 1.0, 5.3, lw * 2)
+        pygame.draw.arc(surf, dark, (c - .65 * R, c - .65 * R, 1.3 * R, 1.3 * R), 0.5, 5.8, lw * 2)
+        dot(0, 0, .22, hot)
+    else:                           # devourer: a maw
+        pygame.draw.circle(surf, dark, (c, c), .85 * R)
+        pygame.draw.circle(surf, edge, (c, c), .85 * R, lw)
+        for i in range(8):
+            a = i * math.tau / 8
+            x1, y1 = c + math.cos(a) * .85 * R, c + math.sin(a) * .85 * R
+            x2, y2 = c + math.cos(a + .2) * .45 * R, c + math.sin(a + .2) * .45 * R
+            x3, y3 = c + math.cos(a + .4) * .85 * R, c + math.sin(a + .4) * .85 * R
+            pygame.draw.polygon(surf, hot, [(x1, y1), (x2, y2), (x3, y3)])
+        dot(0, 0, .2, (10, 0, 12))
+    return pygame.transform.smoothscale(surf, (size, size))

@@ -2,6 +2,7 @@
 """Headless balancing bot:  python3 sim.py [hours] [check_interval_seconds]
 Plays Space Miner with a reasonable greedy strategy and prints a pacing timeline."""
 import math
+import random
 import sys
 
 import core
@@ -69,6 +70,7 @@ def reserves(g):
 
 
 WARP_FRAC = 1.0
+BOT_CHANCE = 0.85
 
 
 class Bot:
@@ -80,6 +82,32 @@ class Bot:
         self.click_site = 0
         self.last_warp = 0.0
         self.log = []
+        self.seen_conq = 1
+        self.conq_logged = {0}
+
+    def galaxy(self):
+        g = self.g
+        if not g.galaxy_open:
+            return
+        # armory: weapons / engines / armor when they cost a small slice of credits and science
+        for i in sorted(range(len(core.ARMORY)), key=lambda i: core.armory_cost(i, g.armory[i])[0]):
+            if i == 3 or g.armory[i] >= core.ARMORY[i][3]:
+                continue
+            cr, sci = core.armory_cost(i, g.armory[i])
+            res, cres = reserves(g)
+            if cr <= 0.3 * max(0.0, g.credits - cres) and sci <= 0.3 * g.science:
+                g.buy_armory(i)
+        if g.campaign is None:
+            options = [k for k in g.frontier()
+                       if core.win_chance(g.fleet_power(), g.sector_power(k)) >= BOT_CHANCE]
+            if options:
+                g.start_campaign(min(options))
+        while self.seen_conq < len(g.conquered):
+            self.seen_conq += 1
+        new = sorted(g.conquered - self.conq_logged)
+        for k in new:
+            self.log.append((g.t, f"conquer {core.SECTORS[k]['name']}"))
+        self.conq_logged |= set(new)
 
     def click(self, dt):
         g = self.g
@@ -145,6 +173,7 @@ class Bot:
             if not changed:
                 break
         g.buy_mode = 1
+        self.galaxy()
         # warp policy
         gain = g.warp_gain()
         if gain >= max(1, int(WARP_FRAC * g.dm)) and g.t - self.last_warp > 2700:
@@ -169,6 +198,7 @@ def main():
     core.apply_tune(**{k: float(v) for k, v in kw.items()})
     global WARP_FRAC
     WARP_FRAC = warp_frac
+    random.seed(1)
     g = core.Game(load=False, sim=True)
     bot = Bot(g)
     t_end = hours * 3600
@@ -183,14 +213,14 @@ def main():
             t, msg = bot.log[seen]
             if not quiet:
                 print(f"  [{fmt_t(t)}] {msg}")
-            elif msg.startswith("unlock") or msg.startswith("project"):
+            elif msg.startswith(("unlock", "project", "conquer")):
                 print(f"  [{fmt_t(t)}] {msg}")
             seen += 1
         if g.t >= next_report and not quiet:
             next_report += 3600 * 4
             print(f"{fmt_t(g.t)} planets={g.n_unlocked:2d} techs={len(g.techs):2d} DM={g.dm:<7d} warps={g.warps:<3d} "
                   f"ops(norm)={fmt(g.norm_ops):>8} cred/s={fmt(g.cred_ops):>8} sci/s={fmt(g.sci_ops):>8} "
-                  f"G={fmt(g.G)} ships={g.total_ships()}")
+                  f"G={fmt(g.G)} ships={g.total_ships()} FP={fmt(g.fleet_power())} sectors={len(g.conquered) - 1}")
         if g.n_unlocked == NSITE and len(g.techs) == len(TECHS) and g.warps > 3 and g.t > 3600 * 20:
             pass
     print(f"END {fmt_t(g.t)} planets={g.n_unlocked} techs={len(g.techs)}/{len(TECHS)} DM={g.dm} warps={g.warps} "
