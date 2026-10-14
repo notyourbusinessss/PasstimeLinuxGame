@@ -20,7 +20,8 @@ import gfx
 import sounds
 from core import (BMAX, BUILDINGS, NB, NSH, NSITE, PERKS, PROJECTS, SC, SHIPS, SITES, TECHS, TECH_BY_ID,
                   UPGRADES, ACHIEVEMENTS, ACH_BY_ID, ACH_CATS, TIER_BONUS, TIER_NAMES, QUEST_TXT, fmt, geo_cost,
-                  SECTORS, NSEC, SECTOR_EDGES, SECTOR_LINKS, FACTIONS, ARMORY, armory_cost, win_chance)
+                  SECTORS, NSEC, SECTOR_EDGES, SECTOR_LINKS, FACTIONS, ARMORY, armory_cost, win_chance,
+                  STARDUST_PERKS, sd_bonus)
 from gfx import glow, scale_c, lerp_c
 
 W, H = 1280, 720
@@ -73,6 +74,10 @@ class App:
         self.sel_sector = 1
         self.raiders = []
         self.hover_sector = None
+        self.warp_view = "warp"
+        self.ascend_fx = 0.0
+        self.ascend_confirm = 0.0
+        self.ascend_cycle = 1
         self.ach_new = False
         self.awards_cat = "All"
         self.fps = 0.0
@@ -281,6 +286,16 @@ class App:
         self.warp_confirm = 0
         g.do_warp()
 
+    def do_ascend(self):
+        g = self.g
+        if not g.can_ascend():
+            return
+        if self.ascend_confirm <= 0:
+            self.ascend_confirm = 4.0
+            return
+        self.ascend_confirm = 0
+        g.ascend()
+
     def hard_reset(self):
         if self.reset_confirm <= 0:
             self.reset_confirm = 4.0
@@ -335,6 +350,8 @@ class App:
         self.pulse = max(0, self.pulse - dt * 4)
         self.shake = max(0, self.shake - dt * 3)
         self.warp_fx = max(0, self.warp_fx - dt)
+        self.ascend_fx = max(0, self.ascend_fx - dt)
+        self.ascend_confirm = max(0, self.ascend_confirm - dt)
         self.warp_confirm = max(0, self.warp_confirm - dt)
         self.reset_confirm = max(0, self.reset_confirm - dt)
         for kind, data in g.fx_events:
@@ -366,6 +383,14 @@ class App:
                     self.add_banner(dict(header="ACHIEVEMENT UNLOCKED", title=a["name"], sub=a["desc"],
                                          right=f"+{TIER_BONUS[a['tier']] * 100:g}%", tier=a["tier"], sound="ach",
                                          col=MEDAL[a["tier"]]))
+            elif kind == "ascend":
+                self.ascend_fx = 3.4
+                self.ascend_cycle = data["cycle"]
+                self.view = "system"
+                self.warp_view = "ascend"
+                self.snd.play("ascend")
+                self.add_banner(dict(header="ASCENSION", title=f"Cycle {data['cycle']} begins", sub="The universe resets - you keep your Stardust.",
+                                     right=f"+{data['gain']}", sound=None, col=(255, 215, 120), glyph="*", dur=5.0))
             elif kind == "campaign":
                 self.snd.play("buy")
             elif kind == "conquer":
@@ -387,7 +412,7 @@ class App:
         g.fx_events.clear()
         if self.banners:
             b = self.banners[0]
-            if b["t"] == 0.0:
+            if b["t"] == 0.0 and b.get("sound", "ach"):
                 self.snd.play(b.get("sound", "ach"))
             b["t"] += dt
             if len(self.banners) > 3:
@@ -481,6 +506,8 @@ class App:
             self.draw_travel(scr, fonts)
         if self.warp_fx > 0:
             self.draw_warp_fx(scr)
+        if self.ascend_fx > 0:
+            self.draw_ascend_fx(scr, fonts)
 
     def draw_stars(self, scr):
         for x, y, d, ph, col in self.stars:
@@ -683,14 +710,18 @@ class App:
         p = g.cur
         site = SITES[p]
         oc = site["ocol"]
+        if g.cycle > 1:
+            self.txt(scr, tiny, f"CYCLE {g.cycle}", (22, 2), (255, 215, 120), shadow=True)
         self.txt(scr, med, f"{site['name'].upper()}", (22, 12), site["col"], shadow=True)
         self.txt(scr, tiny, f"mining {site['ore']}", (22 + med.size(site['name'].upper())[0] + 10, 18), (170, 175, 200), shadow=True)
         self.txt(scr, big, fmt(g.ore[p], 2), (20, 32), (255, 255, 255), shadow=True)
         self.txt(scr, med, f"{fmt(g.s_ops[p], 2)} {site['ore']}/s", (22, 74), lerp_c(oc, (255, 255, 255), 0.35), shadow=True)
         self.txt(scr, sm, f"Click: +{fmt(g.s_click[p])}", (22, 100), (205, 205, 220), shadow=True)
-        extra = f"Bonus x{g.G:.2f}"
+        extra = f"Bonus x{g.G:.2f}" if g.G < 1e4 else f"Bonus x{fmt(g.G, 2)}"
         if g.dm:
             extra += f"   Dark Matter: {g.dm_avail()}/{g.dm}"
+        if g.sd_total:
+            extra += f"   Stardust: {g.stardust}"
         self.txt(scr, sm, extra, (22, 120), (215, 175, 255), shadow=True)
         y = 144
         if g.cred_ops > 0 or g.credits > 0:
@@ -927,11 +958,12 @@ class App:
             return g.galaxy_open and g.campaign is None and any(
                 win_chance(fp, g.sector_power(c)) >= 0.8 for c in g.frontier())
         if k == T_TECH:
-            return any(t[0] not in g.techs and all(q in g.techs for q in t[3]) and g.science >= t[2] for t in TECHS)
+            return any(t[0] not in g.techs and all(q in g.techs for q in t[3]) and g.science >= g.tech_cost(t[0]) for t in TECHS)
         if k == T_QUESTS:
             return any(g.quest_prog(q) >= q["tgt"] for q in g.quests)
         if k == T_WARP:
-            return g.warp_gain() >= 1 or any(pk[0] not in g.perks and g.dm_avail() >= pk[2] for pk in PERKS)
+            return (g.warp_gain() >= 1 or any(pk[0] not in g.perks and g.dm_avail() >= pk[2] for pk in PERKS)
+                    or g.can_ascend() or any(pk[0] not in g.sd_perks and g.stardust >= pk[2] for pk in STARDUST_PERKS))
         if k == T_AWARDS:
             return self.ach_new
         return False
@@ -1058,7 +1090,7 @@ class App:
         if p in g.projects:
             self.row(scr, fonts, r, name, desc, "BUILT", None, True, (255, 220, 100), None, tcol=(255, 225, 140), glyph="W")
         else:
-            ore, cr, sci = core.project_cost(p)
+            ore, cr, sci = g.project_cost(p)
             ok_o, ok_c, ok_s = g.ore[p] >= ore, g.credits >= cr, g.science >= sci
             good, bad = (130, 255, 150), (230, 130, 130)
             lines = [(f"{fmt(ore)} {SITES[p]['ore']}  (have {fmt(g.ore[p])})", good if ok_o else bad),
@@ -1127,11 +1159,13 @@ class App:
         big, med, sm, tiny = fonts
         g = self.g
         self.txt(scr, tiny, f"{len(g.techs)}/{len(TECHS)} researched (techs persist through Warp)  -  "
-                 f"Science: {fmt(g.science)}  (+{fmt(g.sci_ops)}/s)", (PANEL.x + 4, y), (150, 160, 190))
+                 f"Science: {fmt(g.science)}  (+{fmt(g.sci_ops)}/s)" + (f"  -  tech costs x{g.E['techcost']:.2f}" if g.E['techcost'] < 1 else ""),
+                 (PANEL.x + 4, y), (150, 160, 190))
         y += 20
         order = sorted(TECHS, key=lambda t: (t[0] in g.techs, not all(q in g.techs for q in t[3]), t[2]))
         for t in order:
-            tid, name, cost, pre, desc, _ = t
+            tid, name, _, pre, desc, _fx = t
+            cost = g.tech_cost(tid)
             r = pygame.Rect(PANEL.x, y, PANEL.w, 64)
             y += 70
             if tid in g.techs:
@@ -1172,11 +1206,21 @@ class App:
     def draw_warp(self, scr, fonts, y):
         big, med, sm, tiny = fonts
         g = self.g
+        self.button(scr, pygame.Rect(PANEL.x, y, 292, 32), "Warp & Dark Matter", sm,
+                    lambda: setattr(self, "warp_view", "warp"), panel=True,
+                    col=(78, 100, 176) if self.warp_view == "warp" else (34, 42, 74), selected=self.warp_view == "warp")
+        self.button(scr, pygame.Rect(PANEL.x + 302, y, 292, 32), "Ascension (New Game+)", sm,
+                    lambda: setattr(self, "warp_view", "ascend"), panel=True,
+                    col=(150, 110, 40) if self.warp_view == "ascend" else (60, 46, 30),
+                    selected=self.warp_view == "ascend", dot=g.can_ascend() and self.warp_view != "ascend")
+        y += 44
+        if self.warp_view == "ascend":
+            return self.draw_ascension(scr, fonts, y)
         x = PANEL.x + 8
         self.txt(scr, big, "Warp Drive", (x, y))
         lines = ["Warp resets ore, ships and upgrades on EVERY planet. You keep your",
                  "unlocked planets, colonies, megaprojects, tech, credits, science",
-                 "and Dark Matter. Dark Matter total = (lifetime ore / 1B) ^ 0.25.",
+                 "and Dark Matter. Dark Matter total = (ore mined this cycle / 1B) ^ 0.25.",
                  "Dark Matter gives a permanent production bonus (1 + 0.4 x sqrt(DM)) and can be",
                  "spent on perks below."]
         for k, l in enumerate(lines):
@@ -1185,10 +1229,10 @@ class App:
         gain = g.warp_gain()
         self.txt(scr, med, f"Dark Matter: {g.dm_avail()} to spend ({g.dm} total, bonus x{core.dm_bonus(g.dm, g.E['dmbase']):.2f})",
                  (x, y), (210, 170, 255))
-        self.txt(scr, med, f"Lifetime ore (Earth-equivalent): {fmt(g.all_norm)}", (x, y + 26))
+        self.txt(scr, med, f"Ore mined this cycle (Earth-equiv.): {fmt(g.cyc_norm)}", (x, y + 26))
         self.txt(scr, med, f"Warp now for: +{gain} DM", (x, y + 52), (130, 255, 150) if gain else (180, 120, 120))
         need = ((g.dm + gain + 1) / g.E["dm"]) ** (1 / core.DM_POW) * core.DM_DIV
-        self.txt(scr, tiny, f"Next Dark Matter at lifetime ore {fmt(need)}   -   warps so far: {g.warps}", (x, y + 80), (150, 155, 180))
+        self.txt(scr, tiny, f"Next Dark Matter at {fmt(need)} ore   -   warps so far: {g.warps}", (x, y + 80), (150, 155, 180))
         r = pygame.Rect(x, y + 102, PANEL.w - 16, 50)
         label = "CLICK AGAIN TO CONFIRM WARP" if self.warp_confirm > 0 else "WARP!"
         self.button(scr, r, label, med, self.do_warp, enabled=gain >= 1, panel=True,
@@ -1447,6 +1491,88 @@ class App:
                 self.row(scr, fonts, rr, "???", "Not scouted yet", None, None, False, (62, 66, 92), None, dim=True)
         return y
 
+    # ---------------- ascension -----------------
+    def draw_ascension(self, scr, fonts, y):
+        big, med, sm, tiny = fonts
+        g = self.g
+        x = PANEL.x + 8
+        gold = (255, 215, 120)
+        self.txt(scr, big, "Ascension", (x, y), gold)
+        self.txt(scr, med, f"New Game+  -  you are in cycle {g.cycle}", (PANEL.right - 8, y + 8), (200, 190, 150), "topright")
+        y += 44
+        lines = ["Defeat The Devourer on the Void Throne, then Ascend: the whole universe resets and",
+                 "a new cycle begins. You keep your achievements and earn Stardust, which gives a",
+                 "permanent production bonus and buys powerful perks that make every cycle faster."]
+        for i, l in enumerate(lines):
+            self.txt(scr, tiny, l, (x, y + i * 17), (175, 180, 205))
+        y += 62
+        can = g.can_ascend()
+        boss = SECTORS[NSEC - 1]
+        done = NSEC - 1 in g.conquered
+        rr = pygame.Rect(PANEL.x, y, PANEL.w, 62)
+        self.row(scr, fonts, rr, "The Devourer  -  The Void Throne",
+                 "Defeated! You may Ascend whenever you like." if done else "Liberate sectors until the Void Throne is yours.",
+                 "DEFEATED" if done else f"{len(g.conquered) - 1}/{NSEC - 1} sectors", None, done, FACTIONS["devourer"]["col"],
+                 None, icon=self.enemy_big["devourer"])
+        y += 72
+        self.txt(scr, med, f"Stardust: {g.stardust:,} to spend", (x, y), gold)
+        self.txt(scr, sm, f"{g.sd_total:,} earned   -   production bonus x{sd_bonus(g.sd_total):.2f}", (PANEL.right - 8, y + 2),
+                 (210, 190, 140), "topright")
+        y += 28
+        gain = max(1, g.sd_gain())
+        self.txt(scr, med, f"Ascend now for: +{gain} Stardust", (x, y), (130, 255, 150) if can else (180, 120, 120))
+        y += 28
+        m = 1 + core.TUNE["cdiff"] * g.cycle
+        self.txt(scr, tiny, f"Next cycle: planets and megaprojects cost x{m:.0f}, enemy fleets x{core.TUNE['cpow'] ** g.cycle:.1f} stronger.",
+                 (x, y), (190, 160, 130))
+        y += 22
+        keeps = [("KEPT: achievements, Stardust and its perks, your statistics.", (150, 220, 160)),
+                 ("RESET: planets, ships, colonies, tech, credits, science, Dark Matter, armory, liberated sectors "
+                  "and megaprojects - some of these can be kept with the Stardust perks below.", (210, 150, 140))]
+        for text, col in keeps:
+            for l in wrap(tiny, text, PANEL.w - 24):
+                self.txt(scr, tiny, l, (x, y), col)
+                y += 16
+        y += 8
+        label = "CLICK AGAIN TO CONFIRM ASCENSION" if self.ascend_confirm > 0 else "ASCEND"
+        self.button(scr, pygame.Rect(x, y, PANEL.w - 16, 52), label, med, self.do_ascend, enabled=can, panel=True,
+                    col=(170, 70, 60) if self.ascend_confirm > 0 else (150, 110, 40))
+        y += 70
+        self.txt(scr, med, "Stardust Perks", (x, y), gold)
+        y += 30
+        for pk in STARDUST_PERKS:
+            pid, name, cost, desc, _ = pk
+            r = pygame.Rect(PANEL.x, y, PANEL.w, 58)
+            y += 64
+            if pid in g.sd_perks:
+                self.row(scr, fonts, r, name, desc, "OWNED", None, True, (255, 220, 100), None, tcol=(255, 225, 140), glyph="*")
+            else:
+                self.row(scr, fonts, r, name, desc, f"{fmt(cost)} SD", None, g.stardust >= cost, (255, 200, 110),
+                         lambda pid=pid: g.buy_sd_perk(pid), glyph="*")
+        return y
+
+    def draw_ascend_fx(self, scr, fonts):
+        prog = self.ascend_fx / 3.4                    # 1 -> 0
+        grow = 1 - prog
+        for a, sp in self.streaks:
+            d0 = 20 + grow * sp * 520
+            d1 = d0 + 30 + grow * 300 * sp
+            v = min(1.0, prog * 1.8)
+            pygame.draw.line(scr, (int(255 * v), int(205 * v), int(110 * v)), (CX + math.cos(a) * d0, CY + math.sin(a) * d0),
+                             (CX + math.cos(a) * d1, CY + math.sin(a) * d1), 3)
+        fx = pygame.Surface((W, H), pygame.SRCALPHA)
+        a = int(max(0.0, min(1.0, (prog - 0.35) / 0.65)) * 245) if prog > 0.35 else int(max(0.0, prog / 0.35) * 160)
+        fx.fill((255, 240, 205, a))
+        scr.blit(fx, (0, 0))
+        if prog < 0.8:
+            k = min(1.0, (0.8 - prog) / 0.25) * min(1.0, prog / 0.25)
+            img = fonts[0].render(f"CYCLE {self.ascend_cycle}", True, (255, 245, 215))
+            img.set_alpha(int(255 * k))
+            scr.blit(img, img.get_rect(center=(CX, CY - 30)))
+            img2 = fonts[1].render("NEW GAME+", True, (255, 215, 120))
+            img2.set_alpha(int(255 * k))
+            scr.blit(img2, img2.get_rect(center=(CX, CY + 10)))
+
     # ---------------- achievements, stats, dev -----------------
     def ach_progress(self, a):
         if not a["prog"]:
@@ -1560,6 +1686,9 @@ class App:
             ("Supply crates grabbed", f"{g.crates:,}"),
             ("Mining frenzies", f"{g.frenzies:,}"),
             ("Warps", f"{g.warps:,}"),
+            ("Cycle (New Game+)", f"{g.cycle}   ({g.ascensions} ascension{'s' if g.ascensions != 1 else ''})"),
+            ("Time in this cycle", fmt_time(g.play_time - g.cycle_start)),
+            ("Stardust", f"{g.stardust:,} to spend, {g.sd_total:,} earned"),
             ("Dark Matter", f"{g.dm:,} total, {g.dm_avail():,} to spend"),
             ("Dark Matter perks", f"{len(g.perks)}/{len(PERKS)}"),
             ("Achievements", f"{len(g.ach)}/{len(ACHIEVEMENTS)}  (+{g.ach_bonus * 100:.1f}%)"),
@@ -1879,6 +2008,24 @@ def selftest_step(app, g, frames, shot):
         g.event = None
         app.dev_state.infinite = False
         devtools.tick(app, 0.05)
+    if frames == 78:
+        g.conquered = set(range(NSEC))
+        g.recalc()
+        app.tab = T_WARP
+        app.warp_view = "ascend"
+        assert g.can_ascend()
+    if frames == 79:
+        shot("ascension")
+    if frames == 80:
+        c0 = g.cycle
+        app.do_ascend(); app.do_ascend()
+        assert g.cycle == c0 + 1 and g.stardust > 0 and 0 in g.conquered and sum(g.owned[3]) == 0, "ascension failed"
+    if frames == 83:
+        shot("ascend_fx")
+        before = g.stardust
+        for pk in core.STARDUST_PERKS:
+            if g.buy_sd_perk(pk[0]):
+                break
     if frames == 90:
         g.hard_reset()
 

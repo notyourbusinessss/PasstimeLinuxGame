@@ -109,6 +109,19 @@ class Bot:
             self.log.append((g.t, f"conquer {core.SECTORS[k]['name']}"))
         self.conq_logged |= set(new)
 
+    def ascend(self):
+        g = self.g
+        if g.can_ascend():
+            gain, old = g.sd_gain(), g.cycle
+            g.ascend()
+            self.log.append((g.t, f"ASCEND to cycle {g.cycle} (+{gain} Stardust, {g.sd_total} total)"))
+            self.last_warp = g.t
+            self.click_until = g.t + self.active_after
+            self.click_site = 0
+            self.conq_logged = set(g.conquered)
+        for pk in sorted(core.STARDUST_PERKS, key=lambda p: p[2]):
+            g.buy_sd_perk(pk[0])
+
     def click(self, dt):
         g = self.g
         if g.t < self.click_until:
@@ -174,6 +187,7 @@ class Bot:
                 break
         g.buy_mode = 1
         self.galaxy()
+        self.ascend()
         # warp policy
         gain = g.warp_gain()
         if gain >= max(1, int(WARP_FRAC * g.dm)) and g.t - self.last_warp > 2700:
@@ -195,6 +209,8 @@ def main():
     interval = float(kw.pop("interval", 60))
     quiet = kw.pop("quiet", "0") == "1"
     warp_frac = float(kw.pop("warp_frac", 1.0))
+    global BOT_CHANCE
+    BOT_CHANCE = float(kw.pop("bot_chance", 0.85))
     core.apply_tune(**{k: float(v) for k, v in kw.items()})
     global WARP_FRAC
     WARP_FRAC = warp_frac
@@ -213,7 +229,7 @@ def main():
             t, msg = bot.log[seen]
             if not quiet:
                 print(f"  [{fmt_t(t)}] {msg}")
-            elif msg.startswith(("unlock", "project", "conquer")):
+            elif msg.startswith(("unlock", "project", "conquer", "ASCEND")):
                 print(f"  [{fmt_t(t)}] {msg}")
             seen += 1
         if g.t >= next_report and not quiet:
