@@ -21,6 +21,7 @@ import pygame
 import core
 import gamelog
 import resources
+import shipart
 import ships
 import devtools
 import director
@@ -199,17 +200,18 @@ class App:
         self.floats, self.parts, self.rings, self.shooting = [], [], [], []
 
     def ship_color(self, p, i):
-        """Tier colour, tinted towards the planet's own colour (Earth keeps the classic colours)."""
-        t = ships.tint(p)
-        return SHIPS[i][3] if t is None else lerp_c(SHIPS[i][3], t, 0.45)
+        """The class colour (the accent every hull carries, and the colour of its engine glow and laser). On the planets
+        with their own palette it is pulled towards that palette's glow."""
+        pal = ships.palette(p)
+        return SHIPS[i][3] if pal is None else lerp_c(SHIPS[i][3], pal[3], 0.4)
 
     def ship_sprite(self, p, i, icon=False):
         """The sprite of ship class i on planet p (every planet's fleet looks different)."""
-        size = 46 if icon else 26 + i * 2
+        size = 46 if icon else round((26 + i * 2) * ships.scale(p))
         key = (p, i, size)
         spr = self.ship_cache.get(key)
         if spr is None:
-            spr = self.ship_cache[key] = gfx.make_ship(i, self.ship_color(p, i), size, ships.style(p))
+            spr = self.ship_cache[key] = gfx.make_ship(i, SHIPS[i][3], size, ships.style(p), ships.palette(p))
         return spr
 
     def ship_icon(self, p, i):
@@ -790,15 +792,12 @@ class App:
             x, y, ang = self.ast_pos(a)
             (behind if math.sin(ang) < 0 else front).append(("a", a, x, y))
         for i in range(NSH):
-            n = min(g.owned[p][i], 4)
-            rad = 82 + i * 7
-            spd = 0.65 - i * 0.04
+            n = ships.shown(p, g.owned[p][i])
             d = 1 if i % 2 == 0 else -1
             for j in range(n):
-                ang = self.t * spd * d + j * math.tau / n + i
-                x = CX + math.cos(ang) * rad
-                y = CY + math.sin(ang) * rad * 0.7
-                (behind if math.sin(ang) < 0 else front).append(("s", (i, j, ang, d), x, y))
+                dx, dy, depth = ships.orbit(p, i, j, n, self.t, d)
+                hd = ships.heading(p, i, j, n, self.t, d)
+                (behind if depth < 0 else front).append(("s", (i, j, hd, d), CX + dx, CY + dy))
         for item in behind:
             self.draw_item(scr, item)
         spr = self.site_sprites[p]
@@ -814,9 +813,10 @@ class App:
             self.draw_rings(scr, CX, CY, PLANET_R, True)
         for item in front:
             self.draw_item(scr, item)
+        style = ships.style(p)
         for item in behind + front:
             if item[0] == "s":
-                i, j, ang, d = item[1]
+                i, j, hd, d = item[1]
                 if math.sin(self.t * 5 + j * 2 + i) > 0.9:
                     tgt, td = None, 1e9
                     for a in self.asts:
@@ -827,9 +827,8 @@ class App:
                                 tgt, td = a, dd
                     if tgt is not None and td < 130 ** 2:
                         tx, ty, _ = self.ast_pos(tgt)
-                        col = SHIPS[i][3]
-                        pygame.draw.line(scr, scale_c(col, 0.45), (item[2], item[3]), (tx, ty), 4)
-                        pygame.draw.line(scr, lerp_c(col, (255, 255, 255), 0.7), (item[2], item[3]), (tx, ty), 1)
+                        col = self.ship_color(p, i)
+                        shipart.beam(scr, style, (item[2], item[3]), (tx, ty), col, self.t, i * 7 + j)
                         scr.blit(glow(16, scale_c(col, 0.8)), (tx - 16, ty - 16), special_flags=ADD)
 
     def draw_item(self, scr, item):
@@ -850,9 +849,8 @@ class App:
                 f = 0.55 + 0.45 * math.sin(self.t * 4 + a["ph"] + off)
                 scr.blit(glow(7, scale_c(oc, 0.9 * f)), (gx - 7, gy - 7), special_flags=ADD)
             return
-        i, j, ang, d = data
-        col = SHIPS[i][3]
-        ta = ang + d * math.pi / 2
+        i, j, ta, d = data
+        col = self.ship_color(g.cur, i)
         for tc in (1, 2, 3):
             bx = x - math.cos(ta) * tc * 7
             by = y - math.sin(ta) * tc * 7
@@ -2369,7 +2367,33 @@ def app_fonts():
     return _SCR["fonts"]
 
 
+def check_ship_art(app):
+    """Every planet's ships draw, are not all alike, and fly sensible paths."""
+    seen = {}
+    for p in range(NSITE):
+        for i in range(NSH):
+            spr = app.ship_sprite(p, i)
+            assert spr.get_width() > 8 and pygame.mask.from_surface(spr).count() > 20, (p, i)
+            assert app.ship_icon(p, i).get_width() == 46
+            seen[(p, i)] = pygame.image.tostring(spr, "RGBA")
+        n = ships.shown(p, 4)
+        assert 1 <= n <= 4
+        for i in range(NSH):
+            for j in range(n):
+                for t in (0.0, 7.3, 1234.5):
+                    x, y, depth = ships.orbit(p, i, j, n, t, 1 if i % 2 == 0 else -1)
+                    assert abs(x) < 300 and abs(y) < 300 and -1.001 <= depth <= 1.001, (p, i, j, t, x, y, depth)
+                    assert -math.pi <= ships.heading(p, i, j, n, t, 1) <= math.pi
+    for i in range(NSH):                           # the same class must look different on different planets
+        assert len({seen[(p, i)] for p in range(NSITE)}) == NSITE, f"class {i} has identical sprites on two planets"
+    canvas = pygame.Surface((300, 300))
+    for style in {ships.style(p) for p in range(NSITE)}:   # every laser style draws
+        shipart.beam(canvas, style, (100, 100), (180, 150), (255, 200, 120), 1.5, 3)
+
+
 def selftest_step(app, g, frames, shot):
+    if frames == 1:
+        check_ship_art(app)
     if frames == 3:
         for _ in range(25):
             app.space_click()
