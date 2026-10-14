@@ -1819,7 +1819,7 @@ class App:
                     "CLICK AGAIN: WIPE SAVE" if self.reset_confirm > 0 else "Hard reset (wipe save)", sm,
                     self.hard_reset, panel=True, col=(150, 60, 70) if self.reset_confirm > 0 else (70, 40, 50))
         y += 52
-        can_open = not resources.ANDROID and gamelog.log_path() is not None
+        can_open = not resources.ANDROID and gamelog.enabled()
         self.button(scr, pygame.Rect(PANEL.x, y, 200, 34), "Open log folder", sm, self.open_log_folder, enabled=can_open, panel=True)
         shown = gamelog.log_dir()
         if len(shown) > 52:

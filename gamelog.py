@@ -33,6 +33,11 @@ def log_dir():
     return _state["dir"] or resources.log_dir()
 
 
+def enabled():
+    """True when the log files are being written."""
+    return _state["dir"] is not None
+
+
 def log_path():
     return os.path.join(log_dir(), "space-miner.log")
 

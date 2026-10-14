@@ -384,7 +384,7 @@ The **Stats** chip in the Awards tab lists everything you have done (play time, 
 
 ![Stats](screenshots/15-stats-and-settings.png)
 
-The settings are at the bottom of the page, including the **Fullscreen** button (the same as **F11**):
+The settings are at the bottom of the page: sound, the **Fullscreen** button (the same as **F11**), saving, and **Open log folder** (see Troubleshooting):
 
 ![Settings with the Fullscreen button](screenshots/38-fullscreen-setting.png)
 
