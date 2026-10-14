@@ -112,6 +112,10 @@ class App:
         self.g.stage_w, self.g.stage_h = PANEL.x - 12, H
         self.touch = touch.Touch(self, PANEL, lambda: (W, H))
         self.bg_since = None
+        self.gal_wide = bool(self.g.settings.get("galaxy_wide", True))     # the galaxy map fills the window (the panel is hidden)
+        self.wide_applied = None
+        self.view_t = 9.0
+        self.last_view = self.view
         self.had_event = False
         self.snd = sounds.Sounds(self.g.settings)
         self.t = 0.0
@@ -175,24 +179,25 @@ class App:
                     rad = (24 + t * 340) * sc
                     x, y = bx + math.cos(ang) * rad, by + math.sin(ang) * rad * 0.55
                     r = int((16 + int(t * 22)) * sc)
-                    gb.blit(glow(r, (16, 20, 46)), (x - r, y - r), special_flags=ADD)
-            gb.blit(glow(int(170 * sc), (70, 52, 34)), (bx - 170 * sc, by - 170 * sc), special_flags=ADD)
+                    gb.blit(glow(r, (10, 28, 62)), (x - r, y - r), special_flags=ADD)
+            gb.blit(glow(int(170 * sc), (86, 66, 36)), (bx - 170 * sc, by - 170 * sc), special_flags=ADD)
             rng = random.Random(5)
             stars = [[rng.uniform(0, W), rng.uniform(0, H), rng.choice([0.4, 0.7, 1.0, 1.6]),
                       rng.uniform(0, math.tau), rng.choice([(150, 170, 255), (255, 235, 200), (200, 220, 255)])]
                      for _ in range(int(190 * W * H / (BASE_W * BASE_H)))]
             cached = self.layout_cache[key] = (gfx.make_background(W, H), gfx.make_vignette(W, H),
-                                               gfx.make_panel_bg(PANEL.w + 24, H - 8), gb, stars)
+                                               gfx.make_panel_bg(PANEL.w + 24, H - 8), gb, stars, gfx.make_galaxy_backdrop(W, H))
             if len(self.layout_cache) > 3:
                 self.layout_cache.pop(next(iter(self.layout_cache)))
-        self.bg, self.vig, self.panel_bg, self.galaxy_bg, self.stars = cached
+        self.bg, self.vig, self.panel_bg, self.galaxy_bg, self.stars, self.gal_backdrop = cached
 
     def set_resolution(self, w, h):
         """Switch the canvas to w x h (the window is recreated by the caller): re-lay out everything."""
         apply_layout(w, h)
         self.g.stage_w, self.g.stage_h = PANEL.x - 12, H
         self.build_layout_assets()
-        self.fv.relayout()
+        self.wide_applied = None
+        self.update_galaxy_layout()
         self.rebuild_view()
         self.touch.gesture = None
         self.raiders = []
@@ -296,7 +301,7 @@ class App:
         if c and c.get("rect") and c["rect"].collidepoint(pos):
             g.grab_crate()
             return
-        if pos[0] >= PANEL.x - 10:
+        if self.panel_visible() and pos[0] >= PANEL.x - 10:
             for rect, fn in reversed(self.buttons):
                 if rect.inflate(0, grow).collidepoint(pos):
                     fn()
@@ -358,6 +363,25 @@ class App:
             return
         self.war_confirm = 0.0
         g.start_campaign(k)
+
+    def panel_visible(self):
+        """The side panel is hidden while the galaxy map is shown wide."""
+        return not (self.view == "galaxy" and self.gal_wide)
+
+    def toggle_gal_wide(self):
+        self.gal_wide = not self.gal_wide
+        self.g.settings["galaxy_wide"] = self.gal_wide
+
+    def leave_galaxy(self):
+        self.view = "system"
+
+    def update_galaxy_layout(self):
+        """Wide map: the viewport takes the whole window; otherwise it stops at the side panel."""
+        want = not self.panel_visible()
+        if want != self.wide_applied:
+            frontview.set_layout(W + 12 if want else PANEL.x, W, H, wide=want)
+            self.fv.relayout()
+            self.wide_applied = want
 
     def back_pressed(self):
         """The Android back button: leave the galaxy view; never quits (use Home)."""
@@ -564,6 +588,10 @@ class App:
         self.dt = dt
         self.t += dt
         g.step(dt)
+        if self.view != self.last_view:
+            self.last_view, self.view_t = self.view, 0.0
+        self.view_t += dt
+        self.update_galaxy_layout()
         self.fv.update(dt)
         if self.view_site != g.cur:
             self.rebuild_view()
@@ -726,8 +754,11 @@ class App:
         g = self.g
         self.buttons = []
         self.modal_buttons = []
-        scr.blit(self.bg, (0, 0))
-        self.draw_stars(scr)
+        if self.view == "galaxy":                      # a different place: the star chart, not the planet's sky
+            scr.blit(self.gal_backdrop, (0, 0))
+        else:
+            scr.blit(self.bg, (0, 0))
+            self.draw_stars(scr)
         site = SITES[g.cur]
         if self.view == "system":
             scr.blit(glow(280, scale_c(site["col"], 0.22)), (CX - 280, CY - 280), special_flags=ADD)
@@ -742,11 +773,18 @@ class App:
             self.draw_crate(scr)
         self.draw_fx(scr, fonts[1])
         scr.blit(self.vig, (0, 0), special_flags=pygame.BLEND_RGB_MULT)
+        if self.view == "galaxy":
+            self.fv.draw_overlay(scr, fonts)
+        if self.view_t < 0.45:                         # fade in when the view changes
+            ov = pygame.Surface((W, H))
+            ov.set_alpha(int(255 * (1 - self.view_t / 0.45) ** 2))
+            scr.blit(ov, (0, 0))
         self.draw_hud(scr, fonts)
         if self.dev:
             self.draw_dev_badge(scr, fonts)
         self.draw_strip(scr, fonts)
-        self.draw_panel(scr, fonts)
+        if self.panel_visible():
+            self.draw_panel(scr, fonts)
         self.draw_toasts(scr, fonts[2])
         self.draw_banner(scr, fonts)
         if g.event:
@@ -926,7 +964,7 @@ class App:
         scr.set_clip(None)
 
     def draw_toasts(self, scr, sm):
-        y = H - 62
+        y = H - 62 - (frontview.BAR if self.view == "galaxy" else 0)
         maxw = 610
         for msg, secs in reversed(self.g.toasts):
             if sm.size(msg)[0] > maxw:                      # fit long messages with an ellipsis
@@ -956,7 +994,32 @@ class App:
             fr.append(min(1.0, g.credits / cr))
         return k, (min(fr) if fr else 1.0)
 
+    def draw_hud_galaxy(self, scr, fonts):
+        """The galaxy screen keeps only a slim bar of numbers, so the map can use the rest of the window."""
+        big, med, sm, tiny = fonts
+        g = self.g
+        self.txt(scr, med, "GALAXY MAP", (22, 10), (200, 215, 255), shadow=True)
+        x = 22 + med.size("GALAXY MAP")[0] + 28
+        t = f"{fmt(g.credits)} credits (+{fmt(g.cred_ops)}/s)"
+        self.txt(scr, sm, t, (x, 13), (255, 218, 120), shadow=True)
+        x += sm.size(t)[0] + 24
+        self.txt(scr, sm, f"{fmt(g.science)} science (+{fmt(g.sci_ops)}/s)", (x, 13), (125, 238, 255), shadow=True)
+        wars = len(g.war)
+        self.txt(scr, tiny, f"Fleet power {fmt(g.fleet_power())}   -   {len(g.conquered) - 1}/{NSEC - 1} sectors liberated   -   "
+                 + ("at peace" if not wars else f"at war with {wars} faction{'s' if wars > 1 else ''}"),
+                 (22, 40), (170, 180, 215), shadow=True)
+        c = g.campaign
+        if c:
+            right = frontview.VIEW.right
+            self.txt(scr, tiny, f"Campaign: {SECTORS[c['k']]['name']}  {c['chance'] * 100:.0f}% to win  ({fmt_time(max(0, c['dur'] - c['t']))} left)",
+                     (right, 14), (255, 175, 150), "topright", True)
+            pygame.draw.rect(scr, (40, 24, 28), (right - 220, 34, 220, 6), border_radius=3)
+            pygame.draw.rect(scr, (255, 120, 100), (right - 220, 34, 220 * c["t"] / c["dur"], 6), border_radius=3)
+
     def draw_hud(self, scr, fonts):
+        if self.view == "galaxy":
+            self.draw_hud_galaxy(scr, fonts)
+            return
         big, med, sm, tiny = fonts
         g = self.g
         p = g.cur
@@ -2050,7 +2113,7 @@ class App:
         k = max(0.0, min(1.0, t / 0.35, (dur - t) / 0.35))
         ease = 1 - (1 - k) ** 3
         w, h = 430, 68
-        x = PANEL.x - 5 - w
+        x = PANEL.x - 5 - w if self.panel_visible() else (W - w) // 2
         y = -h + (h + 12) * ease
         col = bn["col"]
         scr.blit(glow(150, scale_c(col, 0.18)), (x + w // 2 - 150, y + h // 2 - 150), special_flags=ADD)
@@ -2304,7 +2367,7 @@ def main():
                         kind = {pygame.FINGERDOWN: "down", pygame.FINGERUP: "up", pygame.FINGERMOTION: "motion"}[e.type]
                         app.touch.finger(kind, e.finger_id, e.x, e.y, pygame.display.get_window_size())
                     elif e.type == pygame.MOUSEWHEEL:
-                        if PANEL.collidepoint(app.mouse):
+                        if app.panel_visible() and PANEL.collidepoint(app.mouse):
                             app.scroll[app.tab] -= e.y * 50
                         elif app.view == "galaxy" and not g.event:
                             app.fv.wheel(app.mouse, e.y)

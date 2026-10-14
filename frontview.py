@@ -12,6 +12,7 @@ import pygame
 import director
 import front
 import resources
+import core
 from core import FACTIONS, NSEC, SECTORS, SECTOR_EDGES, SECTOR_LINKS, fmt, win_chance
 from gfx import glow, lerp_c, scale_c
 
@@ -20,6 +21,7 @@ GC = (331, 462)                      # screen position of the galaxy centre at z
 MAPW, MAPH = 590, 384                # size of the whole galaxy at zoom 1
 VIEW = pygame.Rect(8, 256, 640, 412)  # the viewport (the left side of the window, below the HUD)
 STAGE_W = 648
+BAR = 0
 Z_MIN, Z_MAX = 1.0, 4.5
 CLOSE = 1.35                         # from this zoom on, fleets and battle lines are drawn
 DETAIL = 1.9                         # from this zoom on, sectors get their full labels
@@ -27,14 +29,25 @@ MINE = (120, 190, 255)
 LASER_MINE = (150, 225, 255)
 
 
-def set_layout(panel_x, w, h):
-    """Re-fit the map to the window: its viewport is everything left of the side panel below the HUD. (At 1280x720 this
-    gives the original VIEW, GC and map size.)"""
-    global VIEW, GC, MAPW, MAPH, STAGE_W
+TOP = 72                             # the galaxy screen has only a slim bar of numbers above the map
+BAR_H = 84                           # the command bar at the bottom of the wide map
+
+
+def set_layout(panel_x, w, h, wide=False):
+    """Fit the map to the window: its viewport is everything left of the side panel (all of the window when the panel is
+    hidden, "wide") from the slim top bar to the planet strip. In the wide map a command bar sits along the bottom; the map
+    fills the rest, with the shape of the galaxy kept between 1.25:1 and 2:1."""
+    global VIEW, GC, MAPW, MAPH, STAGE_W, BAR
     STAGE_W = panel_x - 12
-    VIEW = pygame.Rect(8, 256, STAGE_W - 8, h - 256 - 52)
-    MAPW, MAPH = VIEW.w * 0.9219, VIEW.h * 0.932
-    GC = (VIEW.x + VIEW.w * 0.505, VIEW.centery)
+    BAR = BAR_H if wide else 0
+    VIEW = pygame.Rect(8, TOP, STAGE_W - 8, h - TOP - 52)
+    aw, ah = VIEW.w * 0.92, (VIEW.h - BAR) * 0.93
+    if aw / ah > 2.0:
+        aw = ah * 2.0
+    elif aw / ah < 1.25:
+        ah = aw / 1.25
+    MAPW, MAPH = aw, ah
+    GC = (VIEW.x + VIEW.w * 0.505, VIEW.y + (VIEW.h - BAR) / 2 + 2)
 
 
 def hrand(*a):
@@ -64,7 +77,7 @@ class FrontView:
         self.relayout()
 
     def relayout(self):
-        self.minimap = pygame.Rect(VIEW.x + 8, VIEW.bottom - 86, 132, 78)
+        self.minimap = pygame.Rect(VIEW.x + 8, VIEW.bottom - BAR - 86, 132, 78)
         self.clamp(snap=True)
 
     # ------------------------------------------------------------------ camera
@@ -387,8 +400,6 @@ class FrontView:
         oy = max(-90, min(90, -(self.y - 0.5) * MAPH * z * 0.14))
         gbw, gbh = app.galaxy_bg.get_size()
         scr.blit(app.galaxy_bg, (STAGE_W * 0.586 - gbw / 2 + ox, scr.get_height() * 0.528 - gbh / 2 + oy), special_flags=ADD)
-        app.txt(scr, med, "GALAXY MAP", (VIEW.right, 104), (190, 200, 235), "topright", True)
-        app.txt(scr, tiny, "Liberate sectors to claim their bonuses", (VIEW.right, 126), (140, 150, 185), "topright")
         scr.set_clip(VIEW)
         # territory
         for k in range(NSEC):
@@ -538,12 +549,18 @@ class FrontView:
                          (fx_ - math.cos(ang) * tc * 9 - (10 - tc), fy_ - math.sin(ang) * tc * 9 - (10 - tc)), special_flags=ADD)
             spr = self.rot(app.ship_sprite(*front.fleet_roster(g)[0]), -math.degrees(ang))
             scr.blit(spr, spr.get_rect(center=(fx_, fy_)))
-        scr.set_clip(stage)
-        self.draw_frame(scr, fonts)
+        scr.set_clip(None)
         self.hover = hover
         app.hover_sector = hover
-        if hover is not None:
-            self.draw_tooltip(scr, fonts, hover, fp)
+
+    def draw_overlay(self, scr, fonts):
+        """The frame, toolbar, command bar, alerts, mini-map and tooltip: drawn after the vignette so they are not dimmed."""
+        app = self.app
+        stage = pygame.Rect(0, 0, STAGE_W + 12, scr.get_height())
+        scr.set_clip(stage)
+        self.draw_frame(scr, fonts)
+        if self.hover is not None:
+            self.draw_tooltip(scr, fonts, self.hover, app.g.fleet_power())
         scr.set_clip(None)
 
     # ------------------------------------------------------------------ frame, toolbar, mini-map, tooltip
@@ -561,21 +578,22 @@ class FrontView:
         y = r.y + 8
         bh = 40 if resources.TOUCH else 26
         tw = 1.35 if resources.TOUCH else 1.0
-        buttons = [("FRONT", 52, self.focus_selected), ("FIT", 38, self.fit), ("-", 28, lambda: self.zoom_at(GC, 1 / 1.35)),
-                   ("+", 28, lambda: self.zoom_at(GC, 1.35))]
+        panel_label = "PANEL" if app.gal_wide else "WIDE"
+        buttons = [("BACK", 50, app.leave_galaxy), (panel_label, 58, app.toggle_gal_wide), ("FRONT", 52, self.focus_selected),
+                   ("FIT", 38, self.fit), ("-", 28, lambda: self.zoom_at(GC, 1 / 1.35)), ("+", 28, lambda: self.zoom_at(GC, 1.35))]
         for label, w, fn in buttons:
             w = int(w * tw)
             rect = pygame.Rect(x - w, y, w, bh)
             x -= w + 6
-            hot = rect.collidepoint(mouse) and not resources.TOUCH
-            pygame.draw.rect(scr, (60, 84, 150) if hot else (26, 34, 70), rect, border_radius=6)
-            pygame.draw.rect(scr, (120, 150, 215), rect, 1, border_radius=6)
-            app.txt(scr, sm if len(label) > 1 else med, label, rect.center, (235, 240, 255), "center")
-            self.hits.append((rect, fn))
+            self.button(scr, rect, label, fn, med if len(label) == 1 else sm)
         app.txt(scr, tiny, f"x{self.z:.1f}", (x - 2, y + bh // 2), (170, 185, 225), "midright")
         hint = ("Pinch: zoom   Drag: pan   Double-tap: close look" if resources.TOUCH else
                 "Wheel: zoom   Drag: pan   Double-click: close look   Z: front view")
-        app.txt(scr, tiny, hint, (r.x + 12, r.y + 10), (120, 132, 175))
+        if x - (r.x + 12) > tiny.size(hint)[0] + 30:                  # only when there is room next to the buttons
+            app.txt(scr, tiny, hint, (r.x + 12, r.y + 10), (120, 132, 175))
+        self.draw_alerts(scr, fonts)
+        if BAR:
+            self.draw_command_bar(scr, fonts)
         # mini-map
         if self.z > 1.05:
             m = self.minimap
@@ -610,6 +628,127 @@ class FrontView:
                 self.xt, self.yt = px, py
                 self.clamp()
             self.hits.append((m, recenter))
+
+    def button(self, scr, rect, label, fn, font, enabled=True, col=(26, 34, 70), accent=(120, 150, 215)):
+        """A button of the map overlay; clickable through self.hits."""
+        app = self.app
+        hot = enabled and rect.collidepoint(app.mouse) and not resources.TOUCH
+        c = (60, 84, 150) if hot else col
+        pygame.draw.rect(scr, c if enabled else (30, 32, 44), rect, border_radius=6)
+        pygame.draw.rect(scr, accent if enabled else (60, 62, 80), rect, 1, border_radius=6)
+        app.txt(scr, font, label, rect.center, (235, 240, 255) if enabled else (120, 122, 140), "center")
+        if enabled:
+            self.hits.append((rect, fn))
+
+    def draw_alerts(self, scr, fonts):
+        """Incoming enemy attacks (with Intel), with a Fortify button, under the toolbar."""
+        app, g = self.app, self.app.g
+        big, med, sm, tiny = fonts
+        ilv = director.intel(g)
+        if ilv < 1 or not g.incoming or app.panel_visible():       # (with the panel open its cards show the same)
+            return
+        y = VIEW.y + 34
+        for inc in g.incoming[:3]:
+            left = max(0, inc["eta"] - inc["t"])
+            name = "Counter-offensive" if inc["kind"] == "offensive" else director.TIERS[inc["tier"]]["name"]
+            where = ""
+            if ilv >= 2:
+                where = (" -> " + SECTORS[inc["target"]]["name"]) if inc["kind"] == "offensive" else " -> " + ", ".join(
+                    core.SITES[q]["name"] for q in inc["targets"])
+            text = f"INCOMING: {name}{where}  ({fmt_eta(left)})"
+            pill = pygame.Rect(VIEW.x + 10, y, min(VIEW.w - 20, tiny.size(text)[0] + 150), 28)
+            bg = pygame.Surface(pill.size, pygame.SRCALPHA)
+            pygame.draw.rect(bg, (40, 12, 16, 225), bg.get_rect(), border_radius=8)
+            pygame.draw.rect(bg, (255, 100, 90, 255), bg.get_rect(), 1, border_radius=8)
+            scr.blit(bg, pill)
+            blink = 0.65 + 0.35 * math.sin(app.t * 6)
+            app.txt(scr, tiny, text, (pill.x + 10, pill.centery), scale_c((255, 140, 130), blink), "midleft")
+            if ilv >= 2:
+                cost = director.fortify_cost(g, inc)
+                done = bool(inc["fort"]) if inc["kind"] == "offensive" else len(inc["fort"]) >= len(inc["targets"])
+                can = not done and g.credits >= cost
+                label = "FORTIFIED" if done else f"FORTIFY {fmt(cost)}"
+                b = pygame.Rect(pill.right - 140, pill.y + 3, 134, 22)
+                self.button(scr, b, label, (lambda i=inc["id"]: director.fortify(g, i)), tiny, enabled=can, col=(70, 30, 36),
+                            accent=(255, 130, 110))
+            y += 34
+
+    def draw_command_bar(self, scr, fonts):
+        """The wide map's bottom bar: the selected sector, what an attack would be like, and the actions."""
+        app, g = self.app, self.app.g
+        big, med, sm, tiny = fonts
+        r = pygame.Rect(VIEW.x + 6, VIEW.bottom - BAR + 4, VIEW.w - 12, BAR - 10)
+        bg = pygame.Surface(r.size, pygame.SRCALPHA)
+        pygame.draw.rect(bg, (10, 13, 32, 236), bg.get_rect(), border_radius=10)
+        pygame.draw.rect(bg, (90, 115, 185, 255), bg.get_rect(), 1, border_radius=10)
+        scr.blit(bg, r)
+        k = app.sel_sector
+        if not app.sector_known(k):
+            fr = g.frontier()
+            k = min(fr) if fr else 0
+        sec = SECTORS[k]
+        fp = g.fleet_power()
+        x = r.x + 14
+        if k in g.conquered:
+            col = (140, 205, 255) if k else (255, 215, 120)
+            pygame.draw.circle(scr, (20, 36, 72), (x + 20, r.centery), 20)
+            pygame.draw.circle(scr, col, (x + 20, r.centery), 20, 2)
+            app.txt(scr, med, sec["name"], (x + 52, r.y + 10), (225, 235, 255))
+            app.txt(scr, tiny, "Your sector" if k else "Your home system", (x + 52, r.y + 34), col)
+            lines = [(sec["desc"], (130, 255, 150))]
+            if k:
+                foes, hold = front.exposure(g, k)
+                if hold is not None:
+                    label, rc = front.risk(hold)
+                    lines.append((f"Garrison {fmt(director.sector_defense(g, k))}  -  {label}: {hold * 100:.0f}% to hold", rc))
+                else:
+                    lines.append(("Rear sector: nothing can reach it", (130, 230, 150)))
+            fac = None
+        else:
+            fac = sec["faction"]
+            fcol = FACTIONS[fac]["col"]
+            icon = app.enemy_big[fac]
+            scr.blit(icon, icon.get_rect(center=(x + 22, r.centery)))
+            app.txt(scr, med, sec["name"], (x + 52, r.y + 10), fcol)
+            st = director.stance(g, fac)
+            stxt, scol = (("AT WAR", (255, 120, 110)) if st == "war" else
+                          ("TRUCE", (130, 220, 255)) if st == "truce" else
+                          (f"PEACE - tension {g.tension.get(fac, 0.0) * 100:.0f}%", (130, 230, 150)))
+            app.txt(scr, tiny, FACTIONS[fac]["name"] + "  -  " + stxt, (x + 52, r.y + 34), scol)
+            ep = g.sector_power(k)
+            ch = win_chance(fp, ep)
+            label, sc_ = front.status(g, k)
+            lines = [(f"Enemy power {fmt(ep)}   your fleet {fmt(fp)}", (210, 215, 235)),
+                     (f"Win chance {ch * 100:.0f}%  -  {label}", app.chance_color(ch)),
+                     (f"Reward: {sec['desc']}", (150, 158, 190))]
+        tx = x + 52 + 250
+        for i, (t, c) in enumerate(lines[:3]):
+            app.txt(scr, tiny, t, (tx, r.y + 8 + i * 17), c)
+        # actions, right-aligned
+        bx = r.right - 12
+        by = r.y + 12
+        bh = 44 if resources.TOUCH else 32
+        if fac is not None:
+            can = g.can_attack(k) and fp > 0
+            at_war = fac in g.war
+            if g.campaign is not None:
+                label = "CAMPAIGN BUSY"
+            elif at_war:
+                label = "ATTACK"
+            else:
+                label = "CONFIRM WAR!" if app.war_confirm > 0 and app.war_confirm_k == k else "DECLARE WAR"
+            rect = pygame.Rect(bx - 168, by, 168, bh)
+            self.button(scr, rect, label, (lambda k=k: app.attack(k)), sm, enabled=can, col=(110, 40, 46), accent=(255, 130, 110))
+            bx -= 176
+            if at_war:
+                ok, why = director.can_sue(g, fac)
+                rect = pygame.Rect(bx - 148, by, 148, bh)
+                label = "SUE FOR PEACE" if ok else (why if len(why) < 18 else "SUE FOR PEACE")
+                self.button(scr, rect, label, (lambda f=fac: director.sue_for_peace(g, f)), tiny if not ok else sm, enabled=ok,
+                            col=(30, 70, 60), accent=(110, 230, 190))
+                bx -= 156
+        rect = pygame.Rect(bx - 120, by, 120, bh)
+        self.button(scr, rect, "CLOSE LOOK", (lambda k=k: (setattr(app, "sel_sector", k), self.focus(k))), sm)
 
     def draw_tooltip(self, scr, fonts, k, fp):
         app, g = self.app, self.app.g

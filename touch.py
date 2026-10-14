@@ -37,7 +37,7 @@ class Touch:
         g = app.g
         if g.event or (g.crate and g.crate.get("rect") and g.crate["rect"].collidepoint(pos)):
             app.mouse_down(pos, touch=True)
-        elif pos[0] >= self.panel.x - 10:
+        elif app.panel_visible() and pos[0] >= self.panel.x - 10:
             self.gesture = dict(kind="panel", start=pos, last=pos, moved=False)
             self.last_t = time.monotonic()
         elif app.view == "galaxy" and app.fv.down(pos):

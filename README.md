@@ -261,6 +261,21 @@ Once you unlock **Mars** the **galaxy map** opens (the spiral button at the far 
 
 ![A sector liberated](screenshots/22-sector-liberated.png)
 
+#### The galaxy screen
+
+Switching to the galaxy (**G**, or the spiral button at the left of the planet strip) opens a screen of its own, with its own **star-chart background** instead of the planet's sky. Only a slim bar of numbers stays at the top, and the map takes the rest of the window:
+
+![The galaxy screen](screenshots/55-galaxy-wide.png)
+
+- At the bottom a **command bar** shows the selected sector - its power against yours, your win chance, its stance (peace, truce or war) and its reward - with **ATTACK** (or **DECLARE WAR**), **SUE FOR PEACE** and **CLOSE LOOK**.
+- Incoming enemy attacks (with the Intel upgrade) appear as red chips under the toolbar with a **FORTIFY** button, and their fleets sail down the lanes.
+
+![An incoming attack on the wide map](screenshots/57-galaxy-wide-incoming.png)
+
+- **PANEL** brings the side panel back (the Armory, the Threat card, Factions, the enemy log...) next to a smaller map; **WIDE** hides it again; **BACK** returns to the solar system. The choice is remembered.
+
+![The galaxy map with the side panel](screenshots/56-galaxy-with-panel.png)
+
 #### Close look: the frontlines
 
 The galaxy map is a zoomable tactical view. Scroll the **mouse wheel** to zoom towards the cursor, **drag** to pan (or use **+** / **-** and the arrow keys), and use the buttons in the corner: **+**, **-**, **FIT** (the whole galaxy) and **FRONT** (zoom in on the front of the selected sector - **Z** and a double-click on a sector do the same). A mini-map shows where you are once you zoom in, and you can click it to jump somewhere else.
