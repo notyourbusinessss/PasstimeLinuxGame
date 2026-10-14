@@ -182,14 +182,65 @@ Once you unlock **Mars** the **galaxy map** opens (the spiral button at the far 
 | Armor | 12 | Fleet losses -6% per level |
 | Engines | 15 | Campaigns 8% faster per level |
 | Shields | 10 | Raid losses -8% per level |
+| Intel | 8 | Enemy attacks are announced earlier and in more detail (see *The Threat Director* below) |
 
-**Raids.** While enemy sectors border your territory they occasionally **raid one of your planets**. Your ships and **Defense Grid** buildings (+10% defense per level) fight them off: you get credits for repelling a raid, or lose a few percent of that planet's ore if the defence fails. If you are on the raided planet you watch it happen:
+**Raids.** While enemy sectors border your territory they **raid your planets**. Your ships and **Defense Grid** buildings (+10% defense per level) fight them off: you get credits for repelling a raid, or lose some of that planet's ore if the defence fails. If you are on the raided planet you watch it happen:
 
 ![Enemy raiders attacking Mars](screenshots/20-enemy-raid.png)
 
 ![A raid that got through](screenshots/21-raid-lost.png)
 
-Every liberated sector also makes the next raids weaker. The 15 sectors and their rewards:
+#### The Threat Director
+
+The enemy is not random: a **Threat Director** watches how strong you are compared with the enemy sectors that border you and decides when to strike. The Galaxy tab shows its **Threat level** card:
+
+![The Threat level card, incoming attacks and faction hostility](screenshots/28-threat-director.png)
+
+- **Aggression** (Quiet, Watchful, Hostile, Aggressive, Warlike) rises when your fleet is weak next to the nearest enemy, when some of your planets are poorly defended and when you have been attacking a faction recently. The more aggressive the enemy, the more often it attacks.
+- **Raids** hit your planets, and the enemy prefers the weakly defended ones. They come in three sizes:
+
+| Raid | Appears once you hold | Power | Planets hit | If you hold | If you lose |
+|---|---|---|---|---|---|
+| Small raid | - | x1 | 1 | credits | 4% of that planet's ore |
+| Regional assault | 3 sectors | x3 | 1 | 4x the credits | 10% of that planet's ore |
+| System invasion | 8 sectors | x6 | 3 at once | 10x the credits | 14% of each planet's ore |
+
+  Your Shields upgrade reduces what a lost raid costs.
+- **Counter-offensives** try to **retake a sector you liberated** that borders enemy territory. Each sector is defended by its **garrison** (your fleet power when you took it, never less than half your current fleet). If it falls you lose that sector's permanent bonus until you liberate it again (which earns the *Comeback* achievement).
+- **Hostility.** Every campaign you start angers the faction you attack: its raids and offensives hit up to 2x harder, and the anger fades over a couple of hours.
+- **Grace periods.** The enemy never attacks while the game is closed, and stays quiet for 10 minutes after you load a save, 15 after a Warp and 20 after an Ascension.
+
+**Intel** decides how much you know in advance. Each level adds warning time (raids: 15 s + 45 s per level, counter-offensives: 60 s + 100 s per level), and higher levels reveal more:
+
+| Intel level | You are told |
+|---|---|
+| 0 | Nothing: the raiders just arrive |
+| 1 - 2 | "Unknown ships detected" |
+| 3 - 4 | Who is coming and which planet or sector is the target, and you can Fortify it |
+| 5 - 6 | ...plus the attack's power |
+| 7 - 8 | ...plus your exact chance to hold |
+
+Incoming attacks show up on the HUD and as a dashed red lane on the galaxy map, each with a countdown:
+
+![An incoming attack on the galaxy map](screenshots/29-incoming-on-map.png)
+
+![Incoming attack lines on the HUD](screenshots/30-hud-incoming.png)
+
+With Intel 3 or more you can press **Fortify** on an incoming attack. It costs credits and multiplies the defence of the target (x2.5 for a planet, x2 for a sector) for that one attack.
+
+![A fortified planet](screenshots/31-fortified.png)
+
+A System invasion is a proper swarm:
+
+![A System invasion over Mars](screenshots/32-system-invasion-raid.png)
+
+And when a sector falls, the galaxy map says so:
+
+![A sector lost to a counter-offensive](screenshots/33-sector-lost.png)
+
+The Galaxy tab keeps a short log of recent enemy activity, and the Stats page counts big raids repelled, counter-offensives held and sectors lost / retaken. The balancing bot (which buys Intel, Fortifies bad fights and keeps its fleet up) loses no sectors, but a player who ignores their defences will.
+
+The 15 sectors and their rewards (each liberated sector also weakens the next raids):
 
 | # | Sector | Faction | Reward for liberating it |
 |---|---|---|---|
@@ -269,7 +320,7 @@ The price of going again: in cycle *n* planets and megaprojects cost more (`1 + 
 
 ### 10. Achievements
 
-There are **153 achievements** in 12 categories: Mining, Fleet, Planets, Colony, Projects, Science, Wealth, Quests, Warp, Galaxy, General and a handful of **Secret** ones whose name and description stay hidden until you earn them.
+There are **161 achievements** in 12 categories: Mining, Fleet, Planets, Colony, Projects, Science, Wealth, Quests, Warp, Galaxy, General and a handful of **Secret** ones whose name and description stay hidden until you earn them.
 
 - Every achievement has a **tier** - bronze (+0.5% production), silver (+1%), gold (+2%) or platinum (+4%) - so completing everything is worth roughly **+200%** to all production.
 - The **Awards** tab shows a **progress bar** for every unfinished achievement, sorted so the ones closest to done are at the top. Use the category chips to filter.
@@ -314,7 +365,7 @@ Press **F1** to jump to the Dev tab and back. A red `DEV MODE` badge shows in th
 | Colonies & megaprojects | Max every building, build one or all megaprojects |
 | Tech, perks & quests | Research everything, grant or reset every Dark Matter perk, complete or reroll quests |
 | Events & crates | Trigger any of the 9 random events, spawn a supply crate, start a Mining Frenzy |
-| Galaxy & enemies | Liberate the next / every sector, finish or force-win a campaign, max the armory, trigger raids you win or lose |
+| Galaxy & enemies | Liberate the next / every sector, finish or force-win a campaign, max the armory (and Intel), trigger raids you win or lose, summon a small / regional / system raid or a counter-offensive (arrives in seconds), resolve or clear all incoming attacks, lose a sector, anger every faction, skip the enemy's grace period |
 | Ascension (New Game+) | Add Stardust, force an Ascension, grant or refund every Stardust perk |
 | Achievements & warp | Unlock or lock every achievement, force a warp |
 | Game | Save, reload from disk, wipe the save, show an FPS counter |
@@ -347,7 +398,7 @@ The pacing (planets, megaprojects and sector liberations) was tuned with a bot t
 | The final boss (Void Throne) | 65 - 90 hours |
 | First Ascension, then every later cycle | after the boss; cycles of ~40 - 65 hours |
 
-Warping a few times along the way speeds this up a lot. Playing less often just means the numbers go up while you are away.
+Enemy raids and counter-offensives are included in these numbers (the bot defends itself with Intel and Fortify); small raids that get through only cost a little ore. Warping a few times along the way speeds this up a lot. Playing less often just means the numbers go up while you are away.
 
 ## Tips
 
@@ -358,7 +409,8 @@ Warping a few times along the way speeds this up a lot. Playing less often just 
 - Check the Galaxy tab every so often: a glowing dot appears on it when a campaign has a good win chance. Liberating sectors is one of the biggest production boosts in the game.
 - After the boss, Ascend: spend the Stardust on the planet-starting perks and the "keep" perks first - they make every later cycle much faster.
 - Put credits and science into the Armory (Weapons first) - your win chances jump quickly, and Armor makes failed campaigns cheaper.
-- Build Defense Grids on planets that keep getting raided.
+- Build Defense Grids on planets that keep getting raided, and buy a few levels of Intel: with the target named you can Fortify it and turn a lost raid into a won one.
+- Don't let your fleet fall far behind the enemy next to you: that is what makes the Threat Director aggressive. Attacking one faction over and over also makes it hit back harder.
 - Open the Awards tab now and then: the nearest-to-done achievements sit at the top and every one is a permanent production bonus.
 - If a dot is glowing on a tab, there is something affordable in it.
 
@@ -368,6 +420,7 @@ Warping a few times along the way speeds this up a lot. Playing less often just 
 |---|---|
 | `space_miner.py` | The game window, input and all the UI |
 | `core.py` | Game rules, state, the galaxy / combat model and the achievement list. No pygame in here, so it runs headless |
+| `director.py` | The Threat Director: aggression, raid and counter-offensive scheduling, Intel warnings, Fortify. No pygame either |
 | `devtools.py` | The developer-mode cheats (only reachable with `--dev`) |
 | `sounds.py` | Procedural sound effects |
 | `gfx.py` | Procedural graphics: planets, asteroids, ships, backdrops |

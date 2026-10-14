@@ -7,6 +7,7 @@ These are only reachable when the game is started from a terminal with the --dev
 Using any cheat marks the save as having cheated (which unlocks a secret achievement).
 """
 import core
+import director
 from core import BMAX, NB, NSH, NSITE, NSEC, ARMORY, STARDUST_PERKS, PERKS, PROJECTS, SC, SITES, TECHS, UPGRADES, ACHIEVEMENTS, fmt
 
 EVENT_NAMES = [("Meteor shower", "meteor"), ("Pirate raid", "pirates"), ("Solar flare", "flare"),
@@ -193,6 +194,37 @@ def sections(app):
         g.sd_perks = set()
         g.stardust = g.sd_total
 
+    def sched_raid(tier):
+        def run():
+            if director.schedule_raid(g, tier=tier, lead=8.0) is None:
+                g.toast("No enemy territory borders yours yet (liberate / reach Mars first).", 3)
+        return run
+
+    def sched_offensive():
+        if director.schedule_offensive(g, lead=12.0) is None:
+            g.toast("You hold no sector that borders enemy territory.", 3)
+
+    def resolve_incoming():
+        for inc in list(g.incoming):
+            g.incoming.remove(inc)
+            director.resolve(g, inc)
+
+    def lose_sector():
+        held = [k for k in g.conquered if k]
+        if held:
+            k = max(held)
+            g.conquered.discard(k)
+            g.lost_sectors.add(k)
+            g.sectors_lost += 1
+            g.fx("sector_lost", k)
+
+    def max_intel():
+        g.armory[director.INTEL] = ARMORY[director.INTEL][3]
+
+    def more_hostile():
+        for f in core.FACTIONS:
+            g.hostility[f] = g.hostility.get(f, 0.0) + 3.0
+
     def set_speed(k):
         def run():
             d.speed = k
@@ -280,6 +312,16 @@ def sections(app):
             ("Finish current campaign now", cheat(finish_campaign), False),
             ("Current campaign: guaranteed win", cheat(sure_win), False),
             ("Max armory", cheat(max_armory), False),
+            ("Max Intel (full warnings)", cheat(max_intel), False),
+            ("Raid incoming: small (8 s)", cheat(sched_raid(0)), False),
+            ("Raid incoming: regional (8 s)", cheat(sched_raid(1)), False),
+            ("Raid incoming: system invasion (8 s)", cheat(sched_raid(2)), False),
+            ("Counter-offensive incoming (12 s)", cheat(sched_offensive), False),
+            ("Resolve all incoming now", cheat(resolve_incoming), False),
+            ("Clear all incoming", cheat(lambda: g.incoming.clear()), False),
+            ("Lose a sector", cheat(lose_sector), False),
+            ("All factions +3 hostility", cheat(more_hostile), False),
+            ("Skip the enemy grace period", cheat(lambda: setattr(g, "grace", 0.0)), False),
             ("Enemy raid here (repelled)", cheat(lambda: g.raid(g.cur, force=True)), False),
             ("Enemy raid here (lost)", cheat(lambda: g.raid(g.cur, force=False)), False),
         ]),

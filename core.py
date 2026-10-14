@@ -262,6 +262,7 @@ ARMORY = [  # key, name, description, max level, base credit cost
     ("armor", "Armor", "Fleet losses -6% per level", 12, 8e3),
     ("engines", "Engines", "Campaigns 8% faster per level", 15, 8e3),
     ("shields", "Shields", "Raid losses -8% per level", 10, 5e3),
+    ("intel", "Intel", "Enemy attacks are announced earlier and in more detail", 8, 6e3),
 ]
 ARMORY_GROWTH = 2.4
 WIN_LOSSES, LOSE_LOSSES = 0.01, 0.08                    # fraction of your ships lost after a victory / defeat
@@ -459,6 +460,17 @@ def build_achievements():
        lambda t: f"Win {t} battles", lambda g: g.battles_won)
     ms("Galaxy", [("Home Guard", 5, "bronze"), ("Fortress Planet", 25, "silver"), ("Unbreakable", 100, "gold")],
        lambda t: f"Repel {t} enemy raids", lambda g: g.raids_repelled)
+    add("Forewarned", "Get an enemy attack warning that names the target (Intel armory)", "Galaxy", "bronze",
+        lambda g: "forewarned" in g.flags)
+    add("Dig In", "Fortify a planet or sector against an incoming attack", "Galaxy", "bronze", lambda g: "fortified" in g.flags)
+    add("Hold the Line", "Repel a Regional assault", "Galaxy", "silver", lambda g: g.tier_wins[1] >= 1,
+        lambda g: (g.tier_wins[1], 1))
+    add("Total Defense", "Repel a System invasion", "Galaxy", "gold", lambda g: g.tier_wins[2] >= 1,
+        lambda g: (g.tier_wins[2], 1))
+    ms("Galaxy", [("Not on My Watch", 5, "silver"), ("Iron Wall", 25, "gold")],
+       lambda t: f"Repel {t} enemy counter-offensives", lambda g: g.offensives_repelled)
+    add("Comeback", "Liberate a sector the enemy took back", "Galaxy", "silver", lambda g: g.sectors_retaken >= 1,
+        lambda g: (g.sectors_retaken, 1))
     add("Fully Armed", "Max out the Weapons armory", "Galaxy", "gold", lambda g: g.armory[0] >= ARMORY[0][3],
         lambda g: (g.armory[0], ARMORY[0][3]))
     # --- General
@@ -482,6 +494,7 @@ def build_achievements():
     add("Home Sweet Home", "Fly back to Earth after unlocking Mars", "Secret", "bronze",
         lambda g: "home" in g.flags, secret=True)
     add("Underdog", "Win a campaign with less than a 30% chance", "Secret", "gold", lambda g: "underdog" in g.flags, secret=True)
+    add("Setback", "Lose a sector to an enemy counter-offensive", "Secret", "bronze", lambda g: g.sectors_lost >= 1, secret=True)
     return A
 
 
@@ -515,6 +528,7 @@ class Game:
         self.dev_mult = 1.0                 # developer cheat: production multiplier
         self.click_times = deque()
         self.raid_t = random.uniform(420, 780)
+        self.offensive_t = random.uniform(1500, 2400)
         self.notified_unlock = -1
         self.recalc()
         if load:
@@ -554,6 +568,15 @@ class Game:
         self.cycle_start = 0.0
         self.armory = [0] * len(ARMORY)
         self.battles_won = self.battles_lost = self.raids_repelled = self.raids_lost = 0
+        self.incoming = []
+        self.hostility = {}
+        self.garrison = {}
+        self.lost_sectors = set()
+        self.director_log = []
+        self.director_id = 0
+        self.tier_wins = [0, 0, 0]
+        self.offensives_repelled = self.sectors_lost = self.sectors_retaken = 0
+        self.grace = 0.0
         self.quests = []
         self.play_time = 0.0
         self.ups_bought = self.travels = self.frenzies = self.best_burst = 0
@@ -578,7 +601,10 @@ class Game:
                  night_secs=self.night_secs, visited=sorted(self.visited), flags=sorted(self.flags),
                  conquered=sorted(self.conquered), campaign=self.campaign, armory=self.armory,
                  battles_won=self.battles_won, battles_lost=self.battles_lost, raids_repelled=self.raids_repelled,
-                 raids_lost=self.raids_lost, cycle=self.cycle, ascensions=self.ascensions, stardust=self.stardust,
+                 raids_lost=self.raids_lost, incoming=self.incoming, hostility=self.hostility, garrison={str(k): v for k, v in self.garrison.items()},
+                 lost_sectors=sorted(self.lost_sectors), director_log=self.director_log, director_id=self.director_id,
+                 tier_wins=self.tier_wins, offensives_repelled=self.offensives_repelled, sectors_lost=self.sectors_lost,
+                 sectors_retaken=self.sectors_retaken, cycle=self.cycle, ascensions=self.ascensions, stardust=self.stardust,
                  sd_total=self.sd_total, sd_perks=sorted(self.sd_perks), cyc_norm=self.cyc_norm, cycle_start=self.cycle_start,
                  settings=self.settings, time=time.time())
         try:
@@ -637,6 +663,16 @@ class Game:
             self.armory = [max(0, min(ARMORY[i][3], int(v))) for i, v in enumerate(arm)] + [0] * (len(ARMORY) - len(arm))
             self.battles_won = int(d.get("battles_won", 0)); self.battles_lost = int(d.get("battles_lost", 0))
             self.raids_repelled = int(d.get("raids_repelled", 0)); self.raids_lost = int(d.get("raids_lost", 0))
+            self.incoming = []     # attacks in flight are not restored: the enemy never acts while the game is closed
+            self.hostility = {str(k): float(v) for k, v in dict(d.get("hostility", {})).items() if k in FACTIONS}
+            self.garrison = {int(k): float(v) for k, v in dict(d.get("garrison", {})).items() if 0 < int(k) < NSEC}
+            self.lost_sectors = {int(k) for k in d.get("lost_sectors", []) if 0 < int(k) < NSEC}
+            self.director_log = [(float(a), str(b)) for a, b in list(d.get("director_log", []))[-8:]]
+            self.director_id = int(d.get("director_id", 0))
+            tw = list(d.get("tier_wins", []))[:3]
+            self.tier_wins = [int(v) for v in tw] + [0] * (3 - len(tw))
+            self.offensives_repelled = int(d.get("offensives_repelled", 0)); self.sectors_lost = int(d.get("sectors_lost", 0))
+            self.sectors_retaken = int(d.get("sectors_retaken", 0))
             self.cycle = max(1, int(d.get("cycle", 1))); self.ascensions = int(d.get("ascensions", 0))
             self.stardust = int(d.get("stardust", 0)); self.sd_total = int(d.get("sd_total", 0))
             self.sd_perks = {x for x in d.get("sd_perks", []) if x in SD_BY_ID}
@@ -654,6 +690,10 @@ class Game:
             return
         self.update_ach_bonus()
         self.recalc()
+        self.grace = 600.0                      # the enemy regroups for a while after you load a save
+        for k in self.conquered:
+            if k and k not in self.garrison:
+                self.garrison[k] = self.sector_power(k) * 1.3
         eff = self.E["offline"]
         total = 0.0
         for p in range(NSITE):
@@ -1007,6 +1047,8 @@ class Game:
         self.run_norm = 0.0
         self.crate = None
         self.buffs = []
+        self.incoming = []
+        self.grace = max(self.grace, 900.0)         # the enemy needs time to notice you have nothing left to defend with
         self.recalc()
         for p in range(n):
             if self.unlocked[p]:
@@ -1117,6 +1159,8 @@ class Game:
             return False
         self.campaign = dict(k=k, t=0.0, dur=self.campaign_duration(k), fp=fp,
                              chance=win_chance(fp, self.sector_power(k)))
+        fac = SECTORS[k]["faction"]
+        self.hostility[fac] = self.hostility.get(fac, 0.0) + 1.0        # attacking a faction makes it more hostile
         self.toast(f"Fleet dispatched to {SECTORS[k]['name']}  ({self.campaign['chance'] * 100:.0f}% to win)", 4)
         self.fx("campaign", k)
         return True
@@ -1133,6 +1177,10 @@ class Game:
         k = c["k"]
         if (c["chance"] >= 0.5) if self.sim else (random.random() < c["chance"]):
             self.conquered.add(k)
+            self.garrison[k] = c["fp"]
+            if k in self.lost_sectors:
+                self.lost_sectors.discard(k)
+                self.sectors_retaken += 1
             self.battles_won += 1
             if c["chance"] < 0.3:
                 self.flags.add("underdog")
@@ -1162,41 +1210,9 @@ class Game:
             return True
         return False
 
-    def step_raids(self, dt):
-        if not self.galaxy_open or self.travel:
-            return
-        self.raid_t -= dt
-        if self.raid_t > 0:
-            return
-        self.raid_t = random.uniform(420, 780)
-        self.raid()
-
     def raid(self, p=None, force=None):
-        """An enemy raid on planet p (random if None). force=True/False decides the outcome (dev tools)."""
-        front = self.frontier()
-        if not front:
-            return False
-        k = min(front, key=self.sector_power)
-        rp = 0.12 * self.sector_power(k)
-        if p is None:
-            p = random.choice([q for q in range(NSITE) if self.unlocked[q]])
-        dp = self.planet_power(p, defense=True)
-        win = force if force is not None else random.random() < win_chance(dp, rp)
-        fac = SECTORS[k]["faction"]
-        nm = SITES[p]["name"]
-        lost = 0.0
-        if win:
-            self.raids_repelled += 1
-            loot = self.cred_ops * 40 + 10
-            self.add_credits(loot)
-            self.toast(f"{FACTIONS[fac]['name']} raided {nm} - repelled!  Salvaged {fmt(loot)} credits.", 5)
-        else:
-            self.raids_lost += 1
-            lost = self.ore[p] * 0.04 * max(0.05, 1 - 0.08 * self.armory[3])
-            self.ore[p] -= lost
-            self.toast(f"{FACTIONS[fac]['name']} raided {nm}!  Lost {fmt(lost)} {SITES[p]['ore']}.", 6)
-        self.fx("raid", dict(p=p, win=win, faction=fac, lost=lost))
-        return True
+        """Developer helper: an immediate raid on planet p. force=True/False picks the outcome."""
+        return director.instant_raid(self, p, force)
 
     # ---------------- New Game Plus: Ascension -----------------
     def can_ascend(self):
@@ -1257,6 +1273,11 @@ class Game:
         self.conquered = keep_sec
         self.armory = keep_arm
         self.campaign = None
+        self.incoming = []
+        self.hostility = {}
+        self.lost_sectors = set()
+        self.garrison = {k: self.sector_power(k) * 1.3 for k in keep_sec if k}
+        self.grace = 1200.0
         self.run_norm = 0.0
         self.cyc_norm = 0.0
         self.cur = 0
@@ -1467,6 +1488,7 @@ class Game:
                 self.add_ore(p, self.s_ops[p] * dt)
         self.add_credits(self.cred_ops * dt)
         self.add_sci(self.sci_ops * dt)
+        director.step(self, dt)
         if self.campaign:
             self.campaign["t"] += dt
             if self.campaign["t"] >= self.campaign["dur"]:
@@ -1487,7 +1509,6 @@ class Game:
                 self.night_secs += dt
             self.step_crate(dt)
             self.step_events(dt)
-            self.step_raids(dt)
         if self.E["auto"] or self.E["autoup"]:
             self.auto_t += dt
             if self.auto_t > 1.0:
@@ -1594,3 +1615,6 @@ apply_tune()
 
 def dm_bonus(dm, dmbase):
     return 1 + dmbase * math.sqrt(dm)
+
+
+import director  # noqa: E402  (the Threat Director works on Game objects and is imported last on purpose)
