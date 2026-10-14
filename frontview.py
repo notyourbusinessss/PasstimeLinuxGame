@@ -34,7 +34,7 @@ def hrand(*a):
     h ^= h >> 15
     h = (h * 2246822519) & 0xFFFFFFFF
     h ^= h >> 13
-    return (h & 0xFFFF) / 65535.0
+    return (h & 0xFFFF) / 65536.0                 # always below 1, so int(r * n) is a valid index
 
 
 class FrontView:
@@ -301,8 +301,8 @@ class FrontView:
             lit = (now * 6) % 1.0 < 0.65
             if lit and mine_pts and enemy_pts:
                 for q in range(min(4, 2 + len(mine_pts) // 6)):
-                    a = mine_pts[int(hrand(mine, enemy, slot, q) * len(mine_pts))]
-                    b = enemy_pts[int(hrand(enemy, mine, slot, q + 9) * len(enemy_pts))]
+                    a = mine_pts[min(len(mine_pts) - 1, int(hrand(mine, enemy, slot, q) * len(mine_pts)))]
+                    b = enemy_pts[min(len(enemy_pts) - 1, int(hrand(enemy, mine, slot, q + 9) * len(enemy_pts)))]
                     mine_fire = hrand(slot, q, mine) < 0.5
                     s, e = (a, b) if mine_fire else (b, a)
                     col = LASER_MINE if mine_fire else ecol

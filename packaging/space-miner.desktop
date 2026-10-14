@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Space Miner
+Comment=An idle space-mining game: mine asteroids, found colonies and liberate the galaxy
+Exec=space-miner
+Icon=space-miner
+Terminal=false
+Categories=Game;Simulation;
+Keywords=idle;incremental;space;mining;clicker;

@@ -6,6 +6,8 @@ import time
 
 import pygame
 
+import gamelog
+
 RATE = 22050
 
 
@@ -42,7 +44,8 @@ class Sounds:
             if not pygame.mixer.get_init():
                 pygame.mixer.init(RATE, -16, 1, 512)
             self.ok = True
-        except Exception:
+        except Exception as e:
+            gamelog.LOG.warning("No audio device (%s); the game will be silent.", e)
             return
         defs = {
             "click": ([(760, 480, 0.05)], 0.22, "sine"),
@@ -62,8 +65,8 @@ class Sounds:
         for name, (segs, vol, wave) in defs.items():
             try:
                 self.snd[name] = pygame.mixer.Sound(buffer=synth(segs, vol, wave).tobytes())
-            except Exception:
-                pass
+            except Exception as e:
+                gamelog.LOG.warning("Could not create the %r sound: %s", name, e)
 
     def play(self, name):
         if not self.ok or not self.settings.get("sound", True):

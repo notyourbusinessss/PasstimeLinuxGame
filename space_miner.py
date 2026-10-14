@@ -10,19 +10,24 @@ import math
 import os
 import random
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
 
+os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")       # no pygame banner in the terminal
 import pygame
 
 import core
+import gamelog
+import resources
 import devtools
 import director
 import front
 import frontview
 import gfx
 import sounds
+from version import __version__
 from core import (BMAX, BUILDINGS, NB, NSH, NSITE, PERKS, PROJECTS, SC, SHIPS, SITES, TECHS, TECH_BY_ID,
                   UPGRADES, ACHIEVEMENTS, ACH_BY_ID, ACH_CATS, TIER_BONUS, TIER_NAMES, QUEST_TXT, fmt, geo_cost,
                   SECTORS, NSEC, FACTIONS, ARMORY, armory_cost, win_chance,
@@ -83,6 +88,7 @@ class App:
         self.fps = 0.0
         self.can_scale = False               # True when the window is resizable and scales the game to fit
         self.fullscreen = False
+        self.test_fault = 0
         self.had_event = False
         self.snd = sounds.Sounds(self.g.settings)
         self.t = 0.0
@@ -274,6 +280,36 @@ class App:
     def set_tab(self, k):
         self.tab = k
 
+    def describe(self):
+        """A few lines about the game state, added to error reports."""
+        g = self.g
+        try:
+            win = pygame.display.get_window_size()
+        except pygame.error:
+            win = "?"
+        return "\n".join([
+            f"view={self.view} tab={self.tabs[self.tab] if 0 <= self.tab < len(self.tabs) else self.tab} planet={SITES[g.cur]['name']} "
+            f"fps={self.fps:.0f} window={win} fullscreen={self.fullscreen} dev={self.dev}",
+            f"play_time={g.play_time:.0f}s cycle={g.cycle} warps={g.warps} unlocked={g.n_unlocked} sectors={len(g.conquered) - 1} "
+            f"campaign={'yes' if g.campaign else 'no'} incoming={len(g.incoming)} event={'yes' if g.event else 'no'} "
+            f"travel={'yes' if g.travel else 'no'} cheated={'cheated' in g.flags}",
+            f"galaxy camera: zoom={self.fv.z:.2f} centre=({self.fv.x:.2f},{self.fv.y:.2f}) selected sector={self.sel_sector}",
+        ])
+
+    def open_log_folder(self):
+        d = gamelog.log_dir()
+        for cmd in (["xdg-open", d], ["open", d]):
+            if shutil.which(cmd[0]):
+                try:
+                    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    return
+                except OSError as e:
+                    gamelog.LOG.warning("Could not open the log folder: %s", e)
+        if hasattr(os, "startfile"):
+            os.startfile(d)                              # Windows
+            return
+        self.g.toast(f"Log folder: {d}", 8)
+
     def toggle_fullscreen(self):
         """F11 / Alt+Enter / the Stats page button. The 1280x720 game is scaled to fit the screen (black bars if the
         aspect ratio differs)."""
@@ -289,6 +325,7 @@ class App:
             g.toast("Fullscreen is not supported by this display.", 3)
             return False
         g.settings["fullscreen"] = self.fullscreen
+        gamelog.LOG.info("Fullscreen %s", "on" if self.fullscreen else "off")
         g.toast("Fullscreen on - press F11 or Esc to leave it." if self.fullscreen else "Back to the window.", 3)
         return True
 
@@ -390,6 +427,9 @@ class App:
     # ---------------- update -----------------
     def update(self, dt):
         g = self.g
+        if self.test_fault > 0:                      # developer test: exercise the error log (Dev tab -> Game)
+            self.test_fault -= 1
+            raise RuntimeError("Test error raised from the Dev tab")
         self.dt = dt
         self.t += dt
         g.step(dt)
@@ -1778,7 +1818,18 @@ class App:
         self.button(scr, pygame.Rect(PANEL.x + 220, y, 280, 40),
                     "CLICK AGAIN: WIPE SAVE" if self.reset_confirm > 0 else "Hard reset (wipe save)", sm,
                     self.hard_reset, panel=True, col=(150, 60, 70) if self.reset_confirm > 0 else (70, 40, 50))
-        return y + 60
+        y += 52
+        can_open = not resources.ANDROID and gamelog.enabled()
+        self.button(scr, pygame.Rect(PANEL.x, y, 200, 34), "Open log folder", sm, self.open_log_folder, enabled=can_open, panel=True)
+        shown = gamelog.log_dir()
+        if len(shown) > 52:
+            shown = "..." + shown[-49:]
+        self.txt(scr, tiny, shown, (PANEL.x + 212, y + 4), (150, 158, 190))
+        n = gamelog.error_count()
+        self.txt(scr, tiny, (f"{n} error(s) logged this session - see the log" if n else "No errors this session"),
+                 (PANEL.x + 212, y + 19), (255, 150, 130) if n else (120, 160, 130))
+        self.txt(scr, tiny, f"Space Miner {__version__}", (PANEL.x + 4, y + 44), (120, 128, 160))
+        return y + 70
 
     def draw_dev(self, scr, fonts, y):
         big, med, sm, tiny = fonts
@@ -1796,7 +1847,8 @@ class App:
                 r = pygame.Rect(PANEL.x + (k % 2) * half, y, half - 6, 34)
                 if r.colliderect(PANEL):
                     f = sm if sm.size(label)[0] < half - 24 else tiny
-                    self.button(scr, r, label, f, fn, panel=True, col=(150, 70, 70) if active else (52, 64, 108))
+                    self.button(scr, r, label, f, (lambda fn=fn, label=label: (gamelog.LOG.info("Developer cheat: %s", label), fn())),
+                                panel=True, col=(150, 70, 70) if active else (52, 64, 108))
                 if k % 2 == 1 or k == len(items) - 1:
                     y += 40
         return y + 20
@@ -1855,11 +1907,13 @@ class App:
 
 USAGE = """Space Miner
 
-usage: python3 space_miner.py [--fullscreen] [--dev] [--selftest]
+usage: space-miner [--fullscreen] [--debug] [--dev] [--selftest] [--version]
 
   --fullscreen start in fullscreen (F11 toggles it any time; the window can also be resized or maximised)
+  --debug      verbose log (also printed in the terminal)
   --dev        developer mode: adds a Dev tab with cheats (F1 jumps to it). Terminal only.
   --selftest   run headless for a few seconds and exercise the game (used for testing)
+  --version    print the version and exit
 """
 
 
@@ -1886,6 +1940,9 @@ def main():
     if "--help" in sys.argv or "-h" in sys.argv:
         print(USAGE)
         return
+    if "--version" in sys.argv:
+        print(f"Space Miner {__version__}")
+        return
     selftest = "--selftest" in sys.argv
     dev = "--dev" in sys.argv
     test_dir = None
@@ -1894,91 +1951,147 @@ def main():
         os.environ["SDL_AUDIODRIVER"] = "dummy"
         test_dir = tempfile.mkdtemp(prefix="space_miner_selftest_")
         core.SAVE = os.path.join(test_dir, "save.json")              # the self-test never touches your real save
+    gamelog.setup(debug="--debug" in sys.argv, directory=test_dir)   # the self-test logs into its temporary folder too
     pygame.display.init()
     pygame.font.init()
     pygame.display.set_caption("Space Miner")
+    try:
+        pygame.display.set_icon(pygame.image.load(resources.resource("assets/icon.png")))
+    except (FileNotFoundError, pygame.error) as e:
+        gamelog.LOG.warning("Could not load the window icon: %s", e)
     scr, can_scale = open_window()
+    if not can_scale:
+        gamelog.LOG.warning("No scaling renderer: using a fixed-size window (no resizing or fullscreen).")
+    gamelog.log_session()
     clock = pygame.time.Clock()
 
-    def font(size, bold=False):
-        return pygame.font.SysFont("dejavusans,liberationsans,arial,freesans", size, bold=bold)
+    def font(size, bold=False):                      # the bundled DejaVu Sans, so it looks the same everywhere
+        try:
+            return pygame.font.Font(resources.resource("assets/fonts/DejaVuSans-Bold.ttf" if bold else "assets/fonts/DejaVuSans.ttf"), size)
+        except (FileNotFoundError, pygame.error) as e:
+            gamelog.LOG.warning("Bundled font not found (%s); using a system font.", e)
+            return pygame.font.SysFont("dejavusans,liberationsans,arial,freesans", size, bold=bold)
 
     fonts = (font(30, True), font(18, True), font(15), font(12))
     t0 = time.time()
     app = App(dev=dev)
     g = app.g
+    gamelog.set_context(app.describe)
     app.can_scale = can_scale
     if can_scale and not selftest and ("--fullscreen" in sys.argv or g.settings.get("fullscreen")):
         app.toggle_fullscreen()
     if dev:
         print("Developer mode ON (cheats are in the Dev tab; F1 jumps to it).")
+        gamelog.LOG.info("Developer mode is ON")
     if selftest:
         print(f"startup {time.time() - t0:.2f}s")
+    gamelog.LOG.info("Ready in %.2f s", time.time() - t0)
     _SCR.update(scr=scr, fonts=fonts)
     here = os.path.dirname(os.path.abspath(__file__))
     running = True
     frames = 0
+    fail_streak = 0
+    crashed = False
+    started = last_beat = time.monotonic()
+    beat_frames = 0
+    slowest = 0.0
 
     def shot(n):
         pygame.image.save(scr, os.path.join(here, f"shot_{n}.png"))
 
-    while running:
-        dt = min(clock.tick(60) / 1000.0, 0.25)
-        if selftest:
-            dt = 0.05
-        app.fps = clock.get_fps()
-        if dev and not selftest:
-            dt = min(dt * app.dev_state.speed, 30.0)
-        app.mouse = (480, 330) if selftest else pygame.mouse.get_pos()
-        for e in pygame.event.get():
-            if e.type == pygame.QUIT:
-                running = False
-            elif e.type == pygame.KEYDOWN:
-                if e.key == pygame.K_ESCAPE:
-                    if app.fullscreen:
-                        app.toggle_fullscreen()
-                    else:
+    try:
+        while running:
+            try:
+                raw = clock.tick(60) / 1000.0
+                dt = min(raw, 0.25)
+                if selftest:
+                    dt = 0.05
+                if raw > 2.0 and not selftest:
+                    gamelog.LOG.info("The game was paused for %.1f s (computer asleep, or the window was being dragged).", raw)
+                else:
+                    slowest = max(slowest, raw)
+                app.fps = clock.get_fps()
+                if dev and not selftest:
+                    dt = min(dt * app.dev_state.speed, 30.0)
+                app.mouse = (480, 330) if selftest else pygame.mouse.get_pos()
+                for e in pygame.event.get():
+                    if e.type == pygame.QUIT:
                         running = False
-                elif e.key == pygame.K_F11 or (e.key == pygame.K_RETURN and e.mod & pygame.KMOD_ALT):
-                    app.toggle_fullscreen()
-                elif e.key == pygame.K_SPACE and not g.event:
-                    app.space_click()
-                elif pygame.K_1 <= e.key <= pygame.K_9 and e.key - pygame.K_1 < len(app.tabs):
-                    app.set_tab(e.key - pygame.K_1)
-                elif e.key == pygame.K_0 and len(app.tabs) >= 10:
-                    app.set_tab(9)
-                elif e.key == pygame.K_g:
-                    app.strip_click(-1)
-                elif app.galaxy_key(e.key):
-                    pass
-                elif e.key == pygame.K_F1 and dev:
-                    app.set_tab(len(app.tabs) - 1 if app.tab != len(app.tabs) - 1 else 0)
-            elif e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
-                if not (app.view == "galaxy" and not g.event and app.fv.down(e.pos)):
-                    app.mouse_down(e.pos)
-            elif e.type == pygame.MOUSEBUTTONUP and e.button == 1:
-                app.fv.up(e.pos)
-            elif e.type == pygame.MOUSEMOTION:
-                if app.fv.drag and not e.buttons[0]:
-                    app.fv.drag = None
-                app.fv.move(e.pos)
-            elif e.type == pygame.MOUSEWHEEL:
-                if PANEL.collidepoint(app.mouse):
-                    app.scroll[app.tab] -= e.y * 50
-                elif app.view == "galaxy" and not g.event:
-                    app.fv.wheel(app.mouse, e.y)
-        app.update(dt)
-        app.draw(scr, fonts)
-        pygame.display.flip()
-        frames += 1
-        if selftest:
-            selftest_step(app, g, frames, shot)
-            if frames >= (100 if dev else 95):
-                running = False
-    g.save()
+                    elif e.type == pygame.KEYDOWN:
+                        if e.key == pygame.K_ESCAPE:
+                            if app.fullscreen:
+                                app.toggle_fullscreen()
+                            else:
+                                running = False
+                        elif e.key == pygame.K_F11 or (e.key == pygame.K_RETURN and e.mod & pygame.KMOD_ALT):
+                            app.toggle_fullscreen()
+                        elif e.key == pygame.K_SPACE and not g.event:
+                            app.space_click()
+                        elif pygame.K_1 <= e.key <= pygame.K_9 and e.key - pygame.K_1 < len(app.tabs):
+                            app.set_tab(e.key - pygame.K_1)
+                        elif e.key == pygame.K_0 and len(app.tabs) >= 10:
+                            app.set_tab(9)
+                        elif e.key == pygame.K_g:
+                            app.strip_click(-1)
+                        elif app.galaxy_key(e.key):
+                            pass
+                        elif e.key == pygame.K_F1 and dev:
+                            app.set_tab(len(app.tabs) - 1 if app.tab != len(app.tabs) - 1 else 0)
+                    elif e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
+                        if not (app.view == "galaxy" and not g.event and app.fv.down(e.pos)):
+                            app.mouse_down(e.pos)
+                    elif e.type == pygame.MOUSEBUTTONUP and e.button == 1:
+                        app.fv.up(e.pos)
+                    elif e.type == pygame.MOUSEMOTION:
+                        if app.fv.drag and not e.buttons[0]:
+                            app.fv.drag = None
+                        app.fv.move(e.pos)
+                    elif e.type == pygame.MOUSEWHEEL:
+                        if PANEL.collidepoint(app.mouse):
+                            app.scroll[app.tab] -= e.y * 50
+                        elif app.view == "galaxy" and not g.event:
+                            app.fv.wheel(app.mouse, e.y)
+                app.update(dt)
+                app.draw(scr, fonts)
+                pygame.display.flip()
+                frames += 1
+                beat_frames += 1
+                fail_streak = 0
+                if selftest:
+                    selftest_step(app, g, frames, shot)
+                    if frames >= (100 if dev else 95):
+                        running = False
+                elif time.monotonic() - last_beat >= 300:                       # a line every 5 minutes: what was going on
+                    secs = time.monotonic() - last_beat
+                    gamelog.LOG.info("alive: %.0f fps average, slowest frame %.0f ms | %s", beat_frames / secs, slowest * 1000,
+                                     app.describe().splitlines()[0])
+                    last_beat, beat_frames, slowest = time.monotonic(), 0, 0.0
+            except Exception:
+                if selftest:
+                    raise                                    # the self-test must fail loudly
+                scr.set_clip(None)                           # a half-finished frame can leave a clip rectangle behind
+                fail_streak += 1
+                if gamelog.report("the game loop"):
+                    try:
+                        g.toast("Something went wrong - it was written to the log. The game keeps running.", 8)
+                    except Exception:
+                        pass
+                if fail_streak >= 30:                        # every frame fails: stop cleanly instead of freezing
+                    path = gamelog.write_crash_report(sys.exc_info(), "The game stopped: 30 frames in a row raised an error.")
+                    print(f"Space Miner stopped because of an error. Crash report: {path or gamelog.log_path()}", file=sys.stderr)
+                    crashed = True
+                    running = False
+    except KeyboardInterrupt:
+        gamelog.LOG.info("Interrupted from the terminal")
+    if not crashed:
+        g.save()                                             # (after a crash the last autosave is kept as it is)
+    gamelog.LOG.info("Exit %s after %.0f s, %d frames, %d error(s)", "after a crash" if crashed else "normally",
+                     time.monotonic() - started, frames, gamelog.error_count())
     pygame.quit()
     if test_dir:
         shutil.rmtree(test_dir, ignore_errors=True)
+    if crashed:
+        sys.exit(1)
 
 
 _SCR = {}
@@ -2108,6 +2221,7 @@ def selftest_step(app, g, frames, shot):
         fv.focus(3, snap=True)
         fv.click(fv.pos(3))
         assert app.sel_sector == 3
+        assert all(frontview.hrand(i, 7, 3) < 1.0 for i in range(300000))    # it once returned exactly 1.0 and crashed the close-up
     if frames == 68:
         shot("front")
         app.fv.fit()
@@ -2126,7 +2240,7 @@ def selftest_step(app, g, frames, shot):
         shot("dev")
         for title, items in devtools.sections(app):
             for label, fn, active in items:
-                if "Wipe" in label or "Lock ALL" in label or "Relock" in label or "Reset galaxy" in label:
+                if "Wipe" in label or "Lock ALL" in label or "Relock" in label or "Reset galaxy" in label or label.startswith("Test:"):
                     continue
                 fn()
         g.event = None

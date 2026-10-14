@@ -3,11 +3,17 @@ import json
 import math
 import os
 import random
+import shutil
 import time
 from collections import deque
 
+import gamelog
+import resources
+
+log = gamelog.LOG
+
 SAVE_VER = 2
-SAVE = os.path.expanduser("~/.space_miner_save.json")
+SAVE = resources.save_path()
 
 GROWTH = 1.15            # ship price growth per owned ship
 BGROWTH = 1.28           # colony building price growth per level
@@ -613,22 +619,49 @@ class Game:
             tmp = SAVE + ".tmp"
             with open(tmp, "w") as f:
                 json.dump(d, f)
+            try:                                       # keep a backup that is at least 10 minutes older than the new save
+                if os.path.exists(SAVE) and (not os.path.exists(SAVE + ".bak")
+                                             or time.time() - os.path.getmtime(SAVE + ".bak") > 600):
+                    shutil.copy2(SAVE, SAVE + ".bak")
+            except OSError as e:
+                log.warning("Could not update the save backup: %s", e)
             os.replace(tmp, SAVE)
-        except OSError:
-            pass
+        except (OSError, TypeError, ValueError) as e:
+            log.error("Could not save the game to %s: %s", SAVE, e)
 
     def load(self):
-        try:
-            with open(SAVE) as f:
-                d = json.load(f)
-        except (OSError, ValueError):
-            self.toast("Welcome, Miner! Mine the asteroids around Earth to begin.")
+        d = None
+        damaged = False
+        for path in (SAVE, SAVE + ".bak"):
+            try:
+                with open(path) as f:
+                    d = json.load(f)
+            except FileNotFoundError:
+                if path == SAVE:
+                    break                              # no save yet: a new game (the backup is only for a damaged save)
+                continue
+            except (OSError, ValueError) as e:
+                log.error("Cannot read %s: %s", path, e)
+                if path == SAVE:
+                    damaged = True
+                    self.keep_copy(path, "unreadable")
+                continue
+            if damaged:
+                log.warning("Restored the game from the backup %s", path)
+                self.toast("Your save was damaged - restored from the latest backup.", 8)
+            break
+        if d is None:
+            if damaged:
+                self.toast("Your save could not be read (a copy was kept). Starting a new game.", 8)
+            else:
+                self.toast("Welcome, Miner! Mine the asteroids around Earth to begin.")
             return
         if d.get("ver") != SAVE_VER:           # old single-asteroid save: keep a backup, start fresh
             try:
                 os.replace(SAVE, SAVE + ".v1.bak")
             except OSError:
                 pass
+            log.warning("Old save version %s: backed up, starting fresh", d.get("ver"))
             self.toast("New solar-system version! Your old save was backed up. Welcome to Earth.", 8)
             return
         try:
@@ -687,8 +720,11 @@ class Game:
             real_away = max(0.0, time.time() - float(d["time"]))
             away = min(real_away, OFFLINE_CAP)
             self.away_max = max(self.away_max, real_away / 3600)
-        except (KeyError, TypeError, ValueError, IndexError):
+        except (KeyError, TypeError, ValueError, IndexError) as e:
+            log.exception("The save file has unexpected contents (%r); keeping a copy and starting a new game", e)
+            self.keep_copy(SAVE, "broken")
             self.reset_all()
+            self.toast("Your save could not be understood (a copy was kept). Starting a new game.", 8)
             return
         self.update_ach_bonus()
         self.recalc()
@@ -705,10 +741,21 @@ class Game:
                 total += g / SC[p]
         self.add_credits(self.cred_ops * away * eff)
         self.add_sci(self.sci_ops * away * eff)
+        log.info("Loaded the save (cycle %d, %d planets, away %.0f s, offline gain %s ore)", self.cycle, self.n_unlocked,
+                 real_away, fmt(total))
         if away > 60 and total > 0:
             m = int(away // 60)
             self.toast(f"Welcome back! Away {m // 60}h {m % 60}m: your fleets mined {fmt(total)} "
                        f"ore (Earth-equivalent) across {self.n_unlocked} planets", 8)
+
+    def keep_copy(self, path, why):
+        """Copy a save we cannot use next to it, so nothing is ever lost silently."""
+        dest = f"{path}.{why}-{time.strftime('%Y%m%d-%H%M%S')}"
+        try:
+            shutil.copy2(path, dest)
+            log.warning("Kept a copy of the %s save as %s", why, dest)
+        except OSError as e:
+            log.error("Could not copy %s: %s", path, e)
 
     # ---------------- maths -----------------
     @property
@@ -970,6 +1017,7 @@ class Game:
         self.credits -= cr
         self.unlocked[k] = True
         self.add_ore(k, SUPPLY * SC[k])
+        log.info("Unlocked %s (play time %.1f h)", SITES[k]["name"], self.play_time / 3600)
         self.toast(f"{SITES[k]['name']} unlocked! New ore: {SITES[k]['ore']}.  {SITES[k]['perk']}", 7)
         self.fx("unlock", k)
         self.recalc()
@@ -1055,6 +1103,7 @@ class Game:
         for p in range(n):
             if self.unlocked[p]:
                 self.add_ore(p, (SUPPLY + self.E["start"]) * SC[p])
+        log.info("Warp #%d: +%d Dark Matter (%d total)", self.warps, gain, self.dm)
         self.toast(f"WARP COMPLETE!  +{gain} Dark Matter", 5)
         self.fx("warp", gain)
         self.save()
@@ -1188,6 +1237,7 @@ class Game:
                 self.flags.add("underdog")
             self.lose_ships(self.loss_fraction(WIN_LOSSES))
             fac = FACTIONS[SECTORS[k]["faction"]]["name"]
+            log.info("Sector liberated: %s", SECTORS[k]["name"])
             self.toast(f"VICTORY! {SECTORS[k]['name']} liberated from the {fac}.  {SECTORS[k]['desc']}", 7)
             if k == NSEC - 1:
                 self.toast("The Devourer is defeated!  You can now ASCEND - see the Warp tab.", 10)
@@ -1252,6 +1302,7 @@ class Game:
         if not (force or self.can_ascend()):
             return False
         gain = max(1, self.sd_gain())
+        log.info("Ascension: +%d Stardust, starting cycle %d", gain, self.cycle + 1)
         self.stardust += gain
         self.sd_total += gain
         self.cycle += 1

@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  selftest:
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install pygame
+      - run: python space_miner.py --version
+      - name: Self-test (headless)
+        run: python space_miner.py --selftest
+      - name: Self-test with every developer cheat
+        run: python space_miner.py --selftest --dev
+      - name: Random-input stress test
+        run: python tools/fuzz.py frames=500 states=fresh,mid
