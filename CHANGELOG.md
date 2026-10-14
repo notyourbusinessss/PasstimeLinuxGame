@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **The real Milky Way as the galaxy map.** The 15 fixed sectors are gone: the map is now the Milky Way seen from above, with **more than 6,000 star systems** to conquer. About 140 are real stars and objects at their real distances and directions (Alpha Centauri, Sirius, Betelgeuse, the Orion and Crab nebulae, Cygnus X-1, Omega Centauri, Sagittarius A*...) and thousands are generated over the real shape of the galaxy. **Travel is free**: you can attack any system within your new **Jump Drive** range (22 levels, 6 light-years to 45,000) of a system you hold. Systems have their own power, faction and reward; the map zooms from the whole galaxy to a single star, with names, lanes, range circles, a ruler and a mini-map; the Galaxy tab has a Jump Drive card and a target browser. Old saves are converted (your sectors become the same stars).
+- **Fleet Admiral** (new tech): launches campaigns by itself against the factions you are at war with.
+- Campaigns take longer against stronger systems plus the flight; an easy win costs few ships.
+- Stardust perks that kept your first sectors now keep your nearest systems (25 / 100). New achievements for the size of your empire, famous places and the Jump Drive.
+- `tools/make_galaxy.py` rebuilds `assets/galaxy.json`.
+- **A bigger galaxy map with a screen of its own**: a star-chart background, a slim top bar, a map that fills the window (a *wide* layout with a command bar for the selected system, or beside the side panel), incoming-attack chips with Fortify.
 - **Every planet's ships look and move differently.** Each planet now has its own design language instead of the same hulls with extras bolted on: silver landers on spindly legs (Moon), wheeled rovers (Mars), airships (Venus), sun-shields and solar wings (Mercury), tumbling rocks with claws (Ceres), striped storm hulls (Jupiter), discs with tilted rings (Saturn), crystals (Uranus), deep-sea creatures (Neptune), ice sleds and hearts (Pluto) and living spores (Proxima b), each in its own colours. They also fly their own paths (hopping, driving over the planet, floating, swinging round a lopsided orbit, spiralling, a flat ring plane, over the poles, weaving, drifting, a figure of eight) and fire their own mining lasers. Prices, output and balance are unchanged.
 - `tools/ship_sheet.py` draws a contact sheet of every ship.
 
@@ -14,7 +20,6 @@ The first release.
 - Warp (prestige) with Dark Matter and 22 perks; **New Game+** (Ascension) with Stardust and 21 perks.
 - The **galaxy**: 15 enemy-held sectors in 6 factions, campaigns, an armory (weapons, armor, engines, shields, intel) and permanent sector bonuses.
 - The **Threat Director**: adaptive raids and counter-offensives, Intel warnings, Fortify, faction hostility.
-- **A galaxy screen of its own**: a star-chart background, a slim top bar, a map that fills the window (a *wide* layout with a command bar for the selected sector, or beside the side panel), incoming-attack chips with Fortify.
 - **Frontline close-up**: a zoomable galaxy map with battle lines, fleets, garrison shields and a mini-map.
 - 165 achievements, a stats page, procedural graphics and sound (no asset files for those).
 

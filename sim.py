@@ -111,10 +111,10 @@ class Bot:
                     if director.incoming_chance(g, inc, p) < 0.6 and g.credits > 3 * cost:
                         director.fortify(g, inc["id"], p)
         if g.campaign is None:
-            options = [k for k in g.frontier()
-                       if core.win_chance(g.fleet_power(), g.sector_power(k)) >= BOT_CHANCE]
+            fp = g.fleet_power()
+            options = [k for k in g.targets() if core.win_chance(fp, g.sector_power(k)) >= BOT_CHANCE]
             if options:
-                g.start_campaign(min(options))
+                g.start_campaign(max(options, key=lambda k: (core.SECTORS[k]["lp"], -core.SECTORS[k]["d"])))
         lost = sorted(self.conq_logged - g.conquered)
         for k in lost:
             self.log.append((g.t, f"LOST {core.SECTORS[k]['name']}"))
