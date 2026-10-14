@@ -526,7 +526,7 @@ class Game:
         self.autosave_t = 0.0
         self.toasts = []
         self.fx_events = []                 # (kind, data) for the UI to animate
-        self.settings = dict(sound=True, volume=0.6)
+        self.settings = dict(sound=True, volume=0.6, fullscreen=False)
         self.dev_mult = 1.0                 # developer cheat: production multiplier
         self.click_times = deque()
         self.raid_t = random.uniform(420, 780)
