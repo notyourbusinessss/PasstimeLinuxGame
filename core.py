@@ -9,6 +9,7 @@ from collections import deque
 
 import gamelog
 import resources
+import ships
 
 log = gamelog.LOG
 
@@ -91,17 +92,17 @@ TECHS = [  # id, name, science cost, prereqs, description, effects
     ("t5", "Bulk Contracts", 150, ["t3"], "Ships 5% cheaper", [("disc", 0.05)]),
     ("t6", "Auto-Drones", 200, ["t1", "t2"], "Auto-buys ships on every planet (spends up to 25% of a stockpile)", [("auto", 1)]),
     ("t7", "Signal Booster", 250, ["t4"], "Crates appear 25% more often", [("crate", 0.25)]),
-    ("t8", "Drone Swarm AI", 400, ["t6"], "Drones x3, Laser Rigs x2", [("gen", 0, 3), ("gen", 1, 2)]),
+    ("t8", "Drone Swarm AI", 400, ["t6"], "Drone and Rig class ships: Drones x3, Rigs x2", [("gen", 0, 3), ("gen", 1, 2)]),
     ("t9", "Deep Core Drilling", 1e3, ["t5"], "Mining Complexes x1.5 stronger", [("minebonus", 1.5)]),
     ("t10", "Quantum Computing", 2.5e3, ["t4"], "Science income x2", [("sci", 2)]),
     ("t11", "Credit Futures", 4e3, ["t3", "t5"], "Credit income x2", [("cred", 2)]),
     ("t12", "Automated Salvage", 6e3, ["t7"], "Supply crates are collected automatically", [("autocrate", 1)]),
     ("t13", "Fusion Ignition", 1e4, ["t9"], "All ore production x1.5", [("ore", 1.5)]),
-    ("t14", "Laser Focusing", 2e4, ["t8"], "Lasers, Barges, Refineries x2",
+    ("t14", "Laser Focusing", 2e4, ["t8"], "Rig, Barge and Refinery class ships x2",
      [("gen", 1, 2), ("gen", 2, 2), ("gen", 3, 2)]),
     ("t15", "Stellar Cartography", 5e4, ["t10"], "Crates pay x2 and appear 25% more", [("crate_pay", 2), ("crate", 0.25)]),
     ("t16", "Warp Theory", 1e5, ["t13"], "Dark Matter gain x1.25", [("dm", 1.25)]),
-    ("t17", "Dyson Blueprints", 3e5, ["t14"], "Foundries & Dyson Swarms x2", [("gen", 4, 2), ("gen", 5, 2)]),
+    ("t17", "Dyson Blueprints", 3e5, ["t14"], "Foundry and Swarm class ships x2", [("gen", 4, 2), ("gen", 5, 2)]),
     ("t18", "Matter Compression", 8e5, ["t11", "t13"], "Ships 10% cheaper", [("disc", 0.10)]),
     ("t19", "Time Dilation Field", 1.5e6, ["t16"], "Offline progress at 75%", [("offline", 0.75)]),
     ("t20", "Antimatter Engines", 4e6, ["t17"], "All ore production x2", [("ore", 2)]),
@@ -109,7 +110,7 @@ TECHS = [  # id, name, science cost, prereqs, description, effects
     ("t22", "Hyper Clicks", 2e7, ["t2", "t15"], "Clicks x5, +2% of ore/s per click", [("click", 5), ("clickops", 0.02)]),
     ("t23", "Head Start Program", 5e7, ["t19"], "Every planet starts a run with extra free ore", [("start", 5e3)]),
     ("t24", "Singularity Lab", 1e8, ["t20"], "Science income x3", [("sci", 3)]),
-    ("t25", "Neutron Weave", 5e8, ["t24"], "Neutron Taps & Black Hole Engines x3", [("gen", 6, 3), ("gen", 7, 3)]),
+    ("t25", "Neutron Weave", 5e8, ["t24"], "Tap and Engine class ships x3", [("gen", 6, 3), ("gen", 7, 3)]),
     ("t26", "Omega Reactor", 2e9, ["t20", "t21"], "All ore production x3", [("ore", 3)]),
     ("t27", "Galactic Federation", 1e10, ["t22", "t24"], "Credits x5, ships 10% cheaper", [("cred", 5), ("disc", 0.10)]),
     ("t28", "Reality Engineering", 1e11, ["t25", "t26"], "Every ship type x2, ore x2",
@@ -318,6 +319,19 @@ def sd_bonus(sd_total):
     return 1 + 0.4 * math.sqrt(sd_total)
 
 
+def ship_name(p, i):
+    """The name of ship class i on planet p (every planet has its own roster, see ships.py)."""
+    return ships.name(p, i)
+
+
+def upgrade_text(u, p):
+    """(name, description) of an upgrade as shown on planet p: ship upgrades use that planet's ship names."""
+    if u["kind"] == "gen":
+        n = ships.name(p, u["arg"][0])
+        return f"{n} Mk{u['mk']}", f"{n}s here are x{u['arg'][1]} as efficient (own {u['thr']})"
+    return u["name"], u["desc"]
+
+
 # ------------------------------------------------------------------ per-planet upgrades (cost in that planet's ore)
 def build_upgrades():
     ups = []
@@ -326,7 +340,7 @@ def build_upgrades():
         for k, (thr, mult, cm) in enumerate(tiers):
             ups.append(dict(id=f"g{i}_{k}", name=f"{n} Mk{k + 2}", cost=c * cm,
                             desc=f"{n}s here are x{mult} as efficient (own {thr})", kind="gen",
-                            arg=(i, mult), req=("own", i, thr)))
+                            arg=(i, mult), req=("own", i, thr), mk=k + 2, thr=thr))
     for k in range(8):
         cost = 100 * 10 ** k
         ups.append(dict(id=f"c{k}", name=f"Pickaxe Mk{k + 1}", cost=cost,
@@ -386,7 +400,7 @@ def build_achievements():
                  ("Endless Horde", 2000, "silver"), ("Sea of Stars", 10000, "gold"), ("Galactic Swarm", 50000, "platinum")],
        lambda t: f"Own {nf(t)} ships in total", lambda g: g.total_ships())
     for i, (n, _, _, _) in enumerate(SHIPS):
-        add(f"{n} Fan", f"Own 100 {n}s on one planet", "Fleet", "bronze" if i < 3 else "silver" if i < 6 else "gold",
+        add(f"{n} Fan", f"Own 100 {ships.CLASSES[i]}-class ships on one planet (on Earth: {n}s)", "Fleet", "bronze" if i < 3 else "silver" if i < 6 else "gold",
             lambda g, i=i: max(o[i] for o in g.owned) >= 100, lambda g, i=i: (max(o[i] for o in g.owned), 100))
     add("Diversified", "Own every ship type on Earth", "Fleet", "bronze", lambda g: all(o > 0 for o in g.owned[0]),
         lambda g: (sum(1 for o in g.owned[0] if o > 0), NSH))
@@ -470,6 +484,10 @@ def build_achievements():
         lambda g: "forewarned" in g.flags)
     add("Close Look", "Zoom in on a frontline in the galaxy view", "Galaxy", "bronze",
         lambda g: "closeup" in g.flags)
+    add("First Strike", "Declare war by invading a faction at peace", "Galaxy", "bronze", lambda g: g.wars_declared >= 1)
+    add("They Struck First", "Be invaded: a faction declares war on you", "Galaxy", "bronze", lambda g: g.wars_suffered >= 1)
+    add("Peace in Our Time", "End a war by sueing for peace", "Galaxy", "silver", lambda g: g.peaces_made >= 1,
+        lambda g: (g.peaces_made, 1))
     add("Dig In", "Fortify a planet or sector against an incoming attack", "Galaxy", "bronze", lambda g: "fortified" in g.flags)
     add("Hold the Line", "Repel a Regional assault", "Galaxy", "silver", lambda g: g.tier_wins[1] >= 1,
         lambda g: (g.tier_wins[1], 1))
@@ -536,6 +554,7 @@ class Game:
         self.dev_mult = 1.0                 # developer cheat: production multiplier
         self.click_times = deque()
         self.raid_t = random.uniform(420, 780)
+        self.warned = set()                # factions whose "war is near" warning was shown
         self.offensive_t = random.uniform(1500, 2400)
         self.notified_unlock = -1
         self.recalc()
@@ -578,6 +597,10 @@ class Game:
         self.battles_won = self.battles_lost = self.raids_repelled = self.raids_lost = 0
         self.incoming = []
         self.hostility = {}
+        self.war = {}                      # faction -> dict(since, by): who is at war with you, and who started it
+        self.tension = {}                  # faction -> 0..1: how close a faction at peace is to declaring war on you
+        self.truce = {}                    # faction -> seconds left of a truce (no tension, no attacks)
+        self.wars_declared = self.wars_suffered = self.peaces_made = 0
         self.garrison = {}
         self.lost_sectors = set()
         self.director_log = []
@@ -609,7 +632,8 @@ class Game:
                  night_secs=self.night_secs, visited=sorted(self.visited), flags=sorted(self.flags),
                  conquered=sorted(self.conquered), campaign=self.campaign, armory=self.armory,
                  battles_won=self.battles_won, battles_lost=self.battles_lost, raids_repelled=self.raids_repelled,
-                 raids_lost=self.raids_lost, incoming=self.incoming, hostility=self.hostility, garrison={str(k): v for k, v in self.garrison.items()},
+                 raids_lost=self.raids_lost, incoming=self.incoming, hostility=self.hostility, war=self.war, tension=self.tension, truce=self.truce,
+                 wars_declared=self.wars_declared, wars_suffered=self.wars_suffered, peaces_made=self.peaces_made, garrison={str(k): v for k, v in self.garrison.items()},
                  lost_sectors=sorted(self.lost_sectors), director_log=self.director_log, director_id=self.director_id,
                  tier_wins=self.tier_wins, offensives_repelled=self.offensives_repelled, sectors_lost=self.sectors_lost,
                  sectors_retaken=self.sectors_retaken, cycle=self.cycle, ascensions=self.ascensions, stardust=self.stardust,
@@ -700,6 +724,12 @@ class Game:
             self.raids_repelled = int(d.get("raids_repelled", 0)); self.raids_lost = int(d.get("raids_lost", 0))
             self.incoming = []     # attacks in flight are not restored: the enemy never acts while the game is closed
             self.hostility = {str(k): float(v) for k, v in dict(d.get("hostility", {})).items() if k in FACTIONS}
+            self.war = {str(k): dict(since=float(v.get("since", 0.0)), by=str(v.get("by", "player")))
+                        for k, v in dict(d.get("war", {})).items() if k in FACTIONS and isinstance(v, dict)}
+            self.tension = {str(k): max(0.0, min(1.0, float(v))) for k, v in dict(d.get("tension", {})).items() if k in FACTIONS}
+            self.truce = {str(k): max(0.0, float(v)) for k, v in dict(d.get("truce", {})).items() if k in FACTIONS}
+            self.wars_declared = int(d.get("wars_declared", 0)); self.wars_suffered = int(d.get("wars_suffered", 0))
+            self.peaces_made = int(d.get("peaces_made", 0))
             self.garrison = {int(k): float(v) for k, v in dict(d.get("garrison", {})).items() if 0 < int(k) < NSEC}
             self.lost_sectors = {int(k) for k in d.get("lost_sectors", []) if 0 < int(k) < NSEC}
             self.director_log = [(float(a), str(b)) for a, b in list(d.get("director_log", []))[-8:]]
@@ -1211,6 +1241,8 @@ class Game:
         self.campaign = dict(k=k, t=0.0, dur=self.campaign_duration(k), fp=fp,
                              chance=win_chance(fp, self.sector_power(k)))
         fac = SECTORS[k]["faction"]
+        if fac not in self.war:                                          # invading a faction at peace is a declaration of war
+            director.declare_war(self, fac, "player")
         self.hostility[fac] = self.hostility.get(fac, 0.0) + 1.0        # attacking a faction makes it more hostile
         self.toast(f"Fleet dispatched to {SECTORS[k]['name']}  ({self.campaign['chance'] * 100:.0f}% to win)", 4)
         self.fx("campaign", k)
@@ -1328,6 +1360,7 @@ class Game:
         self.campaign = None
         self.incoming = []
         self.hostility = {}
+        self.war, self.tension, self.truce = {}, {}, {}
         self.lost_sectors = set()
         self.garrison = {k: self.sector_power(k) * 1.3 for k in keep_sec if k}
         self.grace = 1200.0
@@ -1482,7 +1515,7 @@ class Game:
                     i = random.choice(have)
                     n = random.randint(3, 8)
                     g.owned[p][i] += n
-                    return f"Salvaged {n} free {SHIPS[i][0]}s!"
+                    return f"Salvaged {n} free {ships.name(p, i)}s!"
                 x = g.s_ops[p] * 200 + 150 * SC[p]; g.add_ore(p, x)
                 return f"Found a cargo hold with {fmt(x)} {ore}."
             return dict(title="Derelict Ship", text=f"An abandoned vessel drifts near {nm}. Salvage it?",
