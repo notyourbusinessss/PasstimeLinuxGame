@@ -4,6 +4,7 @@ import math
 import os
 import random
 import time
+from collections import deque
 
 SAVE_VER = 2
 SAVE = os.path.expanduser("~/.space_miner_save.json")
@@ -15,7 +16,6 @@ OFFLINE_CAP = 8 * 3600
 OFFLINE_EFF = 0.5
 SCALE = 10.0             # every planet's ore is worth/costs 10x the previous one
 CSCALE = 5.0             # credit / science scale per planet
-ACH_BONUS = 0.02
 DM_DIV = 1e7             # lifetime (Earth-equivalent) ore for the first Dark Matter
 DM_POW = 0.25            # Dark Matter owned ~ (lifetime ore / DM_DIV) ** DM_POW
 SUPPLY = 60              # free ore (in ship-1 prices) a planet starts a run / unlock with
@@ -247,61 +247,125 @@ UPG_BY_ID = {u["id"]: u for u in UPGRADES}
 
 
 # ------------------------------------------------------------------ achievements
+TIER_BONUS = {"bronze": 0.005, "silver": 0.01, "gold": 0.02, "platinum": 0.04}   # production bonus each
+TIER_NAMES = ["bronze", "silver", "gold", "platinum"]
+ACH_CATS = ["Mining", "Fleet", "Planets", "Colony", "Projects", "Science", "Wealth", "Quests", "Warp", "General", "Secret"]
+
+
+def nf(t):
+    return f"{int(t):,}" if t < 1e6 else fmt(t)
+
+
 def build_achievements():
-    a = [
-        ("First Rock", "Mine your first ore", lambda g: g.clicks >= 1),
-        ("Calloused Hands", "Click 100 times", lambda g: g.clicks >= 100),
-        ("Carpal Tunnel", "Click 1,000 times", lambda g: g.clicks >= 1000),
-        ("Click Maniac", "Click 10,000 times", lambda g: g.clicks >= 10000),
-        ("Small Fleet", "Own 50 ships", lambda g: g.total_ships() >= 50),
-        ("Armada", "Own 200 ships", lambda g: g.total_ships() >= 200),
-        ("Space Empire", "Own 500 ships", lambda g: g.total_ships() >= 500),
-        ("Endless Horde", "Own 2,000 ships", lambda g: g.total_ships() >= 2000),
-        ("Diversified", "Own every ship type on Earth", lambda g: all(o > 0 for o in g.owned[0])),
-        ("Moonwalker", "Unlock the Moon", lambda g: g.unlocked[1]),
-        ("Red Planet", "Unlock Mars", lambda g: g.unlocked[2]),
-        ("Inner System", "Unlock Mercury", lambda g: g.unlocked[4]),
-        ("Gas Giant", "Unlock Jupiter", lambda g: g.unlocked[6]),
-        ("Lord of the Rings", "Unlock Saturn", lambda g: g.unlocked[7]),
-        ("Edge of the System", "Unlock Pluto", lambda g: g.unlocked[10]),
-        ("Interstellar", "Unlock Proxima b", lambda g: g.unlocked[11]),
-        ("Warp Speed", "Warp once", lambda g: g.warps >= 1),
-        ("Frequent Flyer", "Warp 5 times", lambda g: g.warps >= 5),
-        ("Warp Addict", "Warp 20 times", lambda g: g.warps >= 20),
-        ("Lucky Find", "Grab 5 supply crates", lambda g: g.crates >= 5),
-        ("Treasure Hunter", "Grab 25 supply crates", lambda g: g.crates >= 25),
-        ("Crate Baron", "Grab 100 supply crates", lambda g: g.crates >= 100),
-        ("Builder", "Build 50 colony levels", lambda g: g.bldg >= 50),
-        ("Architect", "Build 250 colony levels", lambda g: g.bldg >= 250),
-        ("Megastructures", "Build 800 colony levels", lambda g: g.bldg >= 800),
-        ("Megabuilder", "Complete 4 megaprojects", lambda g: len(g.projects) >= 4),
-        ("Master Builder", "Complete 8 megaprojects", lambda g: len(g.projects) >= 8),
-        ("Wonders of the System", "Complete all 12 megaprojects", lambda g: len(g.projects) >= NSITE),
-        ("Student", "Research 5 techs", lambda g: len(g.techs) >= 5),
-        ("Scientist", "Research 15 techs", lambda g: len(g.techs) >= 15),
-        ("Omniscient", "Research every tech", lambda g: len(g.techs) >= len(TECHS)),
-        ("Taskmaster", "Complete 10 quests", lambda g: g.quests_done >= 10),
-        ("Employee of the Month", "Complete 50 quests", lambda g: g.quests_done >= 50),
-        ("Decisive", "Resolve 5 events", lambda g: g.events_done >= 5),
-        ("Space Diplomat", "Resolve 25 events", lambda g: g.events_done >= 25),
-        ("Dark Collector", "Own 100 Dark Matter", lambda g: g.dm >= 100),
-        ("Dark Hoarder", "Own 1,000 Dark Matter", lambda g: g.dm >= 1000),
-        ("Shopaholic", "Buy 6 Dark Matter perks", lambda g: len(g.perks) >= 6),
-        ("Penny Pincher", "Earn 1M credits ever", lambda g: g.all_cred >= 1e6),
-        ("Tycoon", "Earn 1B credits ever", lambda g: g.all_cred >= 1e9),
-        ("Big Brain", "Earn 1M science ever", lambda g: g.all_sci >= 1e6),
-    ]
-    for exp, name in [(3, "Pocket Change"), (6, "Millionaire Miner"), (9, "Billion Dollar Rock"),
-                      (12, "Trillion Club"), (15, "Cosmic Hoarder"), (18, "Quintillionaire"),
-                      (21, "Sextillion Scrooge"), (24, "Septillion Sage"), (27, "Beyond Numbers")]:
-        a.append((name, f"Mine 1e{exp} ore (Earth-equivalent) ever", lambda g, e=exp: g.all_norm >= 10.0 ** e))
-    for i in (0, 3, 5, 7):
-        a.append((f"{SHIPS[i][0]} Fan", f"Own 100 {SHIPS[i][0]}s on one planet",
-                  lambda g, i=i: any(o[i] >= 100 for o in g.owned)))
-    return a
+    A = []
+
+    def add(name, desc, cat, tier, cond, prog=None, secret=False):
+        A.append(dict(id=name, name=name, desc=desc, cat=cat, tier=tier, cond=cond, prog=prog, secret=secret))
+
+    def ms(cat, rows, descf, get):
+        for name, t, tier in rows:
+            add(name, descf(t), cat, tier, lambda g, t=t: get(g) >= t, lambda g, t=t: (get(g), t))
+
+    # --- Mining
+    ms("Mining", [("First Rock", 1, "bronze"), ("Calloused Hands", 100, "bronze"), ("Carpal Tunnel", 1000, "silver"),
+                  ("Click Maniac", 10000, "gold"), ("Finger of God", 100000, "platinum")],
+       lambda t: f"Click asteroids {nf(t)} times", lambda g: g.clicks)
+    ms("Mining", [("Speed Miner", 30, "silver"), ("Machine-Gun Finger", 60, "gold")],
+       lambda t: f"Click {t} times within 10 seconds", lambda g: g.best_burst)
+    ms("Mining", [("Pocket Change", 1e3, "bronze"), ("Millionaire Miner", 1e6, "bronze"), ("Billion Dollar Rock", 1e9, "bronze"),
+                  ("Trillion Club", 1e12, "silver"), ("Cosmic Hoarder", 1e15, "silver"), ("Quintillionaire", 1e18, "silver"),
+                  ("Sextillion Scrooge", 1e21, "gold"), ("Septillion Sage", 1e24, "gold"), ("Beyond Numbers", 1e27, "gold"),
+                  ("Lord of Ore", 1e30, "platinum")],
+       lambda t: f"Mine {fmt(t)} ore in total (Earth-equivalent)", lambda g: g.all_norm)
+    ms("Mining", [("Tinkerer", 25, "bronze"), ("Engineer", 100, "silver"), ("Mad Scientist", 500, "gold")],
+       lambda t: f"Buy {nf(t)} upgrades", lambda g: g.ups_bought)
+    # --- Fleet
+    ms("Fleet", [("Small Fleet", 50, "bronze"), ("Armada", 200, "bronze"), ("Space Empire", 500, "silver"),
+                 ("Endless Horde", 2000, "silver"), ("Sea of Stars", 10000, "gold"), ("Galactic Swarm", 50000, "platinum")],
+       lambda t: f"Own {nf(t)} ships in total", lambda g: g.total_ships())
+    for i, (n, _, _, _) in enumerate(SHIPS):
+        add(f"{n} Fan", f"Own 100 {n}s on one planet", "Fleet", "bronze" if i < 3 else "silver" if i < 6 else "gold",
+            lambda g, i=i: max(o[i] for o in g.owned) >= 100, lambda g, i=i: (max(o[i] for o in g.owned), 100))
+    add("Diversified", "Own every ship type on Earth", "Fleet", "bronze", lambda g: all(o > 0 for o in g.owned[0]),
+        lambda g: (sum(1 for o in g.owned[0] if o > 0), NSH))
+    ms("Fleet", [("Full Roster", 6, "silver"), ("Fleet Admiral", NSITE, "platinum")],
+       lambda t: f"Own every ship type on {t} planets at once", lambda g: sum(1 for row in g.owned if all(o > 0 for o in row)))
+    # --- Planets
+    for name, k, tier in [("Moonwalker", 1, "bronze"), ("Red Planet", 2, "bronze"), ("Morning Star", 3, "bronze"),
+                          ("Scorched Earth", 4, "silver"), ("Belt Rider", 5, "silver"), ("Gas Giant", 6, "silver"),
+                          ("Lord of the Rings", 7, "gold"), ("Ice Giant", 8, "gold"), ("Deep Blue", 9, "gold"),
+                          ("Edge of the System", 10, "platinum"), ("Interstellar", 11, "platinum")]:
+        add(name, f"Unlock {SITES[k]['name']}", "Planets", tier, lambda g, k=k: g.unlocked[k])
+    ms("Planets", [("Tourist", 5, "bronze"), ("Grand Tour", NSITE, "gold")],
+       lambda t: f"Visit {t} different planets", lambda g: len(g.visited))
+    ms("Planets", [("Frequent Traveler", 10, "bronze"), ("Interplanetary Commuter", 50, "silver"), ("Space Trucker", 250, "gold")],
+       lambda t: f"Travel between planets {t} times", lambda g: g.travels)
+    # --- Colony
+    ms("Colony", [("Builder", 50, "bronze"), ("Architect", 250, "silver"), ("Megastructures", 800, "gold"),
+                  ("Dyson Dreams", 2000, "platinum")], lambda t: f"Build {nf(t)} colony levels", lambda g: g.bldg)
+    for b, nm in enumerate(["Mining Baron", "Dome Builder", "Lab Rat", "Shipwright", "Reactor Boy", "Fortress"]):
+        add(nm, f"Max out a {BUILDINGS[b][0]} (level {BMAX})", "Colony", "silver",
+            lambda g, b=b: any(row[b] >= BMAX for row in g.bld), lambda g, b=b: (max(row[b] for row in g.bld), BMAX))
+    add("Perfect Colony", "Max out all six buildings on one planet", "Colony", "platinum",
+        lambda g: any(all(x >= BMAX for x in row) for row in g.bld),
+        lambda g: (max(sum(min(x, BMAX) for x in row) for row in g.bld), NB * BMAX))
+    # --- Projects
+    ms("Projects", [("First Wonder", 1, "bronze"), ("Megabuilder", 4, "silver"), ("Master Builder", 8, "gold"),
+                    ("Wonders of the System", NSITE, "platinum")], lambda t: f"Complete {t} megaprojects", lambda g: len(g.projects))
+    # --- Science
+    ms("Science", [("Eureka!", 1, "bronze"), ("Student", 5, "bronze"), ("Scientist", 15, "silver"), ("Professor", 25, "gold"),
+                   ("Omniscient", len(TECHS), "platinum")], lambda t: f"Research {t} techs", lambda g: len(g.techs))
+    ms("Science", [("Curious Mind", 1e3, "bronze"), ("Big Brain", 1e6, "bronze"), ("Nobel Laureate", 1e9, "silver"),
+                   ("Galaxy Brain", 1e12, "gold"), ("Omniscience Engine", 1e15, "platinum")],
+       lambda t: f"Produce {fmt(t)} science in total", lambda g: g.all_sci)
+    # --- Wealth
+    ms("Wealth", [("Small Change", 1e3, "bronze"), ("Penny Pincher", 1e6, "bronze"), ("Tycoon", 1e9, "silver"),
+                  ("Mogul", 1e12, "gold"), ("Galactic Banker", 1e15, "platinum")],
+       lambda t: f"Earn {fmt(t)} credits in total", lambda g: g.all_cred)
+    add("Dragon's Hoard", "Sit on 1e30 of a single ore", "Wealth", "silver", lambda g: max(g.ore) >= 1e30,
+        lambda g: (max(g.ore), 1e30))
+    # --- Quests, events & crates
+    ms("Quests", [("Odd Jobs", 1, "bronze"), ("Taskmaster", 10, "bronze"), ("Employee of the Month", 50, "silver"),
+                  ("Workaholic", 200, "gold")], lambda t: f"Complete {t} quests", lambda g: g.quests_done)
+    ms("Quests", [("First Contact", 1, "bronze"), ("Decisive", 5, "bronze"), ("Space Diplomat", 25, "silver"),
+                  ("Troubleshooter", 100, "gold")], lambda t: f"Resolve {t} random events", lambda g: g.events_done)
+    ms("Quests", [("Lucky Find", 5, "bronze"), ("Treasure Hunter", 25, "bronze"), ("Crate Baron", 100, "silver"),
+                  ("Crate Tycoon", 500, "gold")], lambda t: f"Grab {t} supply crates", lambda g: g.crates)
+    ms("Quests", [("Frenzied", 5, "bronze"), ("Frenzy Fanatic", 25, "silver")],
+       lambda t: f"Trigger {t} Mining Frenzies", lambda g: g.frenzies)
+    # --- Warp & Dark Matter
+    ms("Warp", [("Warp Speed", 1, "bronze"), ("Frequent Flyer", 5, "silver"), ("Warp Addict", 20, "gold"),
+                ("Time Lord", 50, "platinum")], lambda t: f"Warp {t} times", lambda g: g.warps)
+    ms("Warp", [("Spark of Darkness", 1, "bronze"), ("Dark Beginnings", 10, "bronze"), ("Dark Collector", 100, "silver"),
+                ("Dark Hoarder", 1000, "silver"), ("Void Lord", 10000, "gold"), ("Heart of the Abyss", 100000, "gold"),
+                ("Dark Matter Singularity", 1e6, "platinum")], lambda t: f"Own {nf(t)} Dark Matter", lambda g: g.dm)
+    ms("Warp", [("First Perk", 1, "bronze"), ("Shopaholic", 6, "silver"), ("Big Spender", 12, "gold"),
+                ("One of Everything", len(PERKS), "platinum")], lambda t: f"Buy {t} Dark Matter perks", lambda g: len(g.perks))
+    # --- General
+    ms("General", [("Dedicated", 1, "bronze"), ("Devoted", 10, "silver"), ("Obsessed", 100, "gold")],
+       lambda t: f"Play for {t} hour{'s' if t > 1 else ''}", lambda g: g.play_time / 3600)
+    ms("General", [("Returning Hero", 1, "bronze"), ("Long Nap", 4, "silver")],
+       lambda t: f"Come back after being away for {t}+ hours", lambda g: g.away_max)
+    add("Perfectionist", "Earn every non-secret achievement", "General", "platinum",
+        lambda g: all(a["id"] in g.ach for a in ACHIEVEMENTS if not a["secret"] and a["id"] != "Perfectionist"),
+        lambda g: (sum(1 for a in ACHIEVEMENTS if not a["secret"] and a["id"] != "Perfectionist" and a["id"] in g.ach),
+                   sum(1 for a in ACHIEVEMENTS if not a["secret"] and a["id"] != "Perfectionist")))
+    # --- Secret
+    add("Caught in the Act", "Use a developer cheat", "Secret", "bronze", lambda g: "cheated" in g.flags, secret=True)
+    add("Quick Draw", "Grab a supply crate within 3 seconds of it appearing", "Secret", "silver",
+        lambda g: "quickdraw" in g.flags, secret=True)
+    add("Jackpot!", "Win the Cosmic Lottery", "Secret", "silver", lambda g: "jackpot" in g.flags, secret=True)
+    add("Pirate Hunter", "Beat the pirates in a fight", "Secret", "silver", lambda g: "pirates" in g.flags, secret=True)
+    add("Whisperer", "Listen to the whispers from the void", "Secret", "gold", lambda g: "whisper" in g.flags, secret=True)
+    add("Night Owl", "Mine for 10 minutes between midnight and 5 am", "Secret", "silver",
+        lambda g: g.night_secs >= 600, secret=True)
+    add("Home Sweet Home", "Fly back to Earth after unlocking Mars", "Secret", "bronze",
+        lambda g: "home" in g.flags, secret=True)
+    return A
 
 
 ACHIEVEMENTS = build_achievements()
+ACH_BY_ID = {a["id"]: a for a in ACHIEVEMENTS}
 
 QUEST_TXT = {"clicks": "Click asteroids {} times", "bought": "Buy {} ships",
              "all_norm": "Mine {} ore (Earth-equivalent)", "crates": "Grab {} supply crates",
@@ -326,6 +390,9 @@ class Game:
         self.autosave_t = 0.0
         self.toasts = []
         self.fx_events = []                 # (kind, data) for the UI to animate
+        self.settings = dict(sound=True, volume=0.6)
+        self.dev_mult = 1.0                 # developer cheat: production multiplier
+        self.click_times = deque()
         self.notified_unlock = -1
         self.recalc()
         if load:
@@ -354,8 +421,14 @@ class Game:
         self.warps = self.clicks = self.crates = 0
         self.bought = self.bldg = self.events_done = self.quests_done = 0
         self.ach = set()
+        self.ach_bonus = 0.0
         self.quests = []
         self.play_time = 0.0
+        self.ups_bought = self.travels = self.frenzies = self.best_burst = 0
+        self.away_max = 0.0
+        self.night_secs = 0.0
+        self.visited = {0}
+        self.flags = set()
 
     def total_ships(self):
         return sum(sum(o) for o in self.owned)
@@ -368,7 +441,10 @@ class Game:
                  perks=sorted(self.perks), projects=sorted(self.projects), dm=self.dm, dm_spent=self.dm_spent, warps=self.warps,
                  clicks=self.clicks, crates=self.crates, bought=self.bought, bldg=self.bldg,
                  events_done=self.events_done, quests_done=self.quests_done, ach=sorted(self.ach),
-                 quests=self.quests, cur=self.cur, play_time=self.play_time, time=time.time())
+                 quests=self.quests, cur=self.cur, play_time=self.play_time, ups_bought=self.ups_bought,
+                 travels=self.travels, frenzies=self.frenzies, best_burst=self.best_burst, away_max=self.away_max,
+                 night_secs=self.night_secs, visited=sorted(self.visited), flags=sorted(self.flags),
+                 settings=self.settings, time=time.time())
         try:
             tmp = SAVE + ".tmp"
             with open(tmp, "w") as f:
@@ -412,14 +488,24 @@ class Game:
             self.warps = int(d["warps"]); self.clicks = int(d["clicks"]); self.crates = int(d["crates"])
             self.bought = int(d["bought"]); self.bldg = int(d["bldg"])
             self.events_done = int(d["events_done"]); self.quests_done = int(d["quests_done"])
-            self.ach = set(d["ach"])
+            self.ach = {a for a in d["ach"] if a in ACH_BY_ID}
+            self.ups_bought = int(d.get("ups_bought", 0)); self.travels = int(d.get("travels", 0))
+            self.frenzies = int(d.get("frenzies", 0)); self.best_burst = int(d.get("best_burst", 0))
+            self.away_max = float(d.get("away_max", 0)); self.night_secs = float(d.get("night_secs", 0))
+            self.visited = {int(v) for v in d.get("visited", [0]) if 0 <= int(v) < NSITE} | {0}
+            self.flags = {str(f) for f in d.get("flags", [])}
+            if isinstance(d.get("settings"), dict):
+                self.settings.update({k: v for k, v in d["settings"].items() if k in self.settings})
             self.quests = [q for q in d["quests"] if isinstance(q, dict) and q.get("k") in QUEST_TXT][:3]
             self.cur = int(d.get("cur", 0)) if self.unlocked[int(d.get("cur", 0)) % n] else 0
             self.play_time = float(d.get("play_time", 0))
-            away = min(max(0, time.time() - float(d["time"])), OFFLINE_CAP)
+            real_away = max(0.0, time.time() - float(d["time"]))
+            away = min(real_away, OFFLINE_CAP)
+            self.away_max = max(self.away_max, real_away / 3600)
         except (KeyError, TypeError, ValueError, IndexError):
             self.reset_all()
             return
+        self.update_ach_bonus()
         self.recalc()
         eff = self.E["offline"]
         total = 0.0
@@ -494,13 +580,13 @@ class Game:
                     reactor += 0.025 * L * f
                 elif b == 5:
                     crate += 0.04 * L * f
-        ach = 1 + ACH_BONUS * len(self.ach)
+        ach = 1 + self.ach_bonus
         buff = 1.0
         for b in self.buffs:
             buff *= b["mult"]
         self.buff_mult = buff
         self.G = ((1 + E["dmbase"] * math.sqrt(self.dm)) * ach * E["ore"] * (1 + reactor)
-                  * (1 + 0.05 * (self.n_unlocked - 1)) * buff)
+                  * (1 + 0.05 * (self.n_unlocked - 1)) * buff * self.dev_mult)
         self.crate_rate = 1 + E["crate"] + crate
         self.cred_ops = cred * E["cred"] * ach
         self.sci_ops = sci * E["sci"] * ach
@@ -637,6 +723,7 @@ class Game:
         if self.unlocked[p] and uid not in self.ups[p] and self.ore[p] >= c:
             self.ore[p] -= c
             self.ups[p].add(uid)
+            self.ups_bought += 1
             self.recalc()
             return True
         return False
@@ -649,6 +736,7 @@ class Game:
                 self.ups[p].add(u["id"])
                 n += 1
         if n:
+            self.ups_bought += n
             self.recalc()
         return n
 
@@ -687,6 +775,11 @@ class Game:
         if k == self.cur or not self.unlocked[k] or self.travel:
             return False
         dur = min(3.2, 1.0 + 0.22 * abs(k - self.cur)) * self.E["travel"]
+        self.travels += 1
+        self.visited.add(k)
+        if k == 0 and self.unlocked[2]:
+            self.flags.add("home")
+        self.fx("travel", k)
         if self.sim:
             self.cur = k
             return True
@@ -733,10 +826,12 @@ class Game:
             return True
         return False
 
-    def do_warp(self, confirmed=True):
+    def do_warp(self, force=False):
         gain = self.warp_gain()
         if gain < 1:
-            return False
+            if not force:
+                return False
+            gain = 1
         self.dm += gain
         self.warps += 1
         n = NSITE
@@ -773,9 +868,15 @@ class Game:
         x = self.s_click[p]
         self.add_ore(p, x)
         self.clicks += 1
+        self.click_times.append(self.t)
+        while self.click_times and self.click_times[0] < self.t - 10:
+            self.click_times.popleft()
+        self.best_burst = max(self.best_burst, len(self.click_times))
         return x
 
     def add_buff(self, name, mult, secs):
+        if name == "Mining Frenzy":
+            self.frenzies += 1
         for b in self.buffs:
             if b["name"] == name:
                 b["t"] = b["dur"] = max(b["t"], secs)
@@ -787,6 +888,8 @@ class Game:
         c = self.crate
         self.crate = None
         self.crates += 1
+        if c and c.get("life", 99) < 3:
+            self.flags.add("quickdraw")
         p = self.cur
         pay = self.E["crate_pay"]
         r = random.random()
@@ -869,7 +972,7 @@ class Game:
         return True
 
     # ---------------- events -----------------
-    def pick_event(self):
+    def pick_event(self, force=None):
         pool = ["meteor", "pirates", "flare", "lottery", "derelict"]
         if self.cred_ops > 0:
             pool.append("trader")
@@ -877,7 +980,7 @@ class Game:
             pool += ["grant", "distress"]
         if random.random() < 0.06:
             pool = ["whisper"]
-        name = random.choice(pool)
+        name = force or random.choice(pool)
         g = self
         p = self.cur
         nm = SITES[p]["name"]
@@ -899,6 +1002,7 @@ class Game:
 
             def fight():
                 if random.random() < 0.5:
+                    g.flags.add("pirates")
                     x = g.s_ops[p] * 500 + 200 * SC[p]; g.add_ore(p, x)
                     return f"Victory! Salvaged {fmt(x)} {ore} from the wrecks."
                 x = g.ore[p] * 0.2; g.ore[p] -= x
@@ -923,6 +1027,7 @@ class Game:
                 x = g.ore[p] * 0.10
                 g.ore[p] -= x
                 if random.random() < 0.3:
+                    g.flags.add("jackpot")
                     g.add_ore(p, x * 4)
                     return f"JACKPOT! Won {fmt(x * 4)} {ore}."
                 return f"Lost your {fmt(x)} {ore} stake."
@@ -970,6 +1075,7 @@ class Game:
                         ("Ignore the signal", lambda: "The signal fades.")])
 
         def listen():
+            g.flags.add("whisper")
             g.dm += 1
             return "A whisper from the void... +1 Dark Matter!"
         return dict(title="Whispers From the Void", text="You hear something deep in the dark between stars.",
@@ -1005,6 +1111,8 @@ class Game:
             if tr["t"] >= tr["dur"]:
                 self.travel = None
         if not self.sim:
+            if time.localtime().tm_hour < 5:
+                self.night_secs += dt
             self.step_crate(dt)
             self.step_events(dt)
         if self.E["auto"] or self.E["autoup"]:
@@ -1028,11 +1136,29 @@ class Game:
                 self.autosave_t = 0
                 self.save()
 
+    def update_ach_bonus(self):
+        self.ach_bonus = sum(TIER_BONUS[ACH_BY_ID[a]["tier"]] for a in self.ach if a in ACH_BY_ID)
+
     def check_achievements(self):
-        for name, desc, cond in ACHIEVEMENTS:
-            if name not in self.ach and cond(self):
-                self.ach.add(name)
-                self.toast(f"Achievement: {name}  (+{int(ACH_BONUS * 100)}% production)", 5)
+        new = []
+        for a in ACHIEVEMENTS:
+            if a["id"] not in self.ach and a["cond"](self):
+                self.ach.add(a["id"])
+                new.append(a)
+        if new:
+            self.update_ach_bonus()
+            for a in new:
+                self.fx("ach", a["id"])
+        return new
+
+    def fast_forward(self, seconds):
+        """Developer helper: add `seconds` of production to every planet, credits and science."""
+        self.recalc()
+        for p in range(NSITE):
+            if self.unlocked[p] and self.s_ops[p] > 0:
+                self.add_ore(p, self.s_ops[p] * seconds)
+        self.add_credits(self.cred_ops * seconds)
+        self.add_sci(self.sci_ops * seconds)
 
     def auto_buy(self):
         """Auto-buyers only spend up to 25% of a planet's stockpile per purchase, so savings can pile up."""
@@ -1055,6 +1181,7 @@ class Game:
                     if c <= 0.25 * self.ore[p]:
                         self.ore[p] -= c
                         self.ups[p].add(u["id"])
+                        self.ups_bought += 1
                         break
 
     def step_crate(self, dt):

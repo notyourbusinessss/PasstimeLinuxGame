@@ -15,9 +15,11 @@ import time
 import pygame
 
 import core
+import devtools
 import gfx
+import sounds
 from core import (BMAX, BUILDINGS, NB, NSH, NSITE, PERKS, PROJECTS, SC, SHIPS, SITES, TECHS, TECH_BY_ID,
-                  UPGRADES, ACHIEVEMENTS, ACH_BONUS, QUEST_TXT, fmt, geo_cost)
+                  UPGRADES, ACHIEVEMENTS, ACH_BY_ID, ACH_CATS, TIER_BONUS, TIER_NAMES, QUEST_TXT, fmt, geo_cost)
 from gfx import glow, scale_c, lerp_c
 
 W, H = 1280, 720
@@ -26,7 +28,15 @@ CX, CY = 325, 392                    # centre of the planet view
 PLANET_R = 58
 ADD = pygame.BLEND_RGB_ADD
 STRIP_Y = H - 30
-TABS = ["Ships", "Upgrades", "Colony", "Planets", "Tech", "Quests", "Warp", "Trophies"]
+BASE_TABS = ["Ships", "Upgrades", "Colony", "Planets", "Tech", "Quests", "Warp", "Awards"]
+MEDAL = {"bronze": (205, 127, 50), "silver": (205, 210, 222), "gold": (255, 208, 70), "platinum": (140, 230, 255)}
+AWARD_CHIPS = ["All"] + ACH_CATS + ["Stats"]
+
+
+def fmt_time(sec):
+    sec = int(sec)
+    h, m = sec // 3600, sec % 3600 // 60
+    return f"{h}h {m:02d}m" if h else f"{m}m {sec % 60:02d}s"
 
 
 def wrap(font, text, width):
@@ -44,13 +54,22 @@ def wrap(font, text, width):
 
 
 class App:
-    def __init__(self):
+    def __init__(self, dev=False):
         self.g = core.Game()
+        self.dev = dev                       # developer mode: only ever enabled by the --dev command-line flag
+        self.dev_state = devtools.DevState()
+        self.tabs = BASE_TABS + (["Dev"] if dev else [])
+        self.ach_popups = []
+        self.ach_new = False
+        self.awards_cat = "All"
+        self.fps = 0.0
+        self.had_event = False
+        self.snd = sounds.Sounds(self.g.settings)
         self.t = 0.0
         self.dt = 0.016
         self.mouse = (0, 0)
         self.tab = 0
-        self.scroll = [0] * len(TABS)
+        self.scroll = [0] * len(self.tabs)
         self.buttons = []
         self.modal_buttons = []
         self.strip_hits = []
@@ -129,6 +148,7 @@ class App:
         if g.travel:
             return
         x = g.click(pos)
+        self.snd.play("click")
         oc = SITES[g.cur]["ocol"]
         self.pulse = 1.0
         self.shake = 0.25
@@ -234,19 +254,44 @@ class App:
         for kind, data in g.fx_events:
             if kind == "warp":
                 self.warp_fx = 1.8
+                self.snd.play("warp")
             elif kind == "unlock":
                 self.rings.append([CX, CY, 0.0, SITES[data]["col"]])
                 self.burst(CX, CY, SITES[data]["col"], 40)
+                self.snd.play("unlock")
             elif kind == "project":
                 self.rings.append([CX, CY, 0.0, (255, 220, 120)])
                 self.burst(CX, CY, (255, 220, 120), 50)
+                self.snd.play("project")
             elif kind == "crate":
                 c = data
                 self.burst(c["x"], c.get("yy", c["y"]), (255, 215, 80), 30)
                 self.rings.append([c["x"], c.get("yy", c["y"]), 0.0, (255, 215, 80)])
+                self.snd.play("crate")
             elif kind == "buy":
                 self.burst(CX, CY, SHIPS[data[1]][3], 8)
+                self.snd.play("buy")
+            elif kind == "travel":
+                self.snd.play("travel")
+            elif kind == "ach":
+                self.ach_new = True
+                if len(self.ach_popups) < 8:
+                    self.ach_popups.append(dict(id=data, t=0.0, dur=3.6))
         g.fx_events.clear()
+        if self.ach_popups:
+            pop = self.ach_popups[0]
+            if pop["t"] == 0.0:
+                self.snd.play("ach")
+            pop["t"] += dt
+            if len(self.ach_popups) > 3:
+                pop["dur"] = 1.6
+            if pop["t"] >= pop["dur"]:
+                self.ach_popups.pop(0)
+        if g.event and not self.had_event:
+            self.snd.play("event")
+        self.had_event = bool(g.event)
+        if self.dev:
+            devtools.tick(self, dt)
         shown = sum(min(o, 4) for o in g.owned[g.cur])
         alive = [a for a in self.asts if a["hp"] > 0]
         for a in self.asts:
@@ -311,9 +356,12 @@ class App:
         self.draw_fx(scr, fonts[1])
         scr.blit(self.vig, (0, 0), special_flags=pygame.BLEND_RGB_MULT)
         self.draw_hud(scr, fonts)
+        if self.dev:
+            self.draw_dev_badge(scr, fonts)
         self.draw_strip(scr, fonts)
         self.draw_panel(scr, fonts)
         self.draw_toasts(scr, fonts[2])
+        self.draw_ach_banner(scr, fonts)
         if g.event:
             self.draw_event(scr, fonts)
         if g.travel:
@@ -544,13 +592,26 @@ class App:
             self.txt(scr, tiny, f"Next planet: {SITES[k]['name']}", (22, y + 2), (190, 196, 220), shadow=True)
             pygame.draw.rect(scr, (24, 28, 56), (22, y + 20, 150, 6), border_radius=3)
             pygame.draw.rect(scr, SITES[k]["col"], (22, y + 20, 150 * fr, 6), border_radius=3)
-        yb = 16
+        yb = 84
         for b in g.buffs:
             self.txt(scr, sm, f"{b['name']} x{b['mult']:g}  {b['t']:.0f}s", (640, yb), (255, 222, 90), "topright", True)
             frac = b["t"] / b["dur"]
             pygame.draw.rect(scr, (40, 34, 12), (490, yb + 21, 150, 5), border_radius=2)
             pygame.draw.rect(scr, (255, 200, 60), (640 - 150 * frac, yb + 21, 150 * frac, 5), border_radius=2)
             yb += 34
+
+    def draw_dev_badge(self, scr, fonts):
+        tiny = fonts[3]
+        d = self.dev_state
+        self.txt(scr, tiny, "DEV MODE", (PANEL.x - 22, 3), (255, 110, 110), "topright", True)
+        if d.fps:
+            self.txt(scr, tiny, f"{self.fps:.0f} FPS", (PANEL.x - 22, 18), (255, 220, 140), "topright", True)
+        if d.speed != 1:
+            self.txt(scr, tiny, f"speed x{d.speed}", (PANEL.x - 22, 33), (255, 220, 140), "topright", True)
+        if d.god:
+            self.txt(scr, tiny, "GOD MODE", (PANEL.x - 22, 48), (255, 140, 140), "topright", True)
+        if d.infinite:
+            self.txt(scr, tiny, "INFINITE RESOURCES", (PANEL.x - 22, 63), (255, 140, 140), "topright", True)
 
     def draw_strip(self, scr, fonts):
         big, med, sm, tiny = fonts
@@ -625,7 +686,9 @@ class App:
 
     # ---------------- panel -----------------
     def button(self, scr, rect, label, font, fn, enabled=True, col=(50, 70, 110), modal=False, dot=False,
-               panel=False, selected=False):
+               panel=False, selected=False, danger=False):
+        if danger and not selected:
+            col = (110, 40, 50)
         hot = enabled and rect.collidepoint(self.mouse) and (not panel or PANEL.collidepoint(self.mouse))
         c = tuple(min(255, v + 28) for v in col) if hot else col
         if not enabled:
@@ -709,18 +772,20 @@ class App:
             return any(g.quest_prog(q) >= q["tgt"] for q in g.quests)
         if k == 6:
             return g.warp_gain() >= 1 or any(pk[0] not in g.perks and g.dm_avail() >= pk[2] for pk in PERKS)
+        if k == 7:
+            return self.ach_new
         return False
 
     def draw_panel(self, scr, fonts):
         big, med, sm, tiny = fonts
         g = self.g
         scr.blit(self.panel_bg, (PANEL.x - 12, 4))
-        tw = PANEL.w // len(TABS)
-        for k, n in enumerate(TABS):
+        tw = PANEL.w // len(self.tabs)
+        for k, n in enumerate(self.tabs):
             r = pygame.Rect(PANEL.x + k * tw, 14, tw - 4, 30)
             self.button(scr, r, n, tiny if sm.size(n)[0] > tw - 10 else sm, (lambda k=k: self.set_tab(k)),
                         col=(78, 100, 176) if self.tab == k else (34, 42, 74), dot=self.tab != k and self.tab_alert(k),
-                        selected=self.tab == k)
+                        selected=self.tab == k, danger=(n == "Dev"))
         if self.tab in (0, 2):
             self.txt(scr, tiny, "Buy:", (PANEL.x + 2, 70), (170, 175, 200))
             for k, (lab, m) in enumerate([("x1", 1), ("x10", 10), ("x100", 100), ("Max", 0)]):
@@ -731,10 +796,12 @@ class App:
         if self.tab in (0, 1, 2):
             self.txt(scr, tiny, f"{site['name']}  -  paid in {site['ore']}", (PANEL.right, 70), site["col"], "topright")
         pygame.draw.line(scr, (50, 58, 100), (PANEL.x, PANEL.y - 7), (PANEL.right, PANEL.y - 7))
+        if self.tab == 7:
+            self.ach_new = False
         scr.set_clip(PANEL)
         sy = PANEL.y - self.scroll[self.tab]
         end = [self.draw_ships, self.draw_upgrades, self.draw_colony, self.draw_planets, self.draw_tech,
-               self.draw_quests, self.draw_warp, self.draw_trophies][self.tab](scr, fonts, sy)
+               self.draw_quests, self.draw_warp, self.draw_awards, self.draw_dev][self.tab](scr, fonts, sy)
         scr.set_clip(None)
         self.content_h = end - sy
         maxs = max(0, self.content_h - PANEL.h)
@@ -980,32 +1047,206 @@ class App:
                          lambda pid=pid: g.buy_perk(pid), glyph="D")
         return y
 
-    def draw_trophies(self, scr, fonts, y):
+    # ---------------- achievements, stats, dev -----------------
+    def ach_progress(self, a):
+        if not a["prog"]:
+            return None
+        cur, tgt = a["prog"](self.g)
+        if tgt <= 0:
+            return None
+        if tgt >= 1e5:
+            f = math.log10(max(cur, 0) + 1) / math.log10(tgt + 1)
+        else:
+            f = cur / tgt
+        return max(0.0, min(1.0, f)), cur, tgt
+
+    def draw_star(self, scr, cx, cy, r, col):
+        pts = []
+        for i in range(10):
+            a = -math.pi / 2 + i * math.pi / 5
+            rr = r if i % 2 == 0 else r * 0.42
+            pts.append((cx + math.cos(a) * rr, cy + math.sin(a) * rr))
+        pygame.draw.polygon(scr, col, pts)
+
+    def draw_medal(self, scr, cx, cy, tier, got):
+        col = MEDAL[tier]
+        if got:
+            scr.blit(glow(26, scale_c(col, 0.55)), (cx - 26, cy - 26), special_flags=ADD)
+        pygame.draw.circle(scr, scale_c(col, 0.28 if got else 0.12), (cx, cy), 19)
+        pygame.draw.circle(scr, col if got else scale_c(col, 0.35), (cx, cy), 19, 2)
+        self.draw_star(scr, cx, cy, 11, col if got else scale_c(col, 0.35))
+
+    def draw_awards(self, scr, fonts, y):
         big, med, sm, tiny = fonts
         g = self.g
-        self.txt(scr, med, f"{len(g.ach)}/{len(ACHIEVEMENTS)} trophies  (+{int(len(g.ach) * ACH_BONUS * 100)}% production)",
-                 (PANEL.x + 4, y), (255, 225, 140))
-        y += 36
-        for name, desc, _ in ACHIEVEMENTS:
-            got = name in g.ach
-            r = pygame.Rect(PANEL.x, y, PANEL.w, 44)
-            y += 50
+        total = len(ACHIEVEMENTS)
+        self.txt(scr, med, f"{len(g.ach)}/{total} achievements", (PANEL.x + 4, y), (255, 225, 140))
+        self.txt(scr, sm, f"+{g.ach_bonus * 100:.1f}% production", (PANEL.right - 4, y + 2), (130, 255, 150), "topright")
+        y += 26
+        x = PANEL.x + 4
+        for t in TIER_NAMES:
+            n = sum(1 for a in ACHIEVEMENTS if a["tier"] == t)
+            e = sum(1 for a in ACHIEVEMENTS if a["tier"] == t and a["id"] in g.ach)
+            label = f"{t.title()} {e}/{n} (+{TIER_BONUS[t] * 100:g}%)"
+            self.txt(scr, tiny, label, (x, y), MEDAL[t])
+            x += tiny.size(label)[0] + 16
+        y += 22
+        for i, c in enumerate(AWARD_CHIPS):
+            r = pygame.Rect(PANEL.x + (i % 8) * 74, y + (i // 8) * 28, 70, 24)
+            self.button(scr, r, c, tiny, (lambda c=c: setattr(self, "awards_cat", c)), panel=True,
+                        col=(78, 100, 176) if self.awards_cat == c else (34, 42, 74))
+        y += 62
+        if self.awards_cat == "Stats":
+            return self.draw_stats(scr, fonts, y)
+        items = [a for a in ACHIEVEMENTS if self.awards_cat in ("All", a["cat"])]
+
+        def sort_key(a):
+            pr = self.ach_progress(a)
+            return (a["id"] in g.ach, -(pr[0] if pr else 0.0))
+        items.sort(key=sort_key)
+        for a in items:
+            r = pygame.Rect(PANEL.x, y, PANEL.w, 62)
+            y += 68
             if not r.colliderect(PANEL):
                 continue
-            pygame.draw.rect(scr, (56, 48, 28) if got else (22, 24, 40), r, border_radius=8)
+            got = a["id"] in g.ach
+            col = MEDAL[a["tier"]]
+            hidden = a["secret"] and not got
+            pygame.draw.rect(scr, (52, 46, 28) if got else (22, 24, 42), r, border_radius=9)
+            pygame.draw.rect(scr, col if got else (52, 56, 84), r, 1, border_radius=9)
+            self.draw_medal(scr, r.x + 34, r.centery, a["tier"], got)
+            self.txt(scr, med, "???" if hidden else a["name"], (r.x + 66, r.y + 6), (255, 235, 170) if got else (150, 155, 180))
+            desc = "Secret achievement - keep playing to find it!" if hidden else a["desc"]
+            self.txt(scr, tiny, desc, (r.x + 66, r.y + 30), (180, 184, 205) if got else (110, 116, 142))
+            self.txt(scr, sm, f"+{TIER_BONUS[a['tier']] * 100:g}%", (r.right - 12, r.y + 8), col if got else scale_c(col, 0.5), "topright")
             if got:
-                pygame.draw.rect(scr, (255, 215, 110), r, 1, border_radius=8)
-                scr.blit(glow(20, (110, 84, 20)), (r.right - 40, r.centery - 20), special_flags=ADD)
-                pygame.draw.circle(scr, (255, 215, 110), (r.right - 20, r.centery), 7)
-            self.txt(scr, sm, name if got else "???", (r.x + 12, r.y + 4), (255, 230, 150) if got else (90, 95, 120))
-            self.txt(scr, tiny, desc, (r.x + 12, r.y + 25), (170, 175, 200) if got else (80, 85, 110))
-        y += 10
-        b1 = pygame.Rect(PANEL.x, y, 200, 40)
-        b2 = pygame.Rect(PANEL.x + 220, y, 280, 40)
-        self.button(scr, b1, "Save now", sm, lambda: (g.save(), g.toast("Game saved.", 2)), panel=True)
-        self.button(scr, b2, "CLICK AGAIN: WIPE SAVE" if self.reset_confirm > 0 else "Hard reset (wipe save)", sm,
+                self.txt(scr, tiny, "EARNED", (r.right - 12, r.bottom - 10), (255, 215, 110), "bottomright")
+            else:
+                pr = self.ach_progress(a)
+                if pr:
+                    f, cur, tgt = pr
+                    bar = pygame.Rect(r.x + 66, r.bottom - 12, r.w - 200, 5)
+                    pygame.draw.rect(scr, (16, 18, 32), bar, border_radius=2)
+                    if f > 0:
+                        pygame.draw.rect(scr, scale_c(col, 0.8), (bar.x, bar.y, int(bar.w * f), bar.h), border_radius=2)
+                    self.txt(scr, tiny, f"{fmt(cur)} / {fmt(tgt)}", (r.right - 12, r.bottom - 10), (150, 156, 184), "bottomright")
+        return y
+
+    def draw_stats(self, scr, fonts, y):
+        big, med, sm, tiny = fonts
+        g = self.g
+        rows = [
+            ("Play time", fmt_time(g.play_time)),
+            ("Asteroid clicks", f"{g.clicks:,}"),
+            ("Best click burst (10 s)", str(g.best_burst)),
+            ("Ore mined (Earth-equivalent)", fmt(g.all_norm)),
+            ("Credits earned", fmt(g.all_cred)),
+            ("Science produced", fmt(g.all_sci)),
+            ("Ships owned", f"{g.total_ships():,}"),
+            ("Ships bought", f"{g.bought:,}"),
+            ("Upgrades bought", f"{g.ups_bought:,}"),
+            ("Planets unlocked", f"{g.n_unlocked}/{NSITE}"),
+            ("Planets visited", f"{len(g.visited)}/{NSITE}"),
+            ("Trips between planets", f"{g.travels:,}"),
+            ("Colony levels built", f"{g.bldg:,}"),
+            ("Megaprojects", f"{len(g.projects)}/{NSITE}"),
+            ("Techs researched", f"{len(g.techs)}/{len(TECHS)}"),
+            ("Quests completed", f"{g.quests_done:,}"),
+            ("Events resolved", f"{g.events_done:,}"),
+            ("Supply crates grabbed", f"{g.crates:,}"),
+            ("Mining frenzies", f"{g.frenzies:,}"),
+            ("Warps", f"{g.warps:,}"),
+            ("Dark Matter", f"{g.dm:,} total, {g.dm_avail():,} to spend"),
+            ("Dark Matter perks", f"{len(g.perks)}/{len(PERKS)}"),
+            ("Achievements", f"{len(g.ach)}/{len(ACHIEVEMENTS)}  (+{g.ach_bonus * 100:.1f}%)"),
+        ]
+        self.txt(scr, med, "Statistics", (PANEL.x + 4, y), (230, 200, 255))
+        y += 28
+        for i, (label, val) in enumerate(rows):
+            r = pygame.Rect(PANEL.x, y, PANEL.w, 24)
+            y += 26
+            if i % 2 == 0 and r.colliderect(PANEL):
+                pygame.draw.rect(scr, (24, 28, 52), r, border_radius=5)
+            self.txt(scr, sm, label, (r.x + 10, r.y + 3), (170, 176, 205))
+            self.txt(scr, sm, val, (r.right - 10, r.y + 3), (240, 240, 250), "topright")
+        if "cheated" in g.flags:
+            self.txt(scr, sm, "This save has used developer cheats.", (PANEL.x + 10, y + 4), (255, 120, 120))
+            y += 24
+        y += 14
+        self.txt(scr, med, "Settings", (PANEL.x + 4, y), (230, 200, 255))
+        y += 30
+        st = g.settings
+
+        def toggle_sound():
+            st["sound"] = not st.get("sound", True)
+            self.snd.play("buy")
+
+        def vol(d):
+            def run():
+                st["volume"] = max(0.0, min(1.0, round(st.get("volume", 0.6) + d, 2)))
+                self.snd.play("buy")
+            return run
+        self.button(scr, pygame.Rect(PANEL.x, y, 180, 36), f"Sound: {'ON' if st.get('sound', True) else 'OFF'}", sm,
+                    toggle_sound, panel=True, col=(60, 120, 90) if st.get("sound", True) else (90, 50, 60))
+        self.button(scr, pygame.Rect(PANEL.x + 190, y, 50, 36), "-", med, vol(-0.1), panel=True)
+        self.txt(scr, sm, f"Volume {int(st.get('volume', 0.6) * 100)}%", (PANEL.x + 300, y + 9), (200, 205, 225), "midtop")
+        self.button(scr, pygame.Rect(PANEL.x + 360, y, 50, 36), "+", med, vol(0.1), panel=True)
+        if not self.snd.ok:
+            self.txt(scr, tiny, "(no audio device found)", (PANEL.x + 420, y + 12), (160, 120, 120))
+        y += 48
+        self.button(scr, pygame.Rect(PANEL.x, y, 200, 40), "Save now", sm,
+                    lambda: (g.save(), g.toast("Game saved.", 2)), panel=True)
+        self.button(scr, pygame.Rect(PANEL.x + 220, y, 280, 40),
+                    "CLICK AGAIN: WIPE SAVE" if self.reset_confirm > 0 else "Hard reset (wipe save)", sm,
                     self.hard_reset, panel=True, col=(150, 60, 70) if self.reset_confirm > 0 else (70, 40, 50))
         return y + 60
+
+    def draw_dev(self, scr, fonts, y):
+        big, med, sm, tiny = fonts
+        self.txt(scr, med, "DEVELOPER MODE", (PANEL.x + 4, y), (255, 120, 120))
+        y += 26
+        self.txt(scr, tiny, "Started with --dev. Using a cheat marks the save as cheated (secret achievement).",
+                 (PANEL.x + 4, y), (170, 150, 150))
+        y += 12
+        half = PANEL.w // 2
+        for title, items in devtools.sections(self):
+            y += 18
+            self.txt(scr, med, title, (PANEL.x + 4, y), (255, 215, 140))
+            y += 28
+            for k, (label, fn, active) in enumerate(items):
+                r = pygame.Rect(PANEL.x + (k % 2) * half, y, half - 6, 34)
+                if r.colliderect(PANEL):
+                    f = sm if sm.size(label)[0] < half - 24 else tiny
+                    self.button(scr, r, label, f, fn, panel=True, col=(150, 70, 70) if active else (52, 64, 108))
+                if k % 2 == 1 or k == len(items) - 1:
+                    y += 40
+        return y + 20
+
+    def draw_ach_banner(self, scr, fonts):
+        if not self.ach_popups:
+            return
+        big, med, sm, tiny = fonts
+        pop = self.ach_popups[0]
+        a = ACH_BY_ID.get(pop["id"])
+        if a is None:
+            return
+        t, dur = pop["t"], pop["dur"]
+        k = max(0.0, min(1.0, t / 0.35, (dur - t) / 0.35))
+        ease = 1 - (1 - k) ** 3
+        w, h = 430, 68
+        x = 225
+        y = -h + (h + 12) * ease
+        col = MEDAL[a["tier"]]
+        scr.blit(glow(150, scale_c(col, 0.18)), (x + w // 2 - 150, y + h // 2 - 150), special_flags=ADD)
+        bg = pygame.Surface((w, h), pygame.SRCALPHA)
+        pygame.draw.rect(bg, (14, 16, 38, 238), bg.get_rect(), border_radius=12)
+        pygame.draw.rect(bg, (*col, 255), bg.get_rect(), 2, border_radius=12)
+        scr.blit(bg, (x, y))
+        self.draw_medal(scr, int(x + 36), int(y + h // 2), a["tier"], True)
+        self.txt(scr, tiny, "ACHIEVEMENT UNLOCKED", (x + 70, y + 8), col)
+        self.txt(scr, med, a["name"], (x + 70, y + 24), (255, 245, 215))
+        self.txt(scr, tiny, a["desc"], (x + 70, y + 48), (175, 180, 205))
+        self.txt(scr, sm, f"+{TIER_BONUS[a['tier']] * 100:g}%", (x + w - 14, y + 10), (130, 255, 150), "topright")
 
     def draw_event(self, scr, fonts):
         big, med, sm, tiny = fonts
@@ -1028,10 +1269,24 @@ class App:
         self.txt(scr, tiny, f"Decide in {ev['left']:.0f}s", (box.centerx, box.bottom - 6), (150, 155, 180), "midbottom")
 
 
+USAGE = """Space Miner
+
+usage: python3 space_miner.py [--dev] [--selftest]
+
+  --dev        developer mode: adds a Dev tab with cheats (F1 jumps to it). Terminal only.
+  --selftest   run headless for a few seconds and exercise the game (used for testing)
+"""
+
+
 def main():
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print(USAGE)
+        return
     selftest = "--selftest" in sys.argv
+    dev = "--dev" in sys.argv
     if selftest:
         os.environ["SDL_VIDEODRIVER"] = "dummy"
+        os.environ["SDL_AUDIODRIVER"] = "dummy"
     pygame.display.init()
     pygame.font.init()
     pygame.display.set_caption("Space Miner")
@@ -1043,10 +1298,13 @@ def main():
 
     fonts = (font(30, True), font(18, True), font(15), font(12))
     t0 = time.time()
-    app = App()
+    app = App(dev=dev)
     g = app.g
+    if dev:
+        print("Developer mode ON (cheats are in the Dev tab; F1 jumps to it).")
     if selftest:
         print(f"startup {time.time() - t0:.2f}s")
+    _SCR.update(scr=scr, fonts=fonts)
     here = os.path.dirname(os.path.abspath(__file__))
     running = True
     frames = 0
@@ -1058,6 +1316,9 @@ def main():
         dt = min(clock.tick(60) / 1000.0, 0.25)
         if selftest:
             dt = 0.05
+        app.fps = clock.get_fps()
+        if dev and not selftest:
+            dt = min(dt * app.dev_state.speed, 30.0)
         app.mouse = (480, 330) if selftest else pygame.mouse.get_pos()
         for e in pygame.event.get():
             if e.type == pygame.QUIT:
@@ -1067,8 +1328,10 @@ def main():
                     running = False
                 elif e.key == pygame.K_SPACE and not g.event:
                     app.space_click()
-                elif pygame.K_1 <= e.key <= pygame.K_8:
+                elif pygame.K_1 <= e.key <= pygame.K_9 and e.key - pygame.K_1 < len(app.tabs):
                     app.set_tab(e.key - pygame.K_1)
+                elif e.key == pygame.K_F1 and dev:
+                    app.set_tab(len(app.tabs) - 1 if app.tab != len(app.tabs) - 1 else 0)
             elif e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
                 app.mouse_down(e.pos)
             elif e.type == pygame.MOUSEWHEEL and PANEL.collidepoint(app.mouse):
@@ -1079,10 +1342,21 @@ def main():
         frames += 1
         if selftest:
             selftest_step(app, g, frames, shot)
-            if frames >= 80:
+            if frames >= (95 if dev else 80):
                 running = False
     g.save()
     pygame.quit()
+
+
+_SCR = {}
+
+
+def app_scr():
+    return _SCR["scr"]
+
+
+def app_fonts():
+    return _SCR["fonts"]
 
 
 def selftest_step(app, g, frames, shot):
@@ -1162,6 +1436,18 @@ def selftest_step(app, g, frames, shot):
         assert g.warps == 1 and sum(g.owned[3]) == 0 and g.unlocked[11], "warp failed"
     if frames == 60:
         shot("warpfx")
+    if frames == 62 and app.dev:
+        app.tab = 8
+        app.draw(app_scr(), app_fonts())
+        shot("dev")
+        for title, items in devtools.sections(app):
+            for label, fn, active in items:
+                if "Wipe" in label or "Lock ALL" in label or "Relock" in label:
+                    continue
+                fn()
+        g.event = None
+        app.dev_state.infinite = False
+        devtools.tick(app, 0.05)
     if frames == 70:
         g.hard_reset()
 
