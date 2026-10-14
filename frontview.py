@@ -11,6 +11,7 @@ import pygame
 
 import director
 import front
+import resources
 from core import FACTIONS, NSEC, SECTORS, SECTOR_EDGES, SECTOR_LINKS, fmt, win_chance
 from gfx import glow, lerp_c, scale_c
 
@@ -193,7 +194,7 @@ class FrontView:
 
     def sector_at(self, pos):
         best, bd = None, 1e9
-        reach = 20 + 3 * min(self.z, 3)
+        reach = (20 + 3 * min(self.z, 3)) * (1.8 if resources.TOUCH else 1.0)
         for k in range(1, NSEC):
             if not self.app.sector_known(k):
                 continue
@@ -558,19 +559,23 @@ class FrontView:
         mouse = app.mouse
         x = r.right - 8
         y = r.y + 8
+        bh = 40 if resources.TOUCH else 26
+        tw = 1.35 if resources.TOUCH else 1.0
         buttons = [("FRONT", 52, self.focus_selected), ("FIT", 38, self.fit), ("-", 28, lambda: self.zoom_at(GC, 1 / 1.35)),
                    ("+", 28, lambda: self.zoom_at(GC, 1.35))]
         for label, w, fn in buttons:
-            rect = pygame.Rect(x - w, y, w, 26)
+            w = int(w * tw)
+            rect = pygame.Rect(x - w, y, w, bh)
             x -= w + 6
-            hot = rect.collidepoint(mouse)
+            hot = rect.collidepoint(mouse) and not resources.TOUCH
             pygame.draw.rect(scr, (60, 84, 150) if hot else (26, 34, 70), rect, border_radius=6)
             pygame.draw.rect(scr, (120, 150, 215), rect, 1, border_radius=6)
             app.txt(scr, sm if len(label) > 1 else med, label, rect.center, (235, 240, 255), "center")
             self.hits.append((rect, fn))
-        app.txt(scr, tiny, f"x{self.z:.1f}", (x - 2, y + 13), (170, 185, 225), "midright")
-        app.txt(scr, tiny, "Wheel: zoom   Drag: pan   Double-click: close look   Z: front view",
-                (r.x + 12, r.y + 10), (120, 132, 175))
+        app.txt(scr, tiny, f"x{self.z:.1f}", (x - 2, y + bh // 2), (170, 185, 225), "midright")
+        hint = ("Pinch: zoom   Drag: pan   Double-tap: close look" if resources.TOUCH else
+                "Wheel: zoom   Drag: pan   Double-click: close look   Z: front view")
+        app.txt(scr, tiny, hint, (r.x + 12, r.y + 10), (120, 132, 175))
         # mini-map
         if self.z > 1.05:
             m = self.minimap

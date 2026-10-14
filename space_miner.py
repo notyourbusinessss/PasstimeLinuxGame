@@ -28,6 +28,7 @@ import front
 import frontview
 import gfx
 import sounds
+import touch
 from version import __version__
 from core import (BMAX, BUILDINGS, NB, NSH, NSITE, PERKS, PROJECTS, SC, SHIPS, SITES, TECHS, TECH_BY_ID,
                   UPGRADES, ACHIEVEMENTS, ACH_BY_ID, ACH_CATS, TIER_BONUS, TIER_NAMES, QUEST_TXT, fmt, geo_cost,
@@ -109,6 +110,8 @@ class App:
         self.war_confirm = 0.0
         self.war_confirm_k = None
         self.g.stage_w, self.g.stage_h = PANEL.x - 12, H
+        self.touch = touch.Touch(self, PANEL, lambda: (W, H))
+        self.bg_since = None
         self.had_event = False
         self.snd = sounds.Sounds(self.g.settings)
         self.t = 0.0
@@ -191,6 +194,7 @@ class App:
         self.build_layout_assets()
         self.fv.relayout()
         self.rebuild_view()
+        self.touch.gesture = None
         self.raiders = []
         self.floats, self.parts, self.rings, self.shooting = [], [], [], []
 
@@ -279,8 +283,9 @@ class App:
             x, y, _ = self.ast_pos(a)
             self.mine_at((x, y), a)
 
-    def mouse_down(self, pos):
+    def mouse_down(self, pos, touch=False):
         g = self.g
+        grow = 8 if touch else 0                       # fingers are fatter than a mouse pointer
         if g.event:
             for rect, fn in reversed(self.modal_buttons):
                 if rect.collidepoint(pos):
@@ -293,12 +298,12 @@ class App:
             return
         if pos[0] >= PANEL.x - 10:
             for rect, fn in reversed(self.buttons):
-                if rect.collidepoint(pos):
+                if rect.inflate(0, grow).collidepoint(pos):
                     fn()
                     return
             return
         for rect, k in self.strip_hits:
-            if rect.collidepoint(pos):
+            if rect.inflate(grow, grow).collidepoint(pos):
                 self.strip_click(k)
                 return
         if self.view == "galaxy":
@@ -312,7 +317,7 @@ class App:
             d = math.hypot(pos[0] - x, pos[1] - y)
             if d < bd:
                 best, bd = a, d
-        if best is not None and bd < 38:
+        if best is not None and (bd < 38 or touch):                  # a tap anywhere mines the nearest asteroid
             x, y, _ = self.ast_pos(best)
             self.mine_at((x, y) if bd > 14 else pos, best)
 
@@ -353,6 +358,26 @@ class App:
             return
         self.war_confirm = 0.0
         g.start_campaign(k)
+
+    def back_pressed(self):
+        """The Android back button: leave the galaxy view; never quits (use Home)."""
+        if not self.g.event and self.view == "galaxy":
+            self.view = "system"
+
+    def went_to_background(self):
+        self.g.save()
+        self.bg_since = time.time()
+        gamelog.LOG.info("App went to the background; saved")
+
+    def came_back(self):
+        """Back from the background: the process may have been paused for hours; reloading the save pays the offline progress."""
+        away = time.time() - self.bg_since if self.bg_since else 0.0
+        self.bg_since = None
+        gamelog.LOG.info("App came back after %.0f s", away)
+        if away > 20:
+            self.g.load()
+            self.g.recalc()
+            self.rebuild_view()
 
     def describe(self):
         """A few lines about the game state, added to error reports."""
@@ -1961,34 +1986,36 @@ class App:
         if not self.snd.ok:
             self.txt(scr, tiny, "(no audio device found)", (PANEL.x + 420, y + 12), (160, 120, 120))
         y += 48
-        self.button(scr, pygame.Rect(PANEL.x, y, 180, 36), f"Fullscreen: {'ON' if self.fullscreen else 'OFF'}", sm,
-                    self.toggle_fullscreen, enabled=self.can_scale, panel=True,
-                    col=(60, 120, 90) if self.fullscreen else (50, 70, 110))
-        self.txt(scr, tiny, "F11 or Alt+Enter. You can also resize or maximise the window.", (PANEL.x + 192, y + 11), (150, 158, 190))
-        y += 48
-        opts = ["auto"] + [f"{w}x{h}" for w, h in RESOLUTIONS]
-        cur = st.get("resolution", "auto")
-        nxt = opts[(opts.index(cur) + 1) % len(opts)] if cur in opts else "auto"
-        shown = "Auto" if cur == "auto" else cur
-        self.button(scr, pygame.Rect(PANEL.x, y, 180, 36), f"Size: {shown}", sm, lambda nxt=nxt: self.set_resolution_choice(nxt),
-                    enabled=self.can_scale, panel=True, col=(50, 70, 110))
-        self.txt(scr, tiny, f"Now {W}x{H}. Bigger = sharper and roomier, but needs a faster computer.", (PANEL.x + 192, y + 11), (150, 158, 190))
-        y += 48
+        if not resources.TOUCH:                      # (not on a phone: the game always fills the screen)
+            self.button(scr, pygame.Rect(PANEL.x, y, 180, 36), f"Fullscreen: {'ON' if self.fullscreen else 'OFF'}", sm,
+                        self.toggle_fullscreen, enabled=self.can_scale, panel=True,
+                        col=(60, 120, 90) if self.fullscreen else (50, 70, 110))
+            self.txt(scr, tiny, "F11 or Alt+Enter. You can also resize or maximise the window.", (PANEL.x + 192, y + 11), (150, 158, 190))
+            y += 48
+            opts = ["auto"] + [f"{w}x{h}" for w, h in RESOLUTIONS]
+            cur = st.get("resolution", "auto")
+            nxt = opts[(opts.index(cur) + 1) % len(opts)] if cur in opts else "auto"
+            shown = "Auto" if cur == "auto" else cur
+            self.button(scr, pygame.Rect(PANEL.x, y, 180, 36), f"Size: {shown}", sm, lambda nxt=nxt: self.set_resolution_choice(nxt),
+                        enabled=self.can_scale, panel=True, col=(50, 70, 110))
+            self.txt(scr, tiny, f"Now {W}x{H}. Bigger = sharper and roomier, but needs a faster computer.", (PANEL.x + 192, y + 11), (150, 158, 190))
+            y += 48
         self.button(scr, pygame.Rect(PANEL.x, y, 200, 40), "Save now", sm,
                     lambda: (g.save(), g.toast("Game saved.", 2)), panel=True)
         self.button(scr, pygame.Rect(PANEL.x + 220, y, 280, 40),
                     "CLICK AGAIN: WIPE SAVE" if self.reset_confirm > 0 else "Hard reset (wipe save)", sm,
                     self.hard_reset, panel=True, col=(150, 60, 70) if self.reset_confirm > 0 else (70, 40, 50))
         y += 52
-        can_open = not resources.ANDROID and gamelog.enabled()
-        self.button(scr, pygame.Rect(PANEL.x, y, 200, 34), "Open log folder", sm, self.open_log_folder, enabled=can_open, panel=True)
-        shown = gamelog.log_dir()
-        if len(shown) > 52:
-            shown = "..." + shown[-49:]
-        self.txt(scr, tiny, shown, (PANEL.x + 212, y + 4), (150, 158, 190))
-        n = gamelog.error_count()
-        self.txt(scr, tiny, (f"{n} error(s) logged this session - see the log" if n else "No errors this session"),
-                 (PANEL.x + 212, y + 19), (255, 150, 130) if n else (120, 160, 130))
+        if not resources.TOUCH:
+            can_open = not resources.ANDROID and gamelog.enabled()
+            self.button(scr, pygame.Rect(PANEL.x, y, 200, 34), "Open log folder", sm, self.open_log_folder, enabled=can_open, panel=True)
+            shown = gamelog.log_dir()
+            if len(shown) > 52:
+                shown = "..." + shown[-49:]
+            self.txt(scr, tiny, shown, (PANEL.x + 212, y + 4), (150, 158, 190))
+            n = gamelog.error_count()
+            self.txt(scr, tiny, (f"{n} error(s) logged this session - see the log" if n else "No errors this session"),
+                     (PANEL.x + 212, y + 19), (255, 150, 130) if n else (120, 160, 130))
         self.txt(scr, tiny, f"Space Miner {__version__}", (PANEL.x + 4, y + 44), (120, 128, 160))
         return y + 70
 
@@ -2068,10 +2095,11 @@ class App:
 
 USAGE = """Space Miner
 
-usage: space-miner [--fullscreen] [--resolution WxH] [--debug] [--dev] [--selftest] [--version]
+usage: space-miner [--fullscreen] [--resolution WxH] [--touch] [--debug] [--dev] [--selftest] [--version]
 
   --fullscreen start in fullscreen (F11 toggles it any time; the window can also be resized or maximised)
   --resolution WxH   canvas size for this run, e.g. 1920x1080 (the Stats page saves a choice; the default is automatic)
+  --touch      the touch-screen interface (tap, drag to scroll, bigger buttons), to try it with a mouse
   --debug      verbose log (also printed in the terminal)
   --dev        developer mode: adds a Dev tab with cheats (F1 jumps to it). Terminal only.
   --selftest   run headless for a few seconds and exercise the game (used for testing)
@@ -2086,6 +2114,12 @@ def open_window(w, h, fullscreen=False):
     os.environ.setdefault("SDL_HINT_RENDER_SCALE_QUALITY", "linear")          # smooth scaling when the window is not w x h
     if pygame.display.get_driver() == "dummy":                                  # the headless test driver has no renderer
         return pygame.display.set_mode((w, h)), True, False
+    if resources.ANDROID:                                                       # always fullscreen, scaled to the screen
+        try:
+            return pygame.display.set_mode((w, h), pygame.SCALED | pygame.FULLSCREEN), True, True
+        except pygame.error as e:
+            gamelog.LOG.warning("Scaled fullscreen failed on Android (%s); trying a plain fullscreen.", e)
+            return pygame.display.set_mode((w, h), pygame.FULLSCREEN), False, True
     flags = pygame.SCALED | pygame.RESIZABLE
     if fullscreen:
         try:
@@ -2105,6 +2139,14 @@ def open_window(w, h, fullscreen=False):
         return pygame.display.set_mode((w, h)), False, False
 
 
+def android_canvas(dw, dh):
+    """A canvas with the shape of the phone's screen (so it fills it without black bars), at least 1280x720."""
+    aspect = max(dw, dh) / max(1, min(dw, dh))
+    if aspect >= 16 / 9:
+        return round(720 * aspect), 720
+    return 1280, round(1280 / aspect)
+
+
 def choose_resolution(setting, fullscreen):
     """The canvas size to use: the one picked in the settings, or ("auto") the biggest preset that suits the screen -
     the whole desktop when fullscreen, otherwise what fits in a window."""
@@ -2119,6 +2161,8 @@ def choose_resolution(setting, fullscreen):
         dw, dh = pygame.display.get_desktop_sizes()[0]
     except (pygame.error, IndexError):
         dw, dh = 1920, 1080
+    if resources.ANDROID:
+        return android_canvas(dw, dh)
     lim = (dw, dh) if fullscreen else (dw * 0.92, dh * 0.85)
     best = RESOLUTIONS[0]
     for r in RESOLUTIONS:
@@ -2136,6 +2180,8 @@ def main():
         return
     selftest = "--selftest" in sys.argv
     dev = "--dev" in sys.argv
+    if "--touch" in sys.argv:
+        resources.TOUCH = True                      # the touch-screen interface, for trying it with a mouse
     test_dir = None
     if selftest:
         os.environ["SDL_VIDEODRIVER"] = "dummy"
@@ -2154,7 +2200,7 @@ def main():
     cli_res = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--resolution=")), None)
     if cli_res is None and "--resolution" in sys.argv and sys.argv.index("--resolution") + 1 < len(sys.argv):
         cli_res = sys.argv[sys.argv.index("--resolution") + 1]
-    want_fs = (not selftest) and ("--fullscreen" in sys.argv or bool(saved.get("fullscreen")))
+    want_fs = resources.ANDROID or ((not selftest) and ("--fullscreen" in sys.argv or bool(saved.get("fullscreen"))))
     start_w, start_h = choose_resolution(cli_res or saved.get("resolution", "auto"), want_fs)
     apply_layout(start_w, start_h)
     scr, can_scale, is_fs = open_window(start_w, start_h, want_fs)
@@ -2216,8 +2262,10 @@ def main():
                     if e.type == pygame.QUIT:
                         running = False
                     elif e.type == pygame.KEYDOWN:
-                        if e.key == pygame.K_ESCAPE:
-                            if app.fullscreen:
+                        if e.key == getattr(pygame, "K_AC_BACK", -1):
+                            app.back_pressed()
+                        elif e.key == pygame.K_ESCAPE:
+                            if app.fullscreen and not resources.ANDROID:
                                 app.toggle_fullscreen()
                             else:
                                 running = False
@@ -2236,19 +2284,35 @@ def main():
                         elif e.key == pygame.K_F1 and dev:
                             app.set_tab(len(app.tabs) - 1 if app.tab != len(app.tabs) - 1 else 0)
                     elif e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
-                        if not (app.view == "galaxy" and not g.event and app.fv.down(e.pos)):
+                        if getattr(e, "touch", False) or resources.TOUCH:
+                            app.touch.down(e.pos)
+                        elif not (app.view == "galaxy" and not g.event and app.fv.down(e.pos)):
                             app.mouse_down(e.pos)
                     elif e.type == pygame.MOUSEBUTTONUP and e.button == 1:
-                        app.fv.up(e.pos)
+                        if getattr(e, "touch", False) or resources.TOUCH:
+                            app.touch.up(e.pos)
+                        else:
+                            app.fv.up(e.pos)
                     elif e.type == pygame.MOUSEMOTION:
-                        if app.fv.drag and not e.buttons[0]:
-                            app.fv.drag = None
-                        app.fv.move(e.pos)
+                        if getattr(e, "touch", False) or resources.TOUCH:
+                            app.touch.move(e.pos)
+                        else:
+                            if app.fv.drag and not e.buttons[0]:
+                                app.fv.drag = None
+                            app.fv.move(e.pos)
+                    elif e.type in (pygame.FINGERDOWN, pygame.FINGERUP, pygame.FINGERMOTION):
+                        kind = {pygame.FINGERDOWN: "down", pygame.FINGERUP: "up", pygame.FINGERMOTION: "motion"}[e.type]
+                        app.touch.finger(kind, e.finger_id, e.x, e.y, pygame.display.get_window_size())
                     elif e.type == pygame.MOUSEWHEEL:
                         if PANEL.collidepoint(app.mouse):
                             app.scroll[app.tab] -= e.y * 50
                         elif app.view == "galaxy" and not g.event:
                             app.fv.wheel(app.mouse, e.y)
+                    elif e.type in LIFECYCLE_BACKGROUND:
+                        app.went_to_background()
+                    elif e.type in LIFECYCLE_FOREGROUND:
+                        app.came_back()
+                app.touch.update(dt)
                 app.update(dt)
                 app.draw(app.scr, fonts)
                 pygame.display.flip()
@@ -2293,6 +2357,8 @@ def main():
 
 
 _SCR = {}
+LIFECYCLE_BACKGROUND = {getattr(pygame, n) for n in ("APP_WILLENTERBACKGROUND", "APP_TERMINATING") if hasattr(pygame, n)}
+LIFECYCLE_FOREGROUND = {getattr(pygame, n) for n in ("APP_DIDENTERFOREGROUND",) if hasattr(pygame, n)}
 
 
 def app_scr():
@@ -2342,7 +2408,7 @@ def selftest_step(app, g, frames, shot):
                     app.draw(app.scr, app_fonts())
         app.view, app.tab = "system", T_SHIPS
         app.set_resolution_choice("auto")
-        assert (W, H) == (1280, 720)
+        assert (W, H) == choose_resolution("auto", False)
     if frames == 40:
         g.ore = [1e15 * SC[i] for i in range(NSITE)]
         g.run_ore = list(g.ore); g.all_norm = g.run_norm = 1e20

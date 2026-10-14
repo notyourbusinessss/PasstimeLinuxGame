@@ -3,6 +3,7 @@ import os
 import sys
 
 ANDROID = "ANDROID_ARGUMENT" in os.environ          # set by python-for-android
+TOUCH = ANDROID                                     # touch-screen user interface (--touch turns it on for testing on a desktop)
 
 
 def base_dir():

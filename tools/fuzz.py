@@ -27,6 +27,7 @@ ARGS = dict(a.split("=") for a in sys.argv[1:] if "=" in a)
 FRAMES = int(ARGS.get("frames", 2500))
 SEED = int(ARGS.get("seed", 1))
 STATES = ARGS.get("states", "fresh,mid,late,ascended,dev").split(",")
+TOUCH = ARGS.get("touch", "0") == "1"          # touch=1: use the touch screen interface (taps, drags, pinches) as well
 
 
 def play(hours, interval=90):
@@ -77,6 +78,7 @@ def main():
         app = sm.App(dev=dev)
         app.g = g
         app.can_scale = True
+        sm.resources.TOUCH = TOUCH
         app.scr = pygame.display.get_surface()
         sm.apply_layout(1280, 720)
         app.set_resolution(1280, 720)
@@ -90,7 +92,27 @@ def main():
                     r = rng.random()
                     pos = (rng.randrange(0, sm.W), rng.randrange(0, sm.H))      # sm.W / sm.H follow the current canvas
                     app.mouse = pos
-                    if r < 0.40:
+                    if TOUCH and r < 0.5:
+                        kind = rng.random()
+                        if kind < 0.4:                                                    # a tap
+                            app.touch.down(pos); app.touch.up(pos)
+                        elif kind < 0.75:                                                 # a drag (maybe a fling)
+                            app.touch.down(pos)
+                            for _ in range(rng.randrange(1, 8)):
+                                pos = (pos[0] + rng.randrange(-80, 80), pos[1] + rng.randrange(-120, 120))
+                                app.touch.move(pos)
+                            app.touch.up(pos)
+                        else:                                                             # a pinch
+                            a, b = pos, (pos[0] + rng.randrange(20, 200), pos[1] + rng.randrange(-80, 80))
+                            win = (sm.W, sm.H)
+                            ft = lambda k, i, q: app.touch.finger(k, i, q[0] / sm.W, q[1] / sm.H, win)
+                            app.touch.down(a); ft("down", 1, a); ft("down", 2, b)
+                            for s in range(rng.randrange(1, 6)):
+                                a = (a[0] - 8, a[1]); b = (b[0] + 8 * rng.choice((-1, 1)), b[1])
+                                ft("motion", 1, a); ft("motion", 2, b)
+                            ft("up", 2, b); ft("up", 1, a); app.touch.up(a)
+                        app.touch.update(0.016)
+                    elif r < 0.40:
                         if not (app.view == "galaxy" and not g.event and app.fv.down(pos)):
                             app.mouse_down(pos)
                         app.fv.up(pos)

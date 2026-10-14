@@ -23,6 +23,42 @@ cd space-miner-*-linux-x86_64
 
 The build needs a reasonably recent distro (glibc 2.35 or newer, e.g. Ubuntu 22.04+). On an older one, run it from source (below).
 
+## Android
+
+Space Miner also runs on Android phones and tablets (landscape).
+
+![The phone layout: the canvas takes the shape of the screen](screenshots/53-android-planet.png)
+
+**Install.** Download `space-miner-<version>-android.apk` from the [Releases page](https://github.com/notyourbusinessss/PasstimeLinuxGame/releases/latest), open it on the device and allow installing apps from this source when Android asks (the APK is debug-signed, so it is for sideloading, not the Play Store). Your save is private to the app.
+
+**How it plays.** The whole game works with touch:
+
+| Gesture | Action |
+|---|---|
+| Tap the planet view | Mine the nearest asteroid (tap anywhere; use several fingers at once) |
+| Tap a button or a row | Press it (a tap that moves is a scroll, so you never buy by accident) |
+| Drag a list up or down | Scroll it; let go while moving to fling it |
+| Drag the galaxy map | Pan |
+| Pinch the galaxy map | Zoom (two fingers also pan) |
+| Double-tap a sector | Close look at its front |
+| Back button | Leave the galaxy map (it never quits the game) |
+| Home / switching apps | The game saves; when you come back it pays the progress you missed (up to 8 hours, like when the game is closed) |
+
+![The galaxy map on a phone](screenshots/54-android-galaxy.png)
+
+The canvas is made to match the shape of the screen (for example 1600x720 on a 20:9 phone), so it fills it without black bars; the buttons on the galaxy map are bigger and taps are forgiving. There is no Dev tab, and no Fullscreen or Size settings (the game always fills the screen). On a small phone the text is small - it is more comfortable on a tablet or a large phone.
+
+**Build it yourself** (Linux, Java 17, about 10 GB of disk for the Android SDK and NDK; the first build takes a while):
+
+```sh
+pip install buildozer "cython==0.29.36"
+buildozer android debug          # the APK ends up in bin/
+```
+
+`buildozer.spec` holds the settings and pins a python-for-android release that builds pygame 2.1.0 with Python 3.10; the release workflow builds the APK the same way for every `v*` tag. You can try the touch interface on a computer: `python3 space_miner.py --touch --resolution 1600x720` (the mouse acts as a finger).
+
+> **Status:** the touch interface is tested with simulated gestures and a fuzz test, but the APK build itself has not been run yet. If the first run of the *Release* workflow fails on Android, the Linux release is still published and the build log is attached to the run.
+
 ## Quick start (from source)
 
 ```sh
@@ -86,7 +122,7 @@ The game can also be played at a **higher resolution**. A bigger canvas is not j
 
 ![The galaxy map at 1920x1080](screenshots/50-hires-galaxy.png)
 
-Command-line options: `--fullscreen`, `--resolution WxH`, `--debug` (verbose log, also printed in the terminal), `--dev` ([developer mode](#developer-mode)), `--version`, `--help`.
+Command-line options: `--fullscreen`, `--resolution WxH`, `--touch`, `--debug` (verbose log, also printed in the terminal), `--dev` ([developer mode](#developer-mode)), `--version`, `--help`.
 
 Your save lives in `~/.space_miner_save.json`. Delete it (or use *Awards -> Stats -> Hard reset*) to start over.
 
@@ -526,6 +562,8 @@ Enemy raids and counter-offensives are included in these numbers (the bot defend
 | `director.py` | The Threat Director: aggression, raid and counter-offensive scheduling, Intel warnings, Fortify. No pygame either |
 | `front.py` | The frontline model: where each battle line sits, status of a front, garrison and hold chances. No pygame either |
 | `frontview.py` | The zoomable galaxy view: camera, mini-map, fleets and battle lines |
+| `touch.py` | Touch input: taps, drag-to-scroll with momentum, pinch to zoom the galaxy map |
+| `main.py`, `buildozer.spec` | The Android entry point and build settings |
 | `devtools.py` | The developer-mode cheats (only reachable with `--dev`) |
 | `sounds.py` | Procedural sound effects |
 | `gfx.py` | Procedural graphics: planets, asteroids, ships (with a hull style per planet), backdrops |
