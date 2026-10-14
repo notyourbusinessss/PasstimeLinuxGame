@@ -28,15 +28,60 @@ jobs:
           name: linux
           path: dist/*
 
+  android:
+    # Builds the APK with buildozer / python-for-android (about 30-40 minutes the first time). If it fails the Linux release is
+    # still published; the log of the failed build is kept as an artifact.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git zip unzip autoconf automake libtool pkg-config zlib1g-dev \
+            libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev build-essential ccache
+      - run: pip install --upgrade pip "buildozer==1.5.0" "Cython==0.29.36" virtualenv
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.buildozer
+            .buildozer
+          key: buildozer-${{ hashFiles('buildozer.spec') }}
+      - name: Build the APK
+        run: buildozer -v android debug 2>&1 | tee android-build.log
+      - name: Name the APK
+        run: |
+          VERSION=$(python3 -c "from version import __version__; print(__version__)")
+          mkdir -p dist
+          cp bin/*.apk "dist/space-miner-$VERSION-android.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: dist/*.apk
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: android-build-log
+          path: android-build.log
+
   publish:
-    needs: [linux]
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, android]
+    if: always() && needs.linux.result == 'success' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
+          pattern: "{linux,android}"
           merge-multiple: true
       - name: Check that the tag matches version.py
         run: |

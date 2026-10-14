@@ -11,6 +11,7 @@ import pygame
 
 import director
 import front
+import resources
 from core import FACTIONS, NSEC, SECTORS, SECTOR_EDGES, SECTOR_LINKS, fmt, win_chance
 from gfx import glow, lerp_c, scale_c
 
@@ -24,6 +25,16 @@ CLOSE = 1.35                         # from this zoom on, fleets and battle line
 DETAIL = 1.9                         # from this zoom on, sectors get their full labels
 MINE = (120, 190, 255)
 LASER_MINE = (150, 225, 255)
+
+
+def set_layout(panel_x, w, h):
+    """Re-fit the map to the window: its viewport is everything left of the side panel below the HUD. (At 1280x720 this
+    gives the original VIEW, GC and map size.)"""
+    global VIEW, GC, MAPW, MAPH, STAGE_W
+    STAGE_W = panel_x - 12
+    VIEW = pygame.Rect(8, 256, STAGE_W - 8, h - 256 - 52)
+    MAPW, MAPH = VIEW.w * 0.9219, VIEW.h * 0.932
+    GC = (VIEW.x + VIEW.w * 0.505, VIEW.centery)
 
 
 def hrand(*a):
@@ -50,7 +61,11 @@ class FrontView:
         self.rot_cache = {}
         self.hover = None
         self.last_click = (-9.0, None)
+        self.relayout()
+
+    def relayout(self):
         self.minimap = pygame.Rect(VIEW.x + 8, VIEW.bottom - 86, 132, 78)
+        self.clamp(snap=True)
 
     # ------------------------------------------------------------------ camera
     def pt(self, px, py):
@@ -179,7 +194,7 @@ class FrontView:
 
     def sector_at(self, pos):
         best, bd = None, 1e9
-        reach = 20 + 3 * min(self.z, 3)
+        reach = (20 + 3 * min(self.z, 3)) * (1.8 if resources.TOUCH else 1.0)
         for k in range(1, NSEC):
             if not self.app.sector_known(k):
                 continue
@@ -247,6 +262,9 @@ class FrontView:
             return
         fac = SECTORS[enemy]["faction"]
         ecol = FACTIONS[fac]["col"]
+        st = director.stance(g, fac)
+        fighting = st == "war" or bool(g.campaign and g.campaign["k"] == enemy)      # at peace the fleets only face each other
+        tension = g.tension.get(fac, 0.0)
         t = front.front_pos(g, enemy)
         F = (pm[0] + (po[0] - pm[0]) * t, pm[1] + (po[1] - pm[1]) * t)
         z = self.z
@@ -266,7 +284,7 @@ class FrontView:
                                                   for i in g.incoming)
         if z >= CLOSE and mine == front.source_sector(g, enemy):      # the fleets gather on the main lane
             body = 16 * (0.85 + 0.15 * min(z, 3))
-            tiers = front.fleet_tiers(g)
+            roster = front.fleet_roster(g)
             fp, ep = g.fleet_power(), g.sector_power(enemy)
             rows_m = max(1, int(max(0.0, t * L - body - 8) / gap))
             rows_e = max(1, int(max(0.0, (1 - t) * L - body - 8) / gap))
@@ -283,7 +301,7 @@ class FrontView:
                 x, y = F[0] - ux * back + nx * side, F[1] - uy * back + ny * side
                 mine_pts.append((x, y))
                 self.spark(scr, x, y, S * 0.8, MINE, 0.35)
-                img = self.rot(app.ship_sprites[tiers[i % len(tiers)]], ang_m, S)
+                img = self.rot(app.ship_sprite(*roster[i % len(roster)]), ang_m, S)
                 scr.blit(img, img.get_rect(center=(x, y)))
             espr = app.enemy_small[fac]
             for j in range(n_e):
@@ -299,7 +317,7 @@ class FrontView:
             # lasers, in short bursts
             slot = int(now * 6)
             lit = (now * 6) % 1.0 < 0.65
-            if lit and mine_pts and enemy_pts:
+            if lit and fighting and mine_pts and enemy_pts:
                 for q in range(min(4, 2 + len(mine_pts) // 6)):
                     a = mine_pts[min(len(mine_pts) - 1, int(hrand(mine, enemy, slot, q) * len(mine_pts)))]
                     b = enemy_pts[min(len(enemy_pts) - 1, int(hrand(enemy, mine, slot, q + 9) * len(enemy_pts)))]
@@ -311,23 +329,35 @@ class FrontView:
                     self.spark(scr, e[0], e[1], 7, (255, 200, 120))
         # the battle line: your front and theirs, with the contested ground between
         half = 2 * lat + 10 if z >= CLOSE else 9      # how wide the battle line is
-        for side_, col_ in ((-1, MINE), (1, ecol)):
+        for side_, col_ in ((-1, MINE if fighting else (120, 150, 190)), (1, ecol if fighting else (150, 140, 170))):
             ox_, oy_ = ux * 9 * side_, uy * 9 * side_
             a_ = (F[0] + ox_ - nx * half, F[1] + oy_ - ny * half)
             b_ = (F[0] + ox_ + nx * half, F[1] + oy_ + ny * half)
-            self.dashed(scr, col_, a_, b_, 2, offset=now * 18 * side_)
-        # the clash itself
-        pulse = 0.6 + 0.4 * math.sin(now * 7 + mine * 3 + enemy)
-        self.spark(scr, F[0], F[1], 12 + 8 * min(z, 3) * pulse, (255, 170, 90), 0.5 + 0.5 * pulse)
-        if z >= CLOSE:
-            for q in range(3):
-                ph = (now * 2.0 + q * 0.34 + hrand(enemy, q)) % 1.0
-                off = (hrand(mine, enemy, q, int(now * 2.0 + q * 0.34)) - 0.5) * 36 * min(z, 3) / 2
-                self.spark(scr, F[0] + nx * off, F[1] + ny * off, 5 + 12 * ph, (255, 220, 160), 1 - ph)
-        for a in range(4):
-            ang = now * 2.2 + a * math.pi / 2
-            pygame.draw.line(scr, (255, 235, 190), (F[0] + math.cos(ang) * 4, F[1] + math.sin(ang) * 4),
-                             (F[0] + math.cos(ang) * 10, F[1] + math.sin(ang) * 10), 2)
+            self.dashed(scr, col_, a_, b_, 2, offset=now * 18 * side_ if fighting else 0.0)
+        # the clash itself (or, at peace, a calm marker whose ring fills with the faction's tension)
+        if fighting:
+            pulse = 0.6 + 0.4 * math.sin(now * 7 + mine * 3 + enemy)
+            self.spark(scr, F[0], F[1], 12 + 8 * min(z, 3) * pulse, (255, 170, 90), 0.5 + 0.5 * pulse)
+            if z >= CLOSE:
+                for q in range(3):
+                    ph = (now * 2.0 + q * 0.34 + hrand(enemy, q)) % 1.0
+                    off = (hrand(mine, enemy, q, int(now * 2.0 + q * 0.34)) - 0.5) * 36 * min(z, 3) / 2
+                    self.spark(scr, F[0] + nx * off, F[1] + ny * off, 5 + 12 * ph, (255, 220, 160), 1 - ph)
+            for a in range(4):
+                ang = now * 2.2 + a * math.pi / 2
+                pygame.draw.line(scr, (255, 235, 190), (F[0] + math.cos(ang) * 4, F[1] + math.sin(ang) * 4),
+                                 (F[0] + math.cos(ang) * 10, F[1] + math.sin(ang) * 10), 2)
+        else:
+            tc = (120, 220, 140) if tension < 0.5 else ((255, 215, 100) if tension < 0.8 else (255, 110, 100))
+            if st == "truce":
+                tc = (130, 220, 255)
+            rr = pygame.Rect(0, 0, 22, 22)
+            rr.center = (F[0], F[1])
+            pygame.draw.circle(scr, (14, 18, 36), rr.center, 11)
+            pygame.draw.circle(scr, scale_c(tc, 0.45), rr.center, 11, 2)
+            if tension > 0.02 and st != "truce":
+                pygame.draw.arc(scr, tc, rr, math.pi / 2, math.pi / 2 + math.tau * tension, 3)
+            pygame.draw.circle(scr, tc, rr.center, 3)
         self.marks.append((F[0], F[1], enemy))
         if z >= DETAIL:                    # power split pill
             ch = win_chance(g.fleet_power(), g.sector_power(enemy))
@@ -337,7 +367,8 @@ class FrontView:
             pygame.draw.rect(scr, (10, 12, 28), (bx - 2, by - 2, pw + 4, ph + 4), border_radius=4)
             pygame.draw.rect(scr, ecol, (bx, by, pw, ph), border_radius=3)
             pygame.draw.rect(scr, MINE, (bx, by, max(2, int(pw * shr)), ph), border_radius=3)
-            app.txt(scr, tiny, f"{ch * 100:.0f}%", (bx + pw / 2, by + ph + 3), app.chance_color(ch), "midtop", True)
+            tag = {"war": "  WAR", "truce": "  TRUCE", "peace": f"  peace {tension * 100:.0f}%"}[st]
+            app.txt(scr, tiny, f"{ch * 100:.0f}%{tag}", (bx + pw / 2, by + ph + 3), app.chance_color(ch), "midtop", True)
 
     # ------------------------------------------------------------------ the whole view
     def draw(self, scr, fonts):
@@ -352,9 +383,10 @@ class FrontView:
         mouse = app.mouse
         stage = pygame.Rect(0, 0, STAGE_W, scr.get_height())
         scr.set_clip(stage)
-        ox = max(-200, min(200, -(self.x - 0.5) * MAPW * z * 0.14))
-        oy = max(-110, min(110, -(self.y - 0.5) * MAPH * z * 0.14))
-        scr.blit(app.galaxy_bg, (-220 + ox, -120 + oy), special_flags=ADD)
+        ox = max(-150, min(150, -(self.x - 0.5) * MAPW * z * 0.14))
+        oy = max(-90, min(90, -(self.y - 0.5) * MAPH * z * 0.14))
+        gbw, gbh = app.galaxy_bg.get_size()
+        scr.blit(app.galaxy_bg, (STAGE_W * 0.586 - gbw / 2 + ox, scr.get_height() * 0.528 - gbh / 2 + oy), special_flags=ADD)
         app.txt(scr, med, "GALAXY MAP", (VIEW.right, 104), (190, 200, 235), "topright", True)
         app.txt(scr, tiny, "Liberate sectors to claim their bonuses", (VIEW.right, 126), (140, 150, 185), "topright")
         scr.set_clip(VIEW)
@@ -504,7 +536,7 @@ class FrontView:
             for tc in range(1, 5):
                 scr.blit(glow(10 - tc, scale_c((130, 200, 255), 0.6 / tc)),
                          (fx_ - math.cos(ang) * tc * 9 - (10 - tc), fy_ - math.sin(ang) * tc * 9 - (10 - tc)), special_flags=ADD)
-            spr = self.rot(app.ship_sprites[5], -math.degrees(ang))
+            spr = self.rot(app.ship_sprite(*front.fleet_roster(g)[0]), -math.degrees(ang))
             scr.blit(spr, spr.get_rect(center=(fx_, fy_)))
         scr.set_clip(stage)
         self.draw_frame(scr, fonts)
@@ -527,19 +559,23 @@ class FrontView:
         mouse = app.mouse
         x = r.right - 8
         y = r.y + 8
+        bh = 40 if resources.TOUCH else 26
+        tw = 1.35 if resources.TOUCH else 1.0
         buttons = [("FRONT", 52, self.focus_selected), ("FIT", 38, self.fit), ("-", 28, lambda: self.zoom_at(GC, 1 / 1.35)),
                    ("+", 28, lambda: self.zoom_at(GC, 1.35))]
         for label, w, fn in buttons:
-            rect = pygame.Rect(x - w, y, w, 26)
+            w = int(w * tw)
+            rect = pygame.Rect(x - w, y, w, bh)
             x -= w + 6
-            hot = rect.collidepoint(mouse)
+            hot = rect.collidepoint(mouse) and not resources.TOUCH
             pygame.draw.rect(scr, (60, 84, 150) if hot else (26, 34, 70), rect, border_radius=6)
             pygame.draw.rect(scr, (120, 150, 215), rect, 1, border_radius=6)
             app.txt(scr, sm if len(label) > 1 else med, label, rect.center, (235, 240, 255), "center")
             self.hits.append((rect, fn))
-        app.txt(scr, tiny, f"x{self.z:.1f}", (x - 2, y + 13), (170, 185, 225), "midright")
-        app.txt(scr, tiny, "Wheel: zoom   Drag: pan   Double-click: close look   Z: front view",
-                (r.x + 12, r.y + 10), (120, 132, 175))
+        app.txt(scr, tiny, f"x{self.z:.1f}", (x - 2, y + bh // 2), (170, 185, 225), "midright")
+        hint = ("Pinch: zoom   Drag: pan   Double-tap: close look" if resources.TOUCH else
+                "Wheel: zoom   Drag: pan   Double-click: close look   Z: front view")
+        app.txt(scr, tiny, hint, (r.x + 12, r.y + 10), (120, 132, 175))
         # mini-map
         if self.z > 1.05:
             m = self.minimap
@@ -595,6 +631,7 @@ class FrontView:
             lines.append((f"{sec['name']}  -  {fac['name']}", fac["col"]))
             lines.append((f"Enemy power {fmt(ep)}   yours {fmt(fp)}", (225, 225, 240)))
             lines.append((f"Win chance {ch * 100:.0f}%  -  {label}", app.chance_color(ch)))
+            lines.append(front.stance_line(g, sec["faction"]))
             lines.append((f"Reward: {sec['desc']}", (170, 175, 205)))
         w = max(sm.size(t)[0] for t, _ in lines) + 24
         h = len(lines) * 20 + 14

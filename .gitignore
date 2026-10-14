@@ -7,3 +7,6 @@ venv/
 build/
 dist/
 *.spec
+.buildozer/
+bin/
+!buildozer.spec
