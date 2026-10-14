@@ -596,7 +596,7 @@ The knobs live in `core.py` (`UNLOCK_LOG`, `PROJECT_LOG`, `SECTOR_LOG`, `TUNE` -
 
 1. Bump `__version__` in `version.py` and add a section for it to `CHANGELOG.md`.
 2. `./packaging/build_linux.sh` builds `dist/space-miner-<version>-linux-<arch>.tar.gz` (with a `.sha256`) on your machine: a one-file executable made with PyInstaller, the installer, the icon and the docs.
-3. For a published release, push a tag: `git tag v1.0.1 && git push origin v1.0.1`. The *Release* workflow runs the self-test, builds the files and creates the release on the Releases page, using the changelog section as the notes. The *CI* workflow runs the self-test on every push and pull request.
+3. For a published release, push a tag: `git tag v1.0.1 && git push origin v1.0.1`. The *Release* workflow runs the self-test, builds the files and creates the release on the Releases page, using the changelog section as the notes. You can also publish without a tag: *Actions -> Release -> Run workflow*, tick **publish** (it builds the branch you name, default `main`, and creates the release `v<version>` for you). The *CI* workflow runs the self-test on every push and pull request.
 
 ### Self-test
 
