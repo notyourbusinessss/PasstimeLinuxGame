@@ -269,7 +269,7 @@ class FrontView:
                                                   for i in g.incoming)
         if z >= CLOSE and mine == front.source_sector(g, enemy):      # the fleets gather on the main lane
             body = 16 * (0.85 + 0.15 * min(z, 3))
-            tiers = front.fleet_tiers(g)
+            roster = front.fleet_roster(g)
             fp, ep = g.fleet_power(), g.sector_power(enemy)
             rows_m = max(1, int(max(0.0, t * L - body - 8) / gap))
             rows_e = max(1, int(max(0.0, (1 - t) * L - body - 8) / gap))
@@ -286,7 +286,7 @@ class FrontView:
                 x, y = F[0] - ux * back + nx * side, F[1] - uy * back + ny * side
                 mine_pts.append((x, y))
                 self.spark(scr, x, y, S * 0.8, MINE, 0.35)
-                img = self.rot(app.ship_sprites[tiers[i % len(tiers)]], ang_m, S)
+                img = self.rot(app.ship_sprite(*roster[i % len(roster)]), ang_m, S)
                 scr.blit(img, img.get_rect(center=(x, y)))
             espr = app.enemy_small[fac]
             for j in range(n_e):
@@ -520,7 +520,7 @@ class FrontView:
             for tc in range(1, 5):
                 scr.blit(glow(10 - tc, scale_c((130, 200, 255), 0.6 / tc)),
                          (fx_ - math.cos(ang) * tc * 9 - (10 - tc), fy_ - math.sin(ang) * tc * 9 - (10 - tc)), special_flags=ADD)
-            spr = self.rot(app.ship_sprites[5], -math.degrees(ang))
+            spr = self.rot(app.ship_sprite(*front.fleet_roster(g)[0]), -math.degrees(ang))
             scr.blit(spr, spr.get_rect(center=(fx_, fy_)))
         scr.set_clip(stage)
         self.draw_frame(scr, fonts)

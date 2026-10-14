@@ -119,6 +119,19 @@ def stance_line(g, fac):
     return f"At peace with the {name} - tension {g.tension.get(fac, 0.0) * 100:.0f}%", (130, 230, 150)
 
 
+def fleet_roster(g, n=3):
+    """The (planet, ship class) pairs that make up your fleet, biggest class first: for each of the top classes the planet
+    that owns most of it, so the swarm on the map shows the ships you really have."""
+    out = []
+    for i in range(NSH - 1, -1, -1):
+        owners = [(g.owned[p][i], p) for p in range(len(g.owned)) if g.owned[p][i] > 0]
+        if owners:
+            out.append((max(owners)[1], i))
+        if len(out) == n:
+            break
+    return out or [(0, 0)]
+
+
 def report(g, k):
     """Lines for the 'Front report' card of sector k: ([(text, colour), ...], your power share or None)."""
     lines = []

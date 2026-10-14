@@ -81,18 +81,28 @@ The planet you are visiting sits in the middle of the screen with asteroids orbi
 
 ![A developed fleet on Mars](screenshots/03-mars-fleet.png)
 
-There are 8 ship types, from the humble Mining Drone to the Black Hole Engine. A new ship type shows up as `???` once you own the one before it.
+There are 8 ship **classes**, from the humble Drone to the Black Hole Engine, and **every planet has its own fleet of them**: a Dune Rover on Mars and a Ring Skipper on Saturn are both Drones (same price and output), but they have their own names, descriptions and look. Moon and Mars ships are wheeled rovers, Venus's float in gas balloons, Mercury's carry solar wings, Ceres's wear welded-on rocks, Jupiter's are painted with storms, Saturn's circle in rings, the ice giants' bristle with frozen spikes and Proxima b's are alien, with tendrils. A new ship type shows up as `???` once you own the one before it.
 
-| Ship | Base cost | Base ore/sec |
-|---|---|---|
-| Mining Drone | 15 | 0.10 |
-| Laser Rig | 100 | 1 |
-| Mining Barge | 1.1K | 8 |
-| Refinery Ship | 12.0K | 47 |
-| Orbital Foundry | 130.0K | 260 |
-| Dyson Swarm | 1.4M | 1.4K |
-| Neutron Tap | 20.0M | 7.8K |
-| Black Hole Engine | 330.0M | 44.0K |
+![Saturn's fleet: Ring Skipper, Ice-Ring Laser, Ring Barge...](screenshots/46-ships-saturn.png)
+
+| Class | Base cost | Base ore/sec | On Earth | On Mars | On Venus | On Saturn |
+|---|---|---|---|---|---|---|
+| Drone | 15 | 0.10 | Mining Drone | Dune Rover | Cloud Skimmer | Ring Skipper |
+| Rig | 100 | 1 | Laser Rig | Canyon Driller | Acid Lance | Ice-Ring Laser |
+| Barge | 1.1K | 8 | Mining Barge | Ochre Hauler | Aerostat Barge | Ring Barge |
+| Refinery | 12.0K | 47 | Refinery Ship | Olympus Refinery | Sulfur Refinery | Cassini Refinery |
+| Foundry | 130.0K | 260 | Orbital Foundry | Phobos Foundry | Sky Foundry | Ring Foundry |
+| Swarm | 1.4M | 1.4K | Dyson Swarm | Dust-Storm Swarm | Storm Swarm | Ring Swarm |
+| Tap | 20.0M | 7.8K | Neutron Tap | Valles Tap | Pressure Tap | Titan Tap |
+| Engine | 330.0M | 44.0K | Black Hole Engine | Red Planet Engine | Deep-Crush Engine | Hex-Storm Engine |
+
+All twelve rosters (`ships.py`):
+
+![Every planet's ships](screenshots/48-ship-rosters.png)
+
+The Upgrades tab uses the planet's own ship names too (and techs and the "Fan" achievements talk about the classes):
+
+![Mars upgrades](screenshots/47-upgrades-mars.png)
 
 *(Costs and output are multiplied by 10 for every planet further out, so the first drone on the Moon costs 150 Silicon and mines 1 Silicon/sec, and on Mars 1.5K Copper and 10 Copper/sec.)*
 
@@ -501,7 +511,8 @@ Enemy raids and counter-offensives are included in these numbers (the bot defend
 | `frontview.py` | The zoomable galaxy view: camera, mini-map, fleets and battle lines |
 | `devtools.py` | The developer-mode cheats (only reachable with `--dev`) |
 | `sounds.py` | Procedural sound effects |
-| `gfx.py` | Procedural graphics: planets, asteroids, ships, backdrops |
+| `gfx.py` | Procedural graphics: planets, asteroids, ships (with a hull style per planet), backdrops |
+| `ships.py` | The twelve per-planet ship rosters: names, descriptions, hull styles and colours |
 | `sim.py` | A greedy bot that plays the game headless and prints a pacing timeline |
 | `calibrate.py` | Searches for planet, megaproject and enemy-strength values that hit a target timeline using the bot |
 | `version.py` | The version number |
