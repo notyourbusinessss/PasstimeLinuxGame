@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `--new-game` (also `--reset`): start over from the terminal. It asks you to type yes (`--yes` skips the question), erases the save and its backup and starts a new game, keeping a copy of the old save as `.space_miner_save.json.before-reset-DATE`.
 - **The real Milky Way as the galaxy map.** The 15 fixed sectors are gone: the map is now the Milky Way seen from above, with **more than 6,000 star systems** to conquer. About 140 are real stars and objects at their real distances and directions (Alpha Centauri, Sirius, Betelgeuse, the Orion and Crab nebulae, Cygnus X-1, Omega Centauri, Sagittarius A*...) and thousands are generated over the real shape of the galaxy. **Travel is free**: you can attack any system within your new **Jump Drive** range (22 levels, 6 light-years to 45,000) of a system you hold. Systems have their own power, faction and reward; the map zooms from the whole galaxy to a single star, with names, lanes, range circles, a ruler and a mini-map; the Galaxy tab has a Jump Drive card and a target browser. Old saves are converted (your sectors become the same stars).
 - **Fleet Admiral** (new tech): launches campaigns by itself against the factions you are at war with.
 - Campaigns take longer against stronger systems plus the flight; an easy win costs few ships.

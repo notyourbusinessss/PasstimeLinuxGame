@@ -123,9 +123,11 @@ The game can also be played at a **higher resolution**. A bigger canvas is not j
 
 ![The galaxy map at 1920x1080](screenshots/50-hires-galaxy.png)
 
-Command-line options: `--fullscreen`, `--resolution WxH`, `--touch`, `--debug` (verbose log, also printed in the terminal), `--dev` ([developer mode](#developer-mode)), `--version`, `--help`.
+Command-line options: `--new-game` (start over, see below), `--fullscreen`, `--resolution WxH`, `--touch`, `--debug` (verbose log, also printed in the terminal), `--dev` ([developer mode](#developer-mode)), `--version`, `--help`.
 
-Your save lives in `~/.space_miner_save.json`. Delete it (or use *Awards -> Stats -> Hard reset*) to start over.
+Your save lives in `~/.space_miner_save.json`.
+
+**Starting over.** From a terminal, run `python3 space_miner.py --new-game` (or `./play.sh --new-game`, or `space-miner --new-game` for the Linux build). It asks you to type `yes`, erases the save and its backup, and starts a brand-new game; add `--yes` to skip the question. The old save is not thrown away: it is kept next to the new one as `~/.space_miner_save.json.before-reset-DATE` (delete that file if you do not want it). Inside the game, *Awards -> Stats -> Hard reset (wipe save)* does the same without a copy. For a softer start over that keeps your achievements and Stardust, use **Ascension** ([New Game+](#9-ascension-new-game)).
 
 ## How the game works
 
@@ -682,5 +684,5 @@ The knobs live in `core.py` (`UNLOCK_LOG`, `PROJECT_LOG`, `SECTOR_LOG`, `TUNE` -
 - **The window is bigger than my screen / everything is tiny or huge** - choose another size with the **Size** button in the Stats page, or start with `--resolution 1280x720`. *Auto* normally picks a size that fits.
 - **The window is small / fullscreen does not work** - the game needs a desktop session with a graphics renderer for the resizable, scaled window; otherwise it falls back to a fixed 1280x720 window and the Fullscreen button is greyed out. Try running it under X11 or Wayland (not over a plain SSH session), and make sure your graphics drivers are installed.
 - **Text looks off** - the game asks for DejaVu Sans, Liberation Sans or Arial and falls back to pygame's default font.
-- **Reset everything** - delete `~/.space_miner_save.json` (and `~/.space_miner_save.json.bak`), or use *Awards -> Stats -> Hard reset*.
+- **Reset everything** - run `python3 space_miner.py --new-game` (it keeps a copy of the old save), or delete `~/.space_miner_save.json` (and `~/.space_miner_save.json.bak`), or use *Awards -> Stats -> Hard reset*.
 
