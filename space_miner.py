@@ -2648,6 +2648,36 @@ def check_more_ships():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def check_kuiper_belt():
+    """The solar system ends at the Kuiper Belt (not at another star's planet), and a save that earned the old achievement
+    for the last planet keeps it under its new name."""
+    last = SITES[NSITE - 1]
+    assert last["name"] == "Kuiper Belt" and last["kind"] == "kuiper" and not any("Proxima" in s["name"] for s in SITES)
+    assert ships.style(NSITE - 1) == "comet" and "comet" in shipart.FAMILIES and ships.motion(NSITE - 1) == "sweep"
+    for i in range(NSH):                                       # the comet orbit stays on screen for every class and ship
+        for j in range(4):
+            for tt in (0.0, 3.3, 9.9, 21.0):
+                x, y, depth = ships.orbit(NSITE - 1, i, j, 4, tt, 1)
+                assert abs(x) < 300 and abs(y) < 250 and abs(depth) <= 1.0, (i, j, tt, x, y)
+    assert "Last Frontier" in core.ACH_BY_ID and "Interstellar" not in core.ACH_BY_ID
+    old_save = core.SAVE
+    d = tempfile.mkdtemp(prefix="space_miner_kuiper_")
+    try:
+        core.SAVE = os.path.join(d, "save.json")
+        g = core.Game(load=False, sim=True)
+        g.save()
+        with open(core.SAVE) as f:
+            data = json.load(f)
+        data["ach"] = ["Interstellar", "Small Fleet"]
+        with open(core.SAVE, "w") as f:
+            json.dump(data, f)
+        h = core.Game(load=True, sim=True)
+        assert "Last Frontier" in h.ach and "Interstellar" not in h.ach and "Small Fleet" in h.ach
+    finally:
+        core.SAVE = old_save
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def check_galaxy():
     """The Milky Way's data and the reach map agree with a brute-force check."""
     N = galaxy.N
@@ -2839,6 +2869,7 @@ def selftest_step(app, g, frames, shot):
         check_ship_art(app)
         check_galaxy()
         check_more_ships()
+        check_kuiper_belt()
         check_fronts()
         check_counter_offensives()
         check_new_game_reset()

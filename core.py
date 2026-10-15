@@ -80,8 +80,8 @@ SITES = [
          perk="Deep-space drift: offline progress at 75%", fx=[("offline", 0.75)], unlock=(5e14, 1e13, 6e10)),
     dict(name="Pluto", ore="Exotic Matter", ocol=(120, 255, 155), col=(220, 200, 180), kind="pluto", bonus=5,
          perk="Edge of the system: Dark Matter gain x1.5", fx=[("dm", 1.5)], unlock=(1e16, 2e14, 1.2e12)),
-    dict(name="Proxima b", ore="Quantum Foam", ocol=(255, 175, 255), col=(220, 80, 50), kind="proxima", bonus=-1,
-         perk="Another star: all ore production x3, buildings x1.5", fx=[("ore", 3)], unlock=(2e17, 4e15, 2.4e13)),
+    dict(name="Kuiper Belt", ore="Tholin", ocol=(255, 175, 255), col=(176, 150, 176), kind="kuiper", bonus=-1,
+         perk="Comet harvesters: all ore production x3, buildings x1.5", fx=[("ore", 3)], unlock=(2e17, 4e15, 2.4e13)),
 ]
 NSITE = len(SITES)
 SC = [SCALE ** p for p in range(NSITE)]
@@ -128,7 +128,7 @@ _TECH_BASE = {t[0]: t[2] for t in TECHS}
 TECH_BY_ID = {t[0]: t for t in TECHS}
 
 # ------------------------------------------------------------------ pacing knobs (tuned with sim.py)
-UNLOCK_LOG = [3.32, 4.17, 7.64, 12.88, 16.74, 17.87, 19.62, 19.91, 22.04, 23.85, 26.94]   # log10 of normalised price, Moon..Proxima b
+UNLOCK_LOG = [3.32, 4.17, 7.64, 12.88, 16.74, 17.87, 19.62, 19.91, 22.04, 23.85, 26.94]   # log10 of normalised price, Moon..Kuiper Belt
 TUNE = dict(ushift=0.0, B=50.0, ccoef=0.17, texp=0.5, tpow=0.75, pshift=0.0, pcoef=0.17, sshift=0.0, cpow=1.25, sdbase=5.0, sdcoef=4.0, sdpow=0.16, cdiff=10.0, dmbase=0.40, dm_div=1e9, dm_pow=0.25)
 
 
@@ -199,7 +199,7 @@ PROJECTS = [  # name, description, effects   (cost: normalised ore PROJECT_LOG, 
     ("Ice Forges", "Ships 10% cheaper everywhere", [("disc", 0.10)]),
     ("Deep Core Mine", "All production x3", [("ore", 3)]),
     ("Edge Gate", "Dark Matter gain x2", [("dm", 2)]),
-    ("Alpha Dyson Swarm", "All production x5", [("ore", 5)]),
+    ("Comet Catchers", "All production x5", [("ore", 5)]),
 ]
 PROJECT_LOG = [4.48, 8.3, 12.28, 14.69, 16.51, 18.3, 19.54, 20.06, 22.22, 23.84, 27.93, 29.27]   # log10 of normalised ore
 
@@ -408,7 +408,7 @@ def build_achievements():
     for name, k, tier in [("Moonwalker", 1, "bronze"), ("Red Planet", 2, "bronze"), ("Morning Star", 3, "bronze"),
                           ("Scorched Earth", 4, "silver"), ("Belt Rider", 5, "silver"), ("Gas Giant", 6, "silver"),
                           ("Lord of the Rings", 7, "gold"), ("Ice Giant", 8, "gold"), ("Deep Blue", 9, "gold"),
-                          ("Edge of the System", 10, "platinum"), ("Interstellar", 11, "platinum")]:
+                          ("Edge of the System", 10, "platinum"), ("Last Frontier", 11, "platinum")]:
         add(name, f"Unlock {SITES[k]['name']}", "Planets", tier, lambda g, k=k: g.unlocked[k])
     ms("Planets", [("Tourist", 5, "bronze"), ("Grand Tour", NSITE, "gold")],
        lambda t: f"Visit {t} different planets", lambda g: len(g.visited))
@@ -534,6 +534,7 @@ def build_achievements():
 
 ACHIEVEMENTS = build_achievements()
 ACH_BY_ID = {a["id"]: a for a in ACHIEVEMENTS}
+RENAMED_ACH = {"Interstellar": "Last Frontier"}       # achievements that changed name: old saves keep them
 
 QUEST_TXT = {"clicks": "Click asteroids {} times", "bought": "Buy {} ships",
              "all_norm": "Mine {} ore (Earth-equivalent)", "crates": "Grab {} supply crates",
@@ -742,7 +743,7 @@ class Game:
             self.warps = int(d["warps"]); self.clicks = int(d["clicks"]); self.crates = int(d["crates"])
             self.bought = int(d["bought"]); self.bldg = int(d["bldg"])
             self.events_done = int(d["events_done"]); self.quests_done = int(d["quests_done"])
-            self.ach = {a for a in d["ach"] if a in ACH_BY_ID}
+            self.ach = {RENAMED_ACH.get(a, a) for a in d["ach"]} & set(ACH_BY_ID)
             self.ups_bought = int(d.get("ups_bought", 0)); self.travels = int(d.get("travels", 0))
             self.frenzies = int(d.get("frenzies", 0)); self.best_burst = int(d.get("best_burst", 0))
             self.away_max = float(d.get("away_max", 0)); self.night_secs = float(d.get("night_secs", 0))
