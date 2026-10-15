@@ -8,7 +8,8 @@ What it does
     undefended your planets are, the bolder the enemy gets;
   * schedules enemy **raids** of three sizes (small raid, regional assault, system invasion) against your planets,
     preferring the weakly defended ones;
-  * schedules **counter-offensives** that try to retake sectors you liberated;
+  * schedules **counter-offensives** that try to retake systems you liberated - from several enemy fronts at once, hitting
+    harder the stronger the enemy next door is, and bolder while your fleets are away on campaign;
   * announces attacks in advance depending on your **Intel** armory upgrade, and lets you **Fortify** the target;
   * stays quiet for a while after loading a save, Warping or Ascending, and never acts while the game is closed;
   * keeps the galaxy at **peace** until a war starts: either you invade a faction (a declaration of war), or a faction
@@ -30,6 +31,10 @@ TIERS = [  # name, power multiplier, ore lost on failure, planets hit, credit lo
 LEVELS = ["Quiet", "Watchful", "Hostile", "Aggressive", "Warlike"]
 FORTIFY_PLANET = 2.5            # defence multiplier of a fortified planet
 FORTIFY_SECTOR = 2.0            # defence multiplier of a fortified sector
+HOME_GUARD = 0.5                # the share of your fleet at home that defends the system under attack
+OFFENSIVE_FRAC = 0.3            # an enemy offensive brings this share of the strength of the system it starts from...
+OFFENSIVE_MIN, OFFENSIVE_MAX = 0.8, 6.0     # ...but between this many times the power of the system it attacks
+MAX_STRIKES = 3                 # the most counter-offensives launched at once (one per enemy front)
 
 
 # ------------------------------------------------------------------ helpers
@@ -89,7 +94,7 @@ def can_sue(g, fac):
         return False, "Not at war"
     if war_age(g, fac) < WAR_MIN:
         return False, f"Too early ({int((WAR_MIN - war_age(g, fac)) // 60) + 1} min)"
-    if g.campaign and SECTORS[g.campaign["k"]]["faction"] == fac:
+    if any(SECTORS[c["k"]]["faction"] == fac for c in g.campaigns):
         return False, "Your fleet is attacking them"
     if g.credits < peace_cost(g, fac):
         return False, "Not enough credits"
@@ -127,8 +132,7 @@ def declare_war(g, fac, by):
 
 def first_strike(g, fac):
     """The opening move of a faction that declares war: a counter-offensive on your weakest border sector, or a raid."""
-    exposed = [k for k in g.conquered if k and any(SECTORS[n]["faction"] == fac and n not in g.conquered
-                                                  for n in SECTOR_LINKS_[k])]
+    exposed = exposed_systems(g, fac)
     if len(g.conquered) - 1 >= 2 and exposed:
         k = min(exposed, key=lambda q: sector_defense(g, q) / max(g.sector_power(q), 1e-9))
         if schedule_offensive(g, target=k, src_fac=fac):
@@ -196,9 +200,38 @@ def planet_defense(g, p, fortified=False):
     return g.planet_power(p, defense=True) * (FORTIFY_PLANET if fortified else 1.0)
 
 
-def sector_defense(g, k, fortified=False):
-    base = max(g.garrison.get(k, 0.0), 0.5 * g.fleet_power())
+def home_guard(g, strikes=1):
+    """The part of your fleet that defends a system under attack: the fleets in the field defend nothing, and what is at home
+    is shared between the attacks that arrive at the same time."""
+    return HOME_GUARD * g.fleet_power() * g.free_share() / max(1, strikes)
+
+
+def sector_defense(g, k, fortified=False, strikes=1):
+    base = max(g.garrison.get(k, 0.0), home_guard(g, strikes))
     return base * (FORTIFY_SECTOR if fortified else 1.0)
+
+
+def offensive_power(g, target, src, fac, roll=1.0):
+    """Strength of a counter-offensive from the enemy system src against your system target: a share of what src can field,
+    never less than the target's own strength and never more than OFFENSIVE_MAX times it."""
+    tp = g.sector_power(target)
+    mult = max(OFFENSIVE_MIN, min(OFFENSIVE_MAX, OFFENSIVE_FRAC * g.sector_power(src) / max(tp, 1e-9)))
+    return tp * mult * roll * hostility_mult(g, fac)
+
+
+def exposed_systems(g, fac=None):
+    """Systems you hold that touch an enemy system of a faction at war with you (of faction fac, if given): what they can attack."""
+    held = g.conquered
+    out = set()
+    for e in war_fronts(g):
+        if fac is None or SECTORS[e]["faction"] == fac:
+            out.update(n for n in SECTOR_LINKS_[e] if n in held and n != 0)
+    return sorted(out)
+
+
+def strikes_with(g, inc):
+    """How many counter-offensives hit at the same time as this one (itself included): they share your fleet at home."""
+    return 1 + sum(1 for o in g.incoming if o["kind"] == "offensive" and o["id"] != inc["id"])
 
 
 def aggression(g):
@@ -218,6 +251,7 @@ def aggression(g):
     planets = [p for p in range(NSITE) if g.unlocked[p]]
     weak = sum(1 for p in planets if planet_defense(g, p) < rp)
     a += 0.2 * weak / max(1, len(planets))
+    a += 0.25 * (1.0 - g.free_share())              # they strike while your fleets are away
     return max(0.0, min(1.0, a))
 
 
@@ -239,7 +273,7 @@ def fortify_cost(g, inc):
 def incoming_chance(g, inc, key=None):
     """The player's chance to hold, for the UI and the bot."""
     if inc["kind"] == "offensive":
-        return win_chance(sector_defense(g, inc["target"], bool(inc["fort"])), inc["power"])
+        return win_chance(sector_defense(g, inc["target"], bool(inc["fort"]), strikes_with(g, inc)), inc["power"])
     p = key if key is not None else inc["targets"][0]
     return win_chance(planet_defense(g, p, p in inc["fort"]), inc["power"])
 
@@ -298,27 +332,36 @@ def schedule_raid(g, tier=None, lead=None, targets=None):
 
 
 def schedule_offensive(g, target=None, lead=None, src_fac=None):
-    """An enemy counter-offensive against a sector you hold that borders the territory of a faction at war with you."""
-    exposed = [k for k in g.conquered if k != 0 and any(n not in g.conquered and SECTORS[n]["faction"] in g.war
-                                                       for n in SECTOR_LINKS_[k])]
+    """An enemy counter-offensive against a system you hold that borders the territory of a faction at war with you (of faction
+    src_fac, if given). The weakly defended systems are the likeliest targets."""
     if target is None:
+        under_attack = {o["target"] for o in g.incoming if o["kind"] == "offensive"}
+        exposed = [k for k in exposed_systems(g, src_fac) if k not in under_attack]
         if not exposed:
             return None
-        weights = [1.0 / (0.3 + sector_defense(g, k) / max(g.sector_power(k), 1e-9)) for k in exposed]
+        home = home_guard(g)
+        weights = [1.0 / (0.3 + max(g.garrison.get(k, 0.0), home) / max(g.sector_power(k), 1e-9)) for k in exposed]
         target = random.choices(exposed, weights=weights)[0]
     enemies = [n for n in SECTOR_LINKS_[target] if n not in g.conquered and (src_fac is None or SECTORS[n]["faction"] == src_fac)]
     enemies = [n for n in enemies if SECTORS[n]["faction"] in g.war] or enemies
-    src = random.choice(enemies) if enemies else target
+    src = max(enemies, key=g.sector_power) if enemies else target          # the strongest neighbour sends the fleet
     fac = SECTORS[src]["faction"] or SECTORS[target]["faction"]
     inc = dict(id=next_id(g), kind="offensive", tier=-1, fac=fac, src=src, target=target, targets=[], t=0.0,
                eta=lead if lead is not None else lead_time(g, True), fort=[],
-               power=g.sector_power(target) * random.uniform(0.8, 1.2) * hostility_mult(g, fac))
+               power=offensive_power(g, target, src, fac, random.uniform(0.9, 1.2)))
     announce(g, inc)
     if inc["eta"] <= 0:
         resolve(g, inc)
     else:
         g.incoming.append(inc)
     return inc
+
+
+def schedule_strikes(g):
+    """A wave of counter-offensives: one from each enemy faction at war that touches your territory (at most MAX_STRIKES)."""
+    facs = sorted({SECTORS[k]["faction"] for k in war_fronts(g)})
+    random.shuffle(facs)
+    return sum(1 for fac in facs[:MAX_STRIKES] if schedule_offensive(g, src_fac=fac))
 
 
 def describe(g, inc, level_=None):
@@ -416,7 +459,7 @@ def resolve_offensive(g, inc):
     k = inc["target"]
     if k not in g.conquered:
         return
-    chance = win_chance(sector_defense(g, k, bool(inc["fort"])), inc["power"])
+    chance = win_chance(sector_defense(g, k, bool(inc["fort"]), strikes_with(g, inc)), inc["power"])
     held = (chance >= 0.5) if g.sim else (random.random() < chance)
     nm = SECTORS[k]["name"]
     fname = FACTIONS[inc["fac"]]["name"] if inc["fac"] else "The enemy"
@@ -486,11 +529,11 @@ def step(g, dt):
         guard += 1
         g.raid_t += interval(g, 420.0, 1200.0)
         schedule_raid(g)
-    g.offensive_t -= dt
+    g.offensive_t -= dt * (2.0 - g.free_share())                      # the more of your fleet is away, the sooner they come
     if g.offensive_t <= 0:
-        g.offensive_t = interval(g, 1500.0, 3000.0)
+        g.offensive_t = interval(g, 1800.0, 3600.0)
         if len(g.conquered) - 1 >= 2 and aggression(g) >= 0.35:
-            schedule_offensive(g)
+            schedule_strikes(g)
 
 
 SECTOR_LINKS_ = core.SECTOR_LINKS

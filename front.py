@@ -48,8 +48,8 @@ def front_pos(g, k):
     """How far along the lane from your sector (0) to the enemy sector k (1) the front line sits.
     A stronger fleet pushes it towards the enemy; a running campaign pushes it further."""
     pos = 0.12 + 0.76 * share(g, k)
-    c = g.campaign
-    if c and c["k"] == k:
+    c = g.attacking(k)
+    if c:
         pos += (0.94 - pos) * 0.55 * max(0.0, min(1.0, c["t"] / max(1.0, c["dur"])))
     return pos
 
@@ -86,8 +86,7 @@ def exposure(g, k):
     worst = 1.0
     for n in foes:
         fac = SECTORS[n]["faction"] or SECTORS[k]["faction"]
-        power = g.sector_power(k) * director.hostility_mult(g, fac)
-        worst = min(worst, win_chance(defense, power))
+        worst = min(worst, win_chance(defense, director.offensive_power(g, k, n, fac)))
     return foes, worst
 
 

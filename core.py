@@ -244,6 +244,7 @@ BOSS = galaxy.BOSS                # The Void Throne, at the Galactic Centre: def
 SECTOR_EDGES = galaxy.EDGES       # lanes: every system is joined to its nearest neighbours
 SECTOR_LINKS = galaxy.LINKS
 JUMP = 5                          # index of the Jump Drive track in ARMORY
+COMMAND = 6                       # index of the Command track: one more simultaneous front per level
 FAC_TOTAL = {}                    # faction -> how many systems it holds at the start
 for _s in SECTORS[1:]:
     FAC_TOTAL[_s["faction"]] = FAC_TOTAL.get(_s["faction"], 0) + 1
@@ -254,9 +255,13 @@ ARMORY = [  # key, name, description, max level, base credit cost
     ("shields", "Shields", "Raid losses -8% per level", 10, 5e3),
     ("intel", "Intel", "Enemy attacks are announced earlier and in more detail", 8, 6e3),
     ("jump", "Jump Drive", "Jump range x1.5 per level: you can attack any system within range of one you hold", 22, 3e3),
+    ("command", "Command", "+1 front per level: attack another system while your fleets are out", 7, 2.5e4),
 ]
 ARMORY_GROWTH = 2.4
 WIN_LOSSES, LOSE_LOSSES = 0.01, 0.08                    # fraction of your ships lost after a victory / defeat
+MIN_SHARE = 0.02                                        # a front needs at least this share of the fleet
+COMMIT_MODES = [("Enough", None), ("25%", 0.25), ("50%", 0.5), ("All", 1.0)]    # how much of the fleet an attack sends
+COMMIT_ODDS = 0.95                                      # "Enough" sends the smallest force that wins this often
 
 
 def armory_cost(i, level):
@@ -269,6 +274,12 @@ def win_chance(fp, ep):
     if fp <= 0 or ep <= 0:
         return 0.0
     return max(0.01, min(0.99, 0.5 + 0.5 * math.tanh(1.6 * math.log(fp / ep))))
+
+
+def power_for(ep, chance):
+    """The fleet power that beats an enemy of power ep with the given chance (the inverse of win_chance)."""
+    chance = max(0.02, min(0.98, chance))
+    return ep * math.exp(math.atanh(2 * chance - 1) / 1.6)
 
 
 # ------------------------------------------------------------------ New Game Plus: Ascension and Stardust
@@ -491,6 +502,8 @@ def build_achievements():
         lambda g: (g.sectors_retaken, 1))
     add("Fully Armed", "Max out the Weapons armory", "Galaxy", "gold", lambda g: g.armory[0] >= ARMORY[0][3],
         lambda g: (g.armory[0], ARMORY[0][3]))
+    ms("Galaxy", [("Two-Front War", 2, "bronze"), ("Multi-Front Command", 4, "silver"), ("War on Every Front", 8, "gold")],
+       lambda t: f"Have {t} fleets attacking at the same time", lambda g: g.peak_fronts)
     # --- General
     ms("General", [("Dedicated", 1, "bronze"), ("Devoted", 10, "silver"), ("Obsessed", 100, "gold")],
        lambda t: f"Play for {t} hour{'s' if t > 1 else ''}", lambda g: g.play_time / 3600)
@@ -601,7 +614,9 @@ class Game:
         self._auto_t = 0.0
         self.auto_war = False              # the Fleet Admiral tech launches campaigns by itself when this is on
         self.auto_odds = 0.85              # ... against enemies at war with you that it beats with at least this chance
-        self.campaign = None
+        self.campaigns = []                # the fronts: one dict per fleet in the field (k, t, dur, fp, share, src, chance)
+        self.commit = 0                    # index into COMMIT_MODES: how much of the fleet an attack sends
+        self.peak_fronts = 0
         self.cycle = 1
         self.ascensions = 0
         self.stardust = self.sd_total = 0
@@ -645,7 +660,7 @@ class Game:
                  quests=self.quests, cur=self.cur, play_time=self.play_time, ups_bought=self.ups_bought,
                  travels=self.travels, frenzies=self.frenzies, best_burst=self.best_burst, away_max=self.away_max,
                  night_secs=self.night_secs, visited=sorted(self.visited), flags=sorted(self.flags),
-                 conquered=sorted(self.conquered), campaign=self.campaign, armory=self.armory,
+                 conquered=sorted(self.conquered), campaigns=self.campaigns, commit=self.commit, peak_fronts=self.peak_fronts, armory=self.armory,
                  battles_won=self.battles_won, battles_lost=self.battles_lost, raids_repelled=self.raids_repelled,
                  raids_lost=self.raids_lost, incoming=self.incoming, hostility=self.hostility, war=self.war, tension=self.tension, truce=self.truce,
                  wars_declared=self.wars_declared, wars_suffered=self.wars_suffered, peaces_made=self.peaces_made, garrison={str(k): v for k, v in self.garrison.items()},
@@ -740,14 +755,23 @@ class Game:
                     return old_map[k] if 0 <= k < len(old_map) else -1
                 return k if 0 <= k < NSEC else -1
             self.conquered = {sec(k) for k in d.get("conquered", [0]) if sec(k) >= 0} | {0}
-            camp = d.get("campaign")
-            self.campaign = camp if isinstance(camp, dict) and all(x in camp for x in ("k", "t", "dur", "fp", "chance")) else None
-            if self.campaign is not None:
-                self.campaign["k"] = sec(self.campaign["k"])
-                if self.campaign["k"] < 0 or self.campaign["k"] in self.conquered:
-                    self.campaign = None
-                else:
-                    self.campaign.setdefault("src", 0)
+            camps = list(d.get("campaigns") or [])
+            if isinstance(d.get("campaign"), dict):            # saves from before there could be several fronts: one fleet, all of it
+                camps.append(dict(d["campaign"], share=1.0))
+            self.campaigns = []
+            for c in camps:
+                if not (isinstance(c, dict) and all(x in c for x in ("k", "t", "dur", "fp", "chance"))):
+                    continue
+                c["k"] = sec(c["k"])
+                if c["k"] < 0 or c["k"] in self.conquered or any(o["k"] == c["k"] for o in self.campaigns):
+                    continue
+                src = sec(c.get("src", 0))
+                c["src"] = src if src in self.conquered else 0
+                c["share"] = max(MIN_SHARE, min(1.0, float(c.get("share", 1.0))))
+                if sum(o["share"] for o in self.campaigns) + c["share"] <= 1.0 + 1e-9:
+                    self.campaigns.append(c)
+            self.commit = max(0, min(len(COMMIT_MODES) - 1, int(d.get("commit", 0))))
+            self.peak_fronts = max(len(self.campaigns), int(d.get("peak_fronts", 0)))
             self.auto_war = bool(d.get("auto_war", False))
             self.auto_odds = max(0.5, min(0.99, float(d.get("auto_odds", 0.85))))
             arm = list(d.get("armory", []))[:len(ARMORY)]
@@ -1330,19 +1354,21 @@ class Game:
         return FAC_TOTAL.get(fac, 0) - self._gal_facs.get(fac, 0)
 
     def weakest_target(self):
-        """The enemy system in reach with the least power (cached), or None."""
+        """The enemy system in reach with the least power that no fleet is attacking yet (cached), or None."""
         t = self.targets()
-        if self._targets_key != self._weak_key:
-            self._weak = min(t, key=lambda k: SECTORS[k]["lp"]) if t else None
-            self._weak_key = self._targets_key
+        busy = tuple(sorted(c["k"] for c in self.campaigns))
+        key = (self._targets_key, busy)
+        if key != self._weak_key:
+            self._weak = min((k for k in t if k not in busy), key=lambda k: SECTORS[k]["lp"], default=None)
+            self._weak_key = key
         return self._weak
 
     def attack_ready(self):
-        """True when the fleet is idle and there is a target it beats with at least 80%: the Galaxy tab then flashes."""
-        if not self.galaxy_open or self.campaign is not None:
+        """True when a front is free and the fleet that is left beats the weakest target with at least 80%: the Galaxy tab then flashes."""
+        if not self.galaxy_open or self.free_fronts() == 0 or self.free_share() < MIN_SHARE:
             return False
         k = self.weakest_target()
-        return k is not None and win_chance(self.fleet_power(), self.sector_power(k)) >= 0.8
+        return k is not None and win_chance(self.free_power(), self.sector_power(k)) >= 0.8
 
     def source_of(self, k):
         """(held system the attack on k would launch from, its distance in light-years)."""
@@ -1352,8 +1378,59 @@ class Game:
             hit = self._src_cache[k] = self.reach.nearest_held(k)
         return hit
 
+    # ---- fronts: several fleets in the field at once
+    def max_fronts(self):
+        """How many systems you can attack at the same time (the Command track in the Galaxy tab adds one per level)."""
+        return 1 + self.armory[COMMAND]
+
+    def free_fronts(self):
+        return max(0, self.max_fronts() - len(self.campaigns))
+
+    def free_share(self):
+        """The share (0..1) of the fleet that is at home: what the fleets in the field do not hold."""
+        return max(0.0, 1.0 - sum(c["share"] for c in self.campaigns))
+
+    def free_power(self):
+        return self.fleet_power() * self.free_share()
+
+    def attacking(self, k):
+        """The front attacking system k, or None."""
+        return next((c for c in self.campaigns if c["k"] == k), None)
+
+    def launch_share(self, k, mode=None, odds=COMMIT_ODDS):
+        """The share of the whole fleet an attack on k would send, never more than is at home. mode picks from COMMIT_MODES
+        (default: your setting); "Enough" sends the smallest force that wins with the given odds."""
+        free = self.free_share()
+        frac = COMMIT_MODES[self.commit if mode is None else mode][1]
+        if frac is not None:
+            return min(free, frac)
+        fp = self.fleet_power()
+        if fp <= 0:
+            return 0.0
+        return min(free, max(MIN_SHARE, power_for(self.sector_power(k), odds) / fp))
+
+    def attack_chance(self, k, share=None):
+        """Your chance to win at k with the given share of the fleet (default: what a launch would send)."""
+        if share is None:
+            share = self.launch_share(k)
+        return win_chance(self.fleet_power() * share, self.sector_power(k))
+
+    def attack_block(self, k):
+        """Why you cannot attack k right now ("" if you can): the label for the attack button."""
+        if k in self.conquered:
+            return "YOURS"
+        if self.attacking(k) is not None:
+            return "ATTACKING"
+        if k not in self.targets_set():
+            return "OUT OF RANGE"
+        if self.free_fronts() == 0:
+            return "FRONTS FULL"
+        if self.free_share() < MIN_SHARE or self.fleet_power() <= 0:
+            return "NO FLEET FREE"
+        return ""
+
     def can_attack(self, k):
-        return (self.galaxy_open and self.campaign is None and k not in self.conquered and k in self.targets_set())
+        return self.galaxy_open and not self.attack_block(k)
 
     def targets_set(self):
         self.targets()
@@ -1369,20 +1446,25 @@ class Game:
     def loss_fraction(self, base):
         return base * max(0.1, 1 - 0.06 * self.armory[1])
 
-    def start_campaign(self, k):
+    def start_campaign(self, k, mode=None, odds=COMMIT_ODDS):
+        """Send a fleet against system k: the share of the fleet that is at home that your commit setting picks (see launch_share)."""
         if not self.can_attack(k):
             return False
-        fp = self.fleet_power()
-        if fp <= 0:
+        share = self.launch_share(k, mode, odds)
+        if share < MIN_SHARE:
             return False
+        power = self.fleet_power() * share
         src, _ = self.source_of(k)
-        self.campaign = dict(k=k, t=0.0, dur=self.campaign_duration(k), fp=fp, src=src,
-                             chance=win_chance(fp, self.sector_power(k)))
+        c = dict(k=k, t=0.0, dur=self.campaign_duration(k), fp=power, share=share, src=src,
+                 chance=win_chance(power, self.sector_power(k)))
+        self.campaigns.append(c)
+        self.peak_fronts = max(self.peak_fronts, len(self.campaigns))
         fac = SECTORS[k]["faction"]
         if fac not in self.war:                                          # invading a faction at peace is a declaration of war
             director.declare_war(self, fac, "player")
         self.hostility[fac] = self.hostility.get(fac, 0.0) + 1.0        # attacking a faction makes it more hostile
-        self.toast(f"Fleet dispatched to {SECTORS[k]['name']}  ({self.campaign['chance'] * 100:.0f}% to win)", 4)
+        self.toast(f"Fleet dispatched to {SECTORS[k]['name']}  ({c['chance'] * 100:.0f}% to win"
+                   + (f", {share * 100:.0f}% of the fleet)" if self.max_fronts() > 1 else ")"), 4)
         self.fx("campaign", k)
         return True
 
@@ -1393,24 +1475,26 @@ class Game:
         self.recalc()
 
     def auto_target(self):
-        """The system the Fleet Admiral would attack next: the strongest enemy at war with you that you beat with at least the
-        chosen odds (the toggle and the odds are on the Galaxy tab)."""
-        fp = self.fleet_power()
+        """The system the Fleet Admiral would attack next: the strongest enemy at war with you, not under attack yet, that a force
+        from the fleet at home beats with at least the chosen odds (the toggle and the odds are on the Galaxy tab)."""
+        fp = self.fleet_power() * self.free_share()
+        limit = fp / (power_for(1.0, self.auto_odds) or 1.0)             # the strongest enemy that force can beat that often
+        busy = {c["k"] for c in self.campaigns}
         best, key = None, None
         for k in self.targets():
-            if SECTORS[k]["faction"] not in self.war:
-                continue
-            if win_chance(fp, self.sector_power(k)) < self.auto_odds:
+            if SECTORS[k]["faction"] not in self.war or k in busy or self.sector_power(k) > limit:
                 continue
             kk = (SECTORS[k]["lp"], -SECTORS[k]["d"])
             if key is None or kk > key:
                 best, key = k, kk
         return best
 
-    def resolve_campaign(self):
-        c = self.campaign
-        self.campaign = None
+    def resolve_campaign(self, c):
+        """A fleet reaches its target: win or lose the fight, then the ships come home (and that front is free again)."""
+        if c in self.campaigns:
+            self.campaigns.remove(c)
         k = c["k"]
+        share = c.get("share", 1.0)
         if (c["chance"] >= 0.5) if self.sim else (random.random() < c["chance"]):
             self.conquered.add(k)
             self.garrison[k] = c["fp"]
@@ -1421,7 +1505,7 @@ class Game:
             if c["chance"] < 0.3:
                 self.flags.add("underdog")
             hard = min(1.0, self.sector_power(k) / max(c["fp"], 1.0))        # an easy win costs few ships, an even fight the full price
-            self.lose_ships(self.loss_fraction(WIN_LOSSES * (0.1 + 0.9 * math.sqrt(hard))))
+            self.lose_ships(self.loss_fraction(WIN_LOSSES * (0.1 + 0.9 * math.sqrt(hard))) * share)
             fac = FACTIONS[SECTORS[k]["faction"]]["name"]
             log.info("System liberated: %s", SECTORS[k]["name"])
             self.toast(f"VICTORY! {SECTORS[k]['name']} liberated from the {fac}.  {SECTORS[k]['desc']}", 7)
@@ -1430,7 +1514,7 @@ class Game:
             self.fx("conquer", k)
         else:
             self.battles_lost += 1
-            self.lose_ships(self.loss_fraction(LOSE_LOSSES))
+            self.lose_ships(self.loss_fraction(LOSE_LOSSES) * share)
             self.toast(f"DEFEAT at {SECTORS[k]['name']}. You lost some ships - build up and try again.", 6)
             self.fx("defeat", k)
         self.recalc()
@@ -1511,7 +1595,7 @@ class Game:
         self.projects = keep_proj
         self.conquered = keep_sec
         self.armory = keep_arm
-        self.campaign = None
+        self.campaigns = []
         self.incoming = []
         self.hostility = {}
         self.war, self.tension, self.truce = {}, {}, {}
@@ -1729,17 +1813,17 @@ class Game:
         self.add_credits(self.cred_ops * dt)
         self.add_sci(self.sci_ops * dt)
         director.step(self, dt)
-        if self.campaign:
-            self.campaign["t"] += dt
-            if self.campaign["t"] >= self.campaign["dur"]:
-                self.resolve_campaign()
-        elif self.E["autowar"] and self.auto_war and self.galaxy_open:
+        for c in list(self.campaigns):
+            c["t"] += dt
+            if c["t"] >= c["dur"]:
+                self.resolve_campaign(c)
+        if self.E["autowar"] and self.auto_war and self.galaxy_open and self.free_fronts() > 0:
             self._auto_t -= dt
             if self._auto_t <= 0:
                 self._auto_t = 3.0
                 k = self.auto_target()
                 if k is not None:
-                    self.start_campaign(k)
+                    self.start_campaign(k, mode=0, odds=self.auto_odds)
         for b in self.buffs:
             b["t"] -= dt
         self.buffs = [b for b in self.buffs if b["t"] > 0]

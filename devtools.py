@@ -179,18 +179,21 @@ def sections(app):
     def max_jump():
         g.armory[core.JUMP] = ARMORY[core.JUMP][3]
 
+    def max_command():
+        g.armory[core.COMMAND] = ARMORY[core.COMMAND][3]
+
     def reset_galaxy():
         g.conquered = {0}
-        g.campaign = None
+        g.campaigns = []
 
     def finish_campaign():
-        if g.campaign:
-            g.campaign["t"] = g.campaign["dur"]
+        for c in g.campaigns:
+            c["t"] = c["dur"]
 
     def sure_win():
-        if g.campaign:
-            g.campaign["chance"] = 1.0
-            g.campaign["fp"] = max(g.campaign["fp"], 1.0)
+        for c in g.campaigns:
+            c["chance"] = 1.0
+            c["fp"] = max(c["fp"], 1.0)
 
     def max_armory():
         g.armory = [a[3] for a in ARMORY]
@@ -352,9 +355,10 @@ def sections(app):
             ("Liberate ALL systems", cheat(conquer_all), False),
             ("Liberate The Void Throne (can Ascend)", cheat(conquer_boss), False),
             ("Max Jump Drive", cheat(max_jump), False),
+            ("Max Command (8 fronts at once)", cheat(max_command), False),
             ("Reset galaxy to Sol only", cheat(reset_galaxy), False),
-            ("Finish current campaign now", cheat(finish_campaign), False),
-            ("Current campaign: guaranteed win", cheat(sure_win), False),
+            ("Finish all running campaigns now", cheat(finish_campaign), False),
+            ("Running campaigns: guaranteed win", cheat(sure_win), False),
             ("Max armory", cheat(max_armory), False),
             ("Max Intel (full warnings)", cheat(max_intel), False),
             ("Raid incoming: small (8 s)", cheat(sched_raid(0)), False),

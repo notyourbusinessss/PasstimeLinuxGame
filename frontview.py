@@ -214,7 +214,7 @@ class FrontView:
         g = self.app.g
         k = self.app.sel_sector
         if k not in g.conquered and k not in g.targets_set():
-            c = g.campaign
+            c = g.campaigns[0] if g.campaigns else None
             k = c["k"] if c else (min(g.targets(), key=lambda q: SECTORS[q]["lp"]) if g.targets() else 0)
         self.focus(k)
 
@@ -465,7 +465,7 @@ class FrontView:
         fac = SECTORS[enemy]["faction"]
         ecol = FACTIONS[fac]["col"]
         st = director.stance(g, fac)
-        fighting = st == "war" or bool(g.campaign and g.campaign["k"] == enemy)      # at peace the fleets only face each other
+        fighting = st == "war" or g.attacking(enemy) is not None      # at peace the fleets only face each other
         tension = g.tension.get(fac, 0.0)
         t = front.front_pos(g, enemy)
         F = (pm[0] + (po[0] - pm[0]) * t, pm[1] + (po[1] - pm[1]) * t)
@@ -485,7 +485,8 @@ class FrontView:
         if close and mine == front.source_sector(g, enemy):      # the fleets gather on the main lane
             body = 16 * (0.85 + 0.15 * min(z, 3))
             roster = front.fleet_roster(g)
-            fp, ep = g.fleet_power(), g.sector_power(enemy)
+            camp = g.attacking(enemy)                            # the fleet in the field there, or else your whole fleet
+            fp, ep = (camp["fp"] if camp else g.fleet_power()), g.sector_power(enemy)
             rows_m = max(1, int(max(0.0, t * L - body - 8) / gap))
             rows_e = max(1, int(max(0.0, (1 - t) * L - body - 8) / gap))
             n_m = min(front.ships_for(fp, 20), COLS * rows_m)
@@ -560,7 +561,8 @@ class FrontView:
             pygame.draw.circle(scr, tc, rr.center, 3)
         self.marks.append((F[0], F[1], enemy))
         if close and L >= 260:                    # power split pill
-            ch = win_chance(g.fleet_power(), g.sector_power(enemy))
+            camp = g.attacking(enemy)
+            ch = camp["chance"] if camp else win_chance(g.fleet_power(), g.sector_power(enemy))
             pw, ph = 70, 6
             bx, by = F[0] + nx * (half + 14) - pw / 2, F[1] + ny * (half + 14)
             shr = front.share(g, enemy)
@@ -570,7 +572,7 @@ class FrontView:
             tag = {"war": "  WAR", "truce": "  TRUCE", "peace": f"  peace {tension * 100:.0f}%"}[st]
             app.txt(scr, tiny, f"{ch * 100:.0f}%{tag}", (bx + pw / 2, by + ph + 3), app.chance_color(ch), "midtop", True)
 
-    def render_stars(self, tgt, ox, oy, g, R, now, sel, camp, app):
+    def render_stars(self, tgt, ox, oy, g, R, now, sel, camps, app):
         """Draw every system on the map onto tgt (whose top-left is at screen position ox, oy). Returns the systems drawn,
         as (screen x, screen y, id), and the name labels wanted, as (priority, x, y, name, colour)."""
         s, mx, my, cx, cy = self.s, self.mc[0], self.mc[1], self.cx, self.cy
@@ -582,7 +584,6 @@ class FrontView:
         set_at = tgt.set_at
         scan = g.reach.scan
         pulse_t = now * 3
-        camp_k = camp["k"] if camp else -1
         sel_k = sel
         for k in self.known:
             x = mx + (XS[k] - cx) * s
@@ -624,7 +625,8 @@ class FrontView:
                             ex, ey = dx + math.cos(a) * orbit, dy + math.sin(a) * orbit * 0.72
                             img = self.rot(spr, -math.degrees(a + math.pi / 2), 16)
                             tgt.blit(img, img.get_rect(center=(ex, ey)))
-                    if camp_k == k:                           # siege ring: campaign progress
+                    if k in camps:                            # siege ring: campaign progress
+                        camp = camps[k]
                         prog = max(0.0, min(1.0, camp["t"] / max(1.0, camp["dur"])))
                         rr = pygame.Rect(0, 0, 2 * (r + 8), 2 * (r + 8))
                         rr.center = (dx, dy)
@@ -647,7 +649,7 @@ class FrontView:
             f = FAME[k]
             if sel_k == k:
                 pr = 100
-            elif camp_k == k:
+            elif k in camps:
                 pr = 90
             elif f >= 3:
                 pr = 60 + (10 if held else 0)
@@ -687,7 +689,7 @@ class FrontView:
         mx, my, cx, cy = self.mc[0], self.mc[1], self.cx, self.cy
         vx0, vx1, vy0, vy1 = VIEW.x - 40, VIEW.right + 40, VIEW.y - 40, VIEW.bottom - BAR + 40
         sel = app.sel_sector
-        camp = g.campaign
+        camps = {c["k"]: c for c in g.campaigns}
         R = self.star_radius()
         rng_ly = g.jump_range()
 
@@ -706,7 +708,7 @@ class FrontView:
         src_ring = None
         if sel in conq:
             src_ring = sel
-        elif sel in tset or (camp and camp["k"] == sel):
+        elif sel in tset or sel in camps:
             src_ring = front.source_sector(g, sel)
         if src_ring is not None and s * rng_ly > 4:
             x, y = self.pos(src_ring)
@@ -736,18 +738,17 @@ class FrontView:
                         pygame.draw.line(scr, (30, 34, 62), (x, y), (xb, yb), 1)
 
         # the systems: zoomed far out they are tiny dots, painted once into a cache while the camera stands still
-        camp_k = camp["k"] if camp else -1
         if R < 2.2:
-            key = (round(cx, 1), round(cy, 1), round(s, 9), self.known_key, sel, camp_k, VIEW.size, BAR)
+            key = (round(cx, 1), round(cy, 1), round(s, 9), self.known_key, sel, tuple(sorted(camps)), VIEW.size, BAR)
             if key != self.dots_key:
                 self.dots = pygame.Surface(VIEW.size)
-                self.dots_hits, self.dots_labels = self.render_stars(self.dots, VIEW.x, VIEW.y, g, R, now, sel, camp, app)
+                self.dots_hits, self.dots_labels = self.render_stars(self.dots, VIEW.x, VIEW.y, g, R, now, sel, camps, app)
                 self.dots_key = key
             scr.blit(self.dots, VIEW.topleft, special_flags=ADD)
             hits, labels = self.dots_hits, list(self.dots_labels)
             self.pts = hits
         else:
-            hits, labels = self.render_stars(scr, 0, 0, g, R, now, sel, camp, app)
+            hits, labels = self.render_stars(scr, 0, 0, g, R, now, sel, camps, app)
             self.pts = hits
         hover, hd = None, 18.0
         mxm, mym = mouse
@@ -768,7 +769,7 @@ class FrontView:
 
         # fronts: the lane of an attack you are flying or considering, and the borders at war you can see
         lanes = []
-        if camp:
+        for camp in camps.values():
             lanes.append((camp.get("src", 0), camp["k"]))
         if sel in tset:
             sp = front.source_sector(g, sel)
@@ -805,8 +806,8 @@ class FrontView:
                 app.txt(scr, tiny, fmt_eta(max(0, inc["eta"] - inc["t"])), (px, py + 16), (255, 150, 140), "midtop", True)
                 if inc["kind"] == "offensive":
                     labels.append((95, tx, ty, SECTORS[inc["target"]]["name"], (255, 150, 140)))
-        # your fleet on its way (zoomed far out: close up it is the swarm on the lane)
-        if camp:
+        # your fleets on their way (zoomed far out: close up they are the swarm on the lane)
+        for camp in camps.values():
             k = camp["k"]
             sxy, txy = self.pos(camp.get("src", 0)), self.pos(k)
             if math.hypot(txy[0] - sxy[0], txy[1] - sxy[1]) < 190:
@@ -819,6 +820,8 @@ class FrontView:
                              (fx_ - math.cos(ang) * tc * 9 - (10 - tc), fy_ - math.sin(ang) * tc * 9 - (10 - tc)), special_flags=ADD)
                 spr = self.rot(app.ship_sprite(*front.fleet_roster(g)[0]), -math.degrees(ang))
                 scr.blit(spr, spr.get_rect(center=(fx_, fy_)))
+                if len(camps) > 1 or g.max_fronts() > 1:                  # how much of the fleet this front is
+                    app.txt(scr, tiny, f"{camp['share'] * 100:.0f}%", (fx_, fy_ - 14), (170, 215, 255), "midbottom", True)
         # name labels, the most important first, none on top of another
         labels.sort(key=lambda t: -t[0])
         placed = []
@@ -1051,10 +1054,9 @@ class FrontView:
         if fac is not None and g.scanned(k):
             can = g.can_attack(k) and fp > 0
             at_war = fac in g.war
-            if g.campaign is not None:
-                label = "CAMPAIGN BUSY"
-            elif k not in g.targets_set():
-                label = "OUT OF RANGE"
+            block = g.attack_block(k)
+            if block:
+                label = block
             elif at_war:
                 label = "ATTACK"
             else:

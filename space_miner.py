@@ -6,6 +6,7 @@ Unlock the next world with the ores of the ones behind you, travel between them,
 research tech, survive random events, then WARP for permanent Dark Matter.
 Autosaves to ~/.space_miner_save.json; your empire keeps working while you're away.
 """
+import json
 import math
 import os
 import random
@@ -34,7 +35,7 @@ import touch
 from version import __version__
 from core import (BMAX, BUILDINGS, NB, NSH, NSITE, PERKS, PROJECTS, SC, SHIPS, SITES, TECHS, TECH_BY_ID,
                   UPGRADES, ACHIEVEMENTS, ACH_BY_ID, ACH_CATS, TIER_BONUS, TIER_NAMES, QUEST_TXT, fmt, geo_cost,
-                  SECTORS, NSEC, FACTIONS, ARMORY, armory_cost, win_chance,
+                  SECTORS, NSEC, FACTIONS, ARMORY, COMMIT_MODES, armory_cost, win_chance,
                   STARDUST_PERKS, sd_bonus)
 from gfx import glow, scale_c, lerp_c
 
@@ -424,7 +425,7 @@ class App:
             f"view={self.view} tab={self.tabs[self.tab] if 0 <= self.tab < len(self.tabs) else self.tab} planet={SITES[g.cur]['name']} "
             f"fps={self.fps:.0f} window={win} fullscreen={self.fullscreen} dev={self.dev}",
             f"play_time={g.play_time:.0f}s cycle={g.cycle} warps={g.warps} unlocked={g.n_unlocked} sectors={len(g.conquered) - 1} "
-            f"campaign={'yes' if g.campaign else 'no'} incoming={len(g.incoming)} event={'yes' if g.event else 'no'} "
+            f"fronts={len(g.campaigns)}/{g.max_fronts()} incoming={len(g.incoming)} event={'yes' if g.event else 'no'} "
             f"travel={'yes' if g.travel else 'no'} cheated={'cheated' in g.flags}",
             f"galaxy camera: scale={self.fv.s:.4f} px/ly centre=({self.fv.cx:.0f},{self.fv.cy:.0f}) selected system={self.sel_sector}",
         ])
@@ -1026,13 +1027,18 @@ class App:
         self.txt(scr, tiny, f"Fleet power {fmt(g.fleet_power())}   -   {len(g.conquered) - 1:,} systems held   -   range {galaxy.fmt_ly(g.jump_range())}   -   "
                  + ("at peace" if not wars else f"at war with {wars} faction{'s' if wars > 1 else ''}"),
                  (22, 40), (170, 180, 215), shadow=True)
-        c = g.campaign
-        if c and not self.panel_visible():                  # (with the panel open its campaign card shows the same)
+        if g.campaigns and not self.panel_visible():        # (with the panel open its Fronts card shows the same)
             right = frontview.VIEW.right
-            self.txt(scr, tiny, f"Campaign: {SECTORS[c['k']]['name']}  {c['chance'] * 100:.0f}% to win  ({fmt_time(max(0, c['dur'] - c['t']))} left)",
-                     (right, 14), (255, 175, 150), "topright", True)
-            pygame.draw.rect(scr, (40, 24, 28), (right - 220, 34, 220, 6), border_radius=3)
-            pygame.draw.rect(scr, (255, 120, 100), (right - 220, 34, 220 * c["t"] / c["dur"], 6), border_radius=3)
+            self.txt(scr, tiny, f"Fronts {len(g.campaigns)}/{g.max_fronts()}  -  {g.free_share() * 100:.0f}% of the fleet at home",
+                     (right, 8), (255, 175, 150), "topright", True)
+            shown = sorted(g.campaigns, key=lambda c: c["dur"] - c["t"])[:3]
+            bw = 142
+            for i, c in enumerate(shown):                   # the next three to arrive
+                x = right - (len(shown) - i) * (bw + 16) + 16
+                self.txt(scr, tiny, f"{SECTORS[c['k']]['name']} {c['chance'] * 100:.0f}% {fmt_time(max(0, c['dur'] - c['t']))}",
+                         (x, 26), (255, 205, 190), shadow=True)
+                pygame.draw.rect(scr, (40, 24, 28), (x, 44, bw, 5), border_radius=3)
+                pygame.draw.rect(scr, (255, 120, 100), (x, 44, bw * c["t"] / c["dur"], 5), border_radius=3)
 
     def draw_hud(self, scr, fonts):
         if self.view == "galaxy":
@@ -1070,13 +1076,15 @@ class App:
             pygame.draw.rect(scr, (24, 28, 56), (22, y + 20, 150, 6), border_radius=3)
             pygame.draw.rect(scr, SITES[k]["col"], (22, y + 20, 150 * fr, 6), border_radius=3)
             y += 34
-        if g.campaign:
-            c = g.campaign
+        for c in sorted(g.campaigns, key=lambda c: c["dur"] - c["t"])[:2]:
             self.txt(scr, tiny, f"Campaign: {SECTORS[c['k']]['name']}  {c['chance'] * 100:.0f}%  "
                      f"({fmt_time(max(0, c['dur'] - c['t']))} left)", (22, y + 2), (255, 175, 150), shadow=True)
             pygame.draw.rect(scr, (40, 24, 28), (22, y + 20, 150, 6), border_radius=3)
             pygame.draw.rect(scr, (255, 120, 100), (22, y + 20, 150 * c["t"] / c["dur"], 6), border_radius=3)
             y += 34
+        if len(g.campaigns) > 2:
+            self.txt(scr, tiny, f"+{len(g.campaigns) - 2} more fronts", (22, y + 2), (255, 175, 150), shadow=True)
+            y += 20
         if director.intel(g) >= 1 and self.view != "galaxy":       # the galaxy view shows incoming fleets itself
             for inc in g.incoming[:2]:
                 left = max(0, inc["eta"] - inc["t"])
@@ -1695,16 +1703,29 @@ class App:
                      f"Lv {L}/{mx}", f"{fmt(cr)} cr + {fmt(sci)} sci", ok, (120, 190, 255),
                      (lambda: g.buy_armory(core.JUMP)) if ok else None, glyph="J")
         y += 70
-        if g.campaign:
-            c = g.campaign
+        # ---- the fronts: how many fleets are out, how much of the fleet each attack sends
+        n_f, mx_f = len(g.campaigns), g.max_fronts()
+        self.txt(scr, med, f"Fronts  {n_f}/{mx_f}", (PANEL.x + 4, y), (255, 190, 150))
+        self.txt(scr, tiny, f"{g.free_share() * 100:.0f}% of the fleet at home", (PANEL.right - 4, y + 7), (150, 158, 190), "topright")
+        y += 28
+        bw = (PANEL.w - 52 - 6 * len(COMMIT_MODES)) // len(COMMIT_MODES)
+        self.txt(scr, tiny, "Send:", (PANEL.x + 4, y + 9), (170, 176, 205))
+        for i, (label, _) in enumerate(COMMIT_MODES):
+            self.button(scr, pygame.Rect(PANEL.x + 52 + i * (bw + 6), y, bw, 28), label, sm, (lambda i=i: setattr(g, "commit", i)),
+                        panel=True, selected=g.commit == i, col=(60, 74, 120))
+        y += 34
+        if not g.campaigns:
+            self.txt(scr, tiny, "No fleet in the field." + (" Upgrade Command in the armory to attack several systems at once." if mx_f == 1 else ""),
+                     (PANEL.x + 4, y), (140, 148, 180))
+            y += 20
+        for c in sorted(g.campaigns, key=lambda c: c["dur"] - c["t"]):
             sec = SECTORS[c["k"]]
-            fr = c["t"] / c["dur"]
-            rr = pygame.Rect(PANEL.x, y, PANEL.w, 66)
-            self.row(scr, fonts, rr, f"Campaign: {sec['name']}", f"{fmt_time(max(0, c['dur'] - c['t']))} left   -   "
-                     f"{c['chance'] * 100:.0f}% to win   -   committed power {fmt(c['fp'])}", None, None, True,
-                     FACTIONS[sec["faction"]]["col"], (lambda k=c["k"]: self.select_sector(k)), frac=fr,
-                     icon=self.enemy_big[sec["faction"]])
-            y += 74
+            rr = pygame.Rect(PANEL.x, y, PANEL.w, 58)
+            self.row(scr, fonts, rr, f"{sec['name']}", f"{fmt_time(max(0, c['dur'] - c['t']))} left   -   "
+                     f"{c['chance'] * 100:.0f}% to win   -   {c['share'] * 100:.0f}% of the fleet ({fmt(c['fp'])})", None, None, True,
+                     FACTIONS[sec["faction"]]["col"], (lambda k=c["k"]: self.select_sector(k)), frac=c["t"] / c["dur"],
+                     icon=self.enemy_small[sec["faction"]])
+            y += 64
         if g.E["autowar"]:
             on = g.auto_war
             rr = pygame.Rect(PANEL.x, y, PANEL.w - 150, 52)
@@ -1801,7 +1822,9 @@ class App:
         sec = SECTORS[k]
         fac = FACTIONS[sec["faction"]]
         ep = g.sector_power(k)
-        ch = win_chance(fp, ep)
+        block = g.attack_block(k)
+        share = 1.0 if block else g.launch_share(k)               # what an attack would send (the whole fleet while none can go)
+        ch = g.attack_chance(k, share)
         rr = pygame.Rect(PANEL.x, y, PANEL.w, 126)
         y += 134
         loc = f"{galaxy.fmt_ly(sec['d'])} from the Sun  -  {sec['region']}, {sec['con']}"
@@ -1819,7 +1842,8 @@ class App:
             can = g.can_attack(k) and fp > 0
             lines = [(f"{sec['kind']}  -  {loc}", (150, 158, 190)),
                      (f"Enemy power {fmt(ep)}    your fleet {fmt(fp)}", (205, 210, 230)),
-                     (f"Win chance {ch * 100:.0f}%    campaign time {fmt_time(g.campaign_duration(k))}", self.chance_color(ch))]
+                     (f"Win chance {ch * 100:.0f}%" + (f" sending {share * 100:.0f}% of the fleet" if not block else "")
+                      + f"    campaign time {fmt_time(g.campaign_duration(k))}", self.chance_color(ch))]
             if not tgt:
                 _, d = g.source_of(k)
                 lines.insert(0, (f"Out of range: {galaxy.fmt_ly(d)} from your nearest system (range {galaxy.fmt_ly(g.jump_range())})",
@@ -1829,10 +1853,8 @@ class App:
             rr.h = 48 + 15 * len(lines) + 8
             y += rr.h - 126
             at_war = sec["faction"] in g.war
-            if g.campaign is not None:
-                label = "BUSY"
-            elif not tgt:
-                label = "OUT OF RANGE"
+            if block:
+                label = block
             elif at_war:
                 label = "ATTACK"
             else:
@@ -2627,10 +2649,166 @@ def check_galaxy():
     assert far in g.targets_set() and 0 in g.sync_reach().held
 
 
+def check_fronts():
+    """Several fleets at once: slots from the Command track, the fleet split between fronts, losses by share, the Fleet Admiral
+    filling free fronts, and saves (including a save from before there could be several fronts)."""
+    for c in (0.2, 0.5, 0.85, 0.95):
+        assert abs(win_chance(core.power_for(1000.0, c), 1000.0) - c) < 1e-6, "power_for is not the inverse of win_chance"
+    g = core.Game(load=False, sim=True)
+    g.unlocked[2] = True
+    g.owned = [[200000, 100000, 50000, 20000, 10000, 5000, 2000, 1000] for _ in range(NSITE)]
+    g.armory[core.JUMP] = 4
+    g.recalc()
+    fp = g.fleet_power()
+    tg = sorted(g.targets(), key=lambda k: SECTORS[k]["lp"])
+    assert g.max_fronts() == 1 and len(tg) >= 6 and g.galaxy_open
+    assert all(g.sector_power(k) * 3 < fp for k in tg[:4]), "the test fleet should beat the weakest systems easily"
+    assert g.attack_block(tg[0]) == "" and g.launch_share(tg[0]) < 0.5, "'Enough' should send only part of the fleet"
+    assert g.start_campaign(tg[0]) and len(g.campaigns) == 1
+    c = g.campaigns[0]
+    assert abs(c["share"] - (1 - g.free_share())) < 1e-9 and abs(c["fp"] - fp * c["share"]) < 1e-6 * fp and c["chance"] >= core.COMMIT_ODDS - 1e-6
+    assert g.attack_block(tg[1]) == "FRONTS FULL" and not g.start_campaign(tg[1]), "one front only without Command"
+    assert g.attack_block(tg[0]) == "ATTACKING" and g.weakest_target() == tg[1]
+    g.armory[core.COMMAND] = 2                                           # three fronts
+    assert g.max_fronts() == 3 and g.free_fronts() == 2
+    assert g.start_campaign(tg[1]) and g.start_campaign(tg[2]) and not g.start_campaign(tg[3])
+    assert len(g.campaigns) == 3 and g.peak_fronts == 3 and g.free_fronts() == 0
+    assert abs(g.free_share() - (1 - sum(c["share"] for c in g.campaigns))) < 1e-9 and 0 <= g.free_share() < 1
+    # the whole fleet on one front leaves nothing for a second
+    g.campaigns = []
+    g.commit = 3
+    assert g.start_campaign(tg[0]) and g.campaigns[0]["share"] == 1.0 and g.attack_block(tg[1]) == "NO FLEET FREE"
+    g.campaigns, g.commit = [], 1                                        # 25% each: four fronts at most
+    g.armory[core.COMMAND] = 7
+    n = 0
+    while g.start_campaign(tg[n]):
+        n += 1
+    assert n == 4 and abs(g.free_share()) < 1e-9, n
+    # a campaign that arrives frees its front; losses scale with the share it carried
+    g.commit = 0
+    g.campaigns = []
+    before = [sum(o) for o in g.owned]
+    assert g.start_campaign(tg[0])
+    c = g.campaigns[0]
+    c["chance"] = 0.0
+    c["t"] = c["dur"]
+    g.step(0.01)
+    assert not g.campaigns and tg[0] not in g.conquered and g.battles_lost == 1
+    lost = 1 - sum(sum(o) for o in g.owned) / sum(before)
+    assert 0 < lost < core.LOSE_LOSSES * c["share"] * 1.5 + 0.01, lost
+    assert g.start_campaign(tg[0])
+    g.campaigns[0]["chance"] = 1.0
+    g.campaigns[0]["t"] = g.campaigns[0]["dur"]
+    g.step(0.01)
+    assert tg[0] in g.conquered and not g.campaigns and g.battles_won == 1
+    # the Fleet Admiral fills every free front by itself
+    g.techs.add("t31")
+    g.recalc()
+    g.auto_war, g.auto_odds = True, 0.85
+    director.declare_war(g, SECTORS[tg[1]]["faction"], "player")
+    war_t = [k for k in g.targets() if SECTORS[k]["faction"] in g.war]
+    assert len(war_t) >= 3
+    for _ in range(3):                                                   # one launch every few seconds
+        g.step(3.2)
+    assert len(g.campaigns) >= 2 and all(SECTORS[c["k"]]["faction"] in g.war and c["chance"] >= 0.84 for c in g.campaigns)
+    assert len({c["k"] for c in g.campaigns}) == len(g.campaigns), "two fleets on one system"
+    assert not director.can_sue(g, SECTORS[g.campaigns[0]["k"]]["faction"])[0]
+    # saves: the fronts survive, and an old save with one campaign becomes one front with the whole fleet
+    old_save = core.SAVE
+    d = tempfile.mkdtemp(prefix="space_miner_fronts_")
+    try:
+        core.SAVE = os.path.join(d, "save.json")
+        g.commit = 2
+        g.save()
+        h = core.Game(load=True, sim=True)
+        assert [(c["k"], round(c["share"], 6)) for c in h.campaigns] == [(c["k"], round(c["share"], 6)) for c in g.campaigns]
+        assert h.commit == 2 and h.peak_fronts == g.peak_fronts and h.armory[core.COMMAND] == 7
+        with open(core.SAVE) as f:
+            data = json.load(f)
+        data.pop("campaigns")
+        data.pop("commit")
+        data["campaign"] = dict(k=tg[5], t=3.0, dur=50.0, fp=123.0, chance=0.8, src=0)
+        with open(core.SAVE, "w") as f:
+            json.dump(data, f)
+        h = core.Game(load=True, sim=True)
+        assert len(h.campaigns) == 1 and h.campaigns[0]["k"] == tg[5] and h.campaigns[0]["share"] == 1.0 and h.free_share() == 0.0
+        data["armory"] = data["armory"][:core.COMMAND]                    # ...and a save from before the Command track exists
+        with open(core.SAVE, "w") as f:
+            json.dump(data, f)
+        assert core.Game(load=True, sim=True).max_fronts() == 1
+    finally:
+        core.SAVE = old_save
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def check_counter_offensives():
+    """Enemies take systems back: a fleet at home defends them, fleets in the field do not, and several enemy fronts strike
+    at once and share your fleet at home."""
+    def setup():
+        g = core.Game(load=False, sim=True)
+        g.unlocked[2] = True
+        g.owned = [[200000, 100000, 50000, 20000, 10000, 5000, 2000, 1000] for _ in range(NSITE)]
+        g.armory[core.JUMP] = 4
+        g.armory[core.COMMAND] = 2
+        g.recalc()
+        g.grace = 0.0
+        return g
+    g = setup()
+    tg = sorted(g.targets(), key=lambda k: SECTORS[k]["lp"])[:6]
+    k = tg[2]
+    g.conquered.add(k)
+    foes = [n for n in galaxy.LINKS[k] if n not in g.conquered]
+    assert foes, "the test system should border enemy systems"
+    fac = SECTORS[foes[0]]["faction"]
+    director.declare_war(g, fac, "enemy")
+    g.incoming = []
+    assert k in director.exposed_systems(g) and k in director.exposed_systems(g, fac) and 0 not in director.exposed_systems(g)
+    tp = g.sector_power(k)
+    for n in foes:                                                         # the strength of an offensive follows the system it starts from
+        p = director.offensive_power(g, k, n, SECTORS[n]["faction"])
+        assert director.OFFENSIVE_MIN * tp - 1e-9 <= p <= director.OFFENSIVE_MAX * tp * director.hostility_mult(g, SECTORS[n]["faction"]) + 1e-9
+    g.garrison[k] = 0.5 * tp                                               # a thin garrison
+    full = director.home_guard(g)
+    assert full == director.HOME_GUARD * g.fleet_power() and director.home_guard(g, 2) == full / 2
+    inc = director.schedule_offensive(g, target=k, lead=0)                 # lead 0: it hits at once
+    assert inc and k in g.conquered and g.offensives_repelled == 1, "the fleet at home should hold the system"
+    g.commit = 3                                                           # ...but with the whole fleet away on a campaign
+    far = next(q for q in sorted(g.targets(), key=lambda q: SECTORS[q]["lp"]) if q != k and q not in g.conquered)
+    assert g.start_campaign(far) and g.free_share() == 0.0 and director.home_guard(g) == 0.0
+    assert director.aggression(g) >= 0.25
+    inc = director.schedule_offensive(g, target=k, lead=0)
+    assert inc and k not in g.conquered and k in g.lost_sectors and g.sectors_lost == 1, "an undefended system should fall"
+    assert k in g.targets_set() or g.attack_block(k) in ("FRONTS FULL", "NO FLEET FREE"), "a lost system can be attacked again"
+    # a wave: one offensive from each enemy faction that touches you, sharing the fleet at home
+    g = setup()
+    facs = set()
+    for k in sorted(range(1, NSEC), key=lambda q: SECTORS[q]["d"]):         # grow a territory outwards until it touches 3 factions
+        g.conquered.add(k)
+        facs = {SECTORS[n]["faction"] for q in g.conquered for n in galaxy.LINKS[q] if n not in g.conquered}
+        if len(facs) >= 3:
+            break
+    assert len(facs) >= 3, "the test territory should touch several factions"
+    g.armory[director.INTEL] = 6                                           # attacks are announced, so they stay in flight
+    for f in facs:
+        director.declare_war(g, f, "enemy")
+    g.incoming = []
+    reachable = {f for f in facs if director.exposed_systems(g, f)}        # (Sol itself cannot be taken)
+    n = director.schedule_strikes(g)
+    offs = [i for i in g.incoming if i["kind"] == "offensive"]
+    assert len(reachable) >= 2 and 2 <= n <= min(director.MAX_STRIKES, len(reachable)) and n == len(offs), (n, reachable)
+    assert len({i["fac"] for i in offs}) == n                              # (a system two factions touch is attacked by only one)
+    assert len({i["target"] for i in offs}) == n, "two offensives on one system"
+    if n > 1:
+        one = director.sector_defense(g, offs[0]["target"], strikes=1)
+        assert director.sector_defense(g, offs[0]["target"], strikes=director.strikes_with(g, offs[0])) <= one
+
+
 def selftest_step(app, g, frames, shot):
     if frames == 1:
         check_ship_art(app)
         check_galaxy()
+        check_fronts()
+        check_counter_offensives()
         check_new_game_reset()
     if frames == 3:
         for _ in range(25):
@@ -2779,7 +2957,8 @@ def selftest_step(app, g, frames, shot):
     if frames == 72:
         shot("raid")
     if frames == 74:
-        g.campaign["t"] = g.campaign["dur"]
+        for c in g.campaigns:
+            c["t"] = c["dur"]
         for inc in list(g.incoming):
             inc["t"] = inc["eta"] - 0.1
     if frames == 76 and app.dev:
