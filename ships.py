@@ -90,13 +90,13 @@ ROSTERS = [
                  "Cracks ice into exotic fuel", "A twin world's workshop", "Hunters at the system's edge",
                  "Taps the last sunlight", "Bends space at the edge",
                  "A fortress on the nitrogen glacier", "The last fleet at the edge of the Sun"]),
-    dict(  # Proxima b
-         names=["Spore Drone", "Bloom Lance", "Hive Barge", "Quantum Refinery", "Foam Foundry", "Alien Swarm",
-                "Red-Dwarf Tap", "Foam Engine", "Bloom Citadel", "Spore Ark"],
-         blurbs=["A living seed with an engine", "A beam grown, not built", "A drifting alien hive",
-                 "Refines the fabric of space", "Forges bubbles of foam", "Strange minds, many wings",
-                 "Drinks the red dwarf's glow", "Turns quantum foam to power",
-                 "A fortress grown like a flower", "Seeds a thousand worlds"]),
+    dict(  # Kuiper Belt
+         names=["Comet Skiff", "Tail Lance", "Snowball Barge", "Tholin Refinery", "Makemake Foundry", "Oort Swarm",
+                "Arrokoth Tap", "Sedna Engine", "Eris Citadel", "Halley Ark"],
+         blurbs=["Hitches a ride on a passing comet", "A beam as long as a comet's tail", "Hauls whole snowballs by the dozen",
+                 "Cooks red organic sludge into fuel", "Built on a world nobody visits", "Grit from the edge of the Sun's reach",
+                 "Taps a snowman made of ice", "Falls in on an 11,000-year orbit", "Guards the dwarf planet of discord",
+                 "A fleet that returns every 76 years"]),
 ]
 
 # How each planet's ships look and move. style: the hull family drawn by shipart.py; pal: the colours (hull, shade, trim,
@@ -123,8 +123,8 @@ LOOKS = [
          scale=1.25, motion="weave"),                                                                  # Neptune
     dict(style="sled", pal=((208, 186, 222), (142, 118, 162), (255, 246, 255), (255, 170, 212)),
          scale=1.1, motion="drift"),                                                                 # Pluto
-    dict(style="spore", pal=((40, 152, 122), (20, 92, 82), (150, 255, 206), (255, 90, 170)),
-         scale=1.15, motion="eight"),                                                                 # Proxima b
+    dict(style="comet", pal=((150, 112, 134), (84, 58, 82), (240, 222, 244), (120, 235, 255)),
+         scale=1.15, motion="sweep"),                                                                 # Kuiper Belt
 ]
 for _r, _look in zip(ROSTERS, LOOKS):
     _r.update(_look)
@@ -215,6 +215,14 @@ def orbit(p, i, j, n, t, d):
     if m == "drift":                                         # slow, wide and lonely
         a = t * spd * .4 * d + ph
         return math.cos(a) * rad * 1.15, math.sin(a) * rad * .9, math.sin(a)
+    if m == "sweep":                                         # a comet's long, lopsided orbit, each class on its own axis
+        e = .5
+        mean = t * spd * 1.0 * d + ph
+        nu = mean + 2 * e * math.sin(mean) + 1.25 * e * e * math.sin(2 * mean)
+        r = rad * .85 * (1 - e * e) / (1 + e * math.cos(nu))
+        x, y = math.cos(nu) * r, math.sin(nu) * r * .7
+        c, sn = math.cos(i * .7), math.sin(i * .7)
+        return x * c - y * sn, x * sn + y * c, math.sin(nu)
     if m == "eight":                                         # a figure of eight that crosses over the planet
         a = t * spd * .8 * d + ph
         return math.sin(a) * rad * 1.1, math.sin(a) * math.cos(a) * rad * .95, math.cos(a)

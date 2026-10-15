@@ -2,7 +2,7 @@
 
 Earth keeps the classic hulls (gfx.make_ship). Every other planet has a family of eight ships (Drone, Rig, Barge, Refinery,
 Foundry, Swarm, Tap, Engine) built from its own shapes and its own colours - landers on legs, wheeled rovers, airships,
-sun-shields, tumbling rocks, striped storm hulls, ringed discs, crystals, deep-sea creatures, ice sleds, living spores -
+sun-shields, tumbling rocks, striped storm hulls, ringed discs, crystals, deep-sea creatures, ice sleds, comets and snowballs -
 so a fleet can be told apart from another planet's at a glance. `beam()` draws each family's mining laser.
 
 Ships point to the right (+x); shapes are described in units of the hull radius, roughly -1..1.
@@ -710,7 +710,7 @@ def sled(d, t):
         d.spot(0, 0, .15, (255, 200, 230))
 
 
-# ------------------------------------------------------------------ Proxima b: living spores
+# ------------------------------------------------------------------ living spores (no planet uses this family yet)
 def spore(d, t):
     def blob(cx, cy, r, fill=HULL):
         rng = random.Random(int(cx * 17 + cy * 31 + r * 7))
@@ -779,8 +779,78 @@ def spore(d, t):
         d.spot(0, 0, .12, (255, 150, 220))
 
 
+# ------------------------------------------------------------------ Kuiper Belt: comets and snowballs
+def comet(d, t):
+    def tail(x, y, length=.9, spread=.28, n=3, col=None):
+        for k in range(n):
+            off = (k - (n - 1) / 2) * spread
+            d.line((x - .1, y + off * .3), (x - length, y + off), col or d.glow, 1.3)
+
+    def lump(cx, cy, r, seed, fill=None):
+        _rock(d, cx, cy, r, seed, fill)
+    if t == 0:
+        tail(0, 0, .95, .3, 3)
+        lump(.3, 0, .5, 1)
+        d.spot(.45, -.08, .09)
+    elif t == 1:
+        d.line((-1.05, 0), (0, 0), d.glow, 2.6)
+        d.line((-1.05, 0), (0, 0), (255, 255, 255), .8)
+        lump(.1, 0, .42, 2)
+        d.poly([(.45, -.1), (1.12, 0), (.45, .1)], d.acc)
+        d.spot(.2, .05, .09)
+    elif t == 2:
+        tail(-.62, 0, .45, .32, 3)
+        for k, x in enumerate((.72, .12, -.48)):
+            d.circ(x, 0, .31, d.hull if k % 2 == 0 else d.mid)
+            d.circ(x + .07, -.08, .08, (255, 255, 255), None)
+        d.line((.43, 0), (.43, 0), d.trim, 1)
+        d.line((.38, 0), (.5, 0), d.trim, 2.5)
+        d.line((-.18, 0), (-.06, 0), d.trim, 2.5)
+        d.spot(.82, 0, .07)
+    elif t == 3:
+        tail(-.3, -.2, .7, .3, 3, (255, 206, 196))
+        lump(.05, .12, .62, 3)
+        d.rect(-.1, -.74, .22, -.2, d.mid)
+        d.circ(.45, .12, .2, d.mid)
+        d.circ(-.28, .24, .17, d.mid)
+        d.circ(.45, .12, .08, (214, 110, 96), None)
+        d.circ(-.28, .24, .06, (214, 110, 96), None)
+        d.spot(.06, -.78, .09, (255, 160, 130))
+    elif t == 4:
+        d.lines([(-.68, -.08), (-.98, -.22), (-1.2, -.52)], d.glow, 2)
+        d.lines([(-.68, .08), (-.98, .22), (-1.2, .52)], d.glow, 2)
+        d.circ(0, 0, .72)
+        d.circ(-.22, .22, .26, d.mid)
+        d.circ(.3, -.26, .18, d.mid)
+        d.arc(0, 0, .98, .3, 0, math.tau, d.trim, 1.4)
+        for k in range(6):
+            a = k * math.tau / 6 + .4
+            d.circ(math.cos(a) * .98, math.sin(a) * .3, .05, d.glow, None)
+        d.spot(0, 0, .12)
+    elif t == 5:
+        for k, (x, y) in enumerate(((.55, 0), (.15, .52), (.15, -.52), (-.3, .26), (-.3, -.26))):
+            d.line((x - .1, y), (x - .55, y), d.glow, 1.2)
+            lump(x, y, .17, 10 + k)
+            d.circ(x + .04, y - .04, .04, (255, 255, 255), None)
+    elif t == 6:
+        d.line((-.2, -.3), (-.55, -.88), d.trim, 1.5)
+        d.circ(-.55, -.88, .11, d.mid)
+        d.poly([(-.42, -.1), (-1.18, -.52), (-1.18, .52), (-.42, .1)], lerp_c(d.glow, (0, 0, 0), .62), None)
+        d.line((-.5, 0), (-1.18, 0), d.glow, 1.6)
+        lump(.0, 0, .46, 6)
+        lump(.56, .02, .33, 7)
+        d.spot(.62, -.04, .1)
+    else:
+        for off in (-.3, .3):
+            d.lines([(.0 - k * .13, off * (.35 + k * .17) + .05 * math.sin(k)) for k in range(10)], d.glow, 2.6)
+        d.arc(0, 0, 1.08, .52, -.9, .9, d.trim, 1.4)
+        lump(.28, 0, .64, 8)
+        d.circ(.28, 0, .3, d.dark, d.glow)
+        d.spot(.28, 0, .15)
+
+
 FAMILIES = dict(lander=lander, rover=rover, airship=airship, solar=solar, rock=rock, storm=storm, ringed=ringed,
-                crystal=crystal, deep=deep, sled=sled, spore=spore)
+                crystal=crystal, deep=deep, sled=sled, spore=spore, comet=comet)
 STYLES = ["classic"] + list(FAMILIES)
 
 
@@ -857,6 +927,13 @@ def beam(scr, style, a, b, col, t, seed=0):
             pygame.draw.polygon(scr, white, [(x + ux * 5, y + uy * 5), (x + nx * 3, y + ny * 3), (x - ux * 5, y - uy * 5),
                                              (x - nx * 3, y - ny * 3)])
         pygame.draw.line(scr, scale_c(col, .25), a, b, 2)
+    elif style == "comet":                                  # bright heads racing down the line, each with a sparkling tail
+        pygame.draw.line(scr, scale_c(col, .2), a, b, 2)
+        for k in range(4):
+            f = ((k / 4) + t * 1.1) % 1.0
+            for j in range(6):
+                x, y = at(max(0.0, f - j * .035))
+                pygame.draw.circle(scr, white if j == 0 else scale_c(col, 1 - j * .15), (x, y), max(1, 4 - j // 2))
     elif style == "spore":                                  # a living tendril
         pts = [at(k / 14, math.sin(k * .7 + t * 6) * 8 * math.sin(k / 14 * math.pi)) for k in range(15)]
         pygame.draw.lines(scr, dim, False, pts, 6)

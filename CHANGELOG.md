@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **The Kuiper Belt replaces Proxima b** as the 12th and last planet of the solar system: Proxima b belongs to another star, so the first part of the game is now the solar system only. Same place in the game (price, ore production x3, buildings x1.5, megaproject x5), new look: an ice dwarf world with tholin patches, Tholin ore, the *Comet Catchers* megaproject and a fleet of comets and snowballs (Comet Skiff ... Eris Citadel, Halley Ark) that sweep round the planet on long comet orbits. Saves are unchanged (the Interstellar achievement is now Last Frontier and is kept).
+
 ## 1.1.0
 
 The galaxy is now the real Milky Way with thousands of systems, you can attack several fronts at once, the enemy can take your systems, and every planet has two more ship classes.

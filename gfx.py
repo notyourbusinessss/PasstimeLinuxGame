@@ -165,10 +165,16 @@ def _planet_color(kind, v, v2, x, y, S, base):
         if dx * dx + dy * dy < 1:
             c = lerp_c(c, (250, 244, 238), 0.75)
         return c
-    if kind == "proxima":
-        if v > 0.5:
-            return lerp_c((100, 26, 18), (210, 84, 40), v2)
-        return lerp_c((16, 100, 116), (60, 190, 170), v2)
+    if kind == "kuiper":                  # a dwarf world of ice with dark red-brown patches of tholin and a few bright craters
+        c = lerp_c((164, 176, 204), (244, 247, 255), min(1.0, v * 1.6))
+        if v2 > 0.4:
+            c = lerp_c(c, lerp_c((98, 56, 68), (178, 112, 112), min(1.0, v2 * 1.3)), min(0.9, (v2 - 0.4) * 3.4))
+        for cx, cy, cr in ((0.30, 0.34, 0.07), (0.64, 0.58, 0.10), (0.42, 0.72, 0.05), (0.7, 0.28, 0.045)):
+            dx, dy = (x - cx * S) / (cr * S), (y - cy * S) / (cr * S)
+            q = dx * dx + dy * dy
+            if q < 1:
+                c = lerp_c(c, (250, 252, 255), 0.6 * (1 - q))
+        return c
     return lerp_c((90, 90, 90), (200, 200, 200), v)
 
 

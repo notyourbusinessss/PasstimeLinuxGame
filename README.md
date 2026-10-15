@@ -152,7 +152,7 @@ There are 10 ship **classes**, from the humble Drone to the Galaxy Ark, and **ev
 | Uranus | Ice-blue crystals | Over the poles, round the sideways planet | A beam that splits into a fan |
 | Neptune | Deep-sea creatures: fish, manta rays, tridents, squid | Weave through the dark | A wavy beam |
 | Pluto | Pale ice sleds, snowballs and hearts | A slow, wide, lonely drift | Slow ice shards |
-| Proxima b | Living spores, jellies and tendrils | A figure of eight over the planet | A living tendril |
+| Kuiper Belt | Comets and snowballs: mauve nuclei with glowing tails | Long, lopsided comet orbits | Bright comet heads racing down a line |
 
 ![Every planet flies its own way](screenshots/59-planet-scenes.png)
 
@@ -216,7 +216,11 @@ Once a planet is unlocked, click it in the bottom strip (or the Planets tab) to 
 | 9 | Uranus | Antimatter | Cold engines: all ore production x2 |
 | 10 | Neptune | Dark Crystal | Deep-space drift: offline progress at 75% |
 | 11 | Pluto | Exotic Matter | Edge of the system: Dark Matter gain x1.5 |
-| 12 | Proxima b | Quantum Foam | Another star: all ore production x3, buildings x1.5 |
+| 12 | Kuiper Belt | Tholin | Comet harvesters: all ore production x3, buildings x1.5 |
+
+The solar system ends at the **Kuiper Belt**: a dwarf world of ice with dark tholin patches, mined for Tholin by a fleet of comets and snowballs that sweep round it on long comet orbits (the planets of other stars - Proxima Centauri, TRAPPIST-1 - are systems you conquer on the galaxy map).
+
+![The Kuiper Belt and its fleet](screenshots/72-kuiper-belt.png)
 
 A "Next planet" progress bar in the top-left corner shows how close you are, and hovering a planet in the bottom strip lists exactly what it costs.
 
@@ -235,7 +239,7 @@ The **Colony** tab lets you build on the current planet. Credits and Science, wh
 | Fusion Reactor | credits | +2.5% ALL production / level |
 | Defense Grid | science | +4% crate frequency, +10% defense vs raids / level |
 
-Each planet gives a x2 boost to one building type (Proxima b boosts all of them x1.5), and buildings go up to level 50.
+Each planet gives a x2 boost to one building type (the Kuiper Belt boosts all of them x1.5), and buildings go up to level 50.
 
 Every planet also has one **megaproject** at the bottom of its Colony tab. It costs a huge pile of that planet's ore *plus* credits and science, and it permanently boosts your whole empire - even through Warps. That is what makes the old ores worth keeping.
 
@@ -254,7 +258,7 @@ Every planet also has one **megaproject** at the bottom of its Colony tab. It co
 | Uranus | Ice Forges | Ships 10% cheaper everywhere |
 | Neptune | Deep Core Mine | All production x3 |
 | Pluto | Edge Gate | Dark Matter gain x2 |
-| Proxima b | Alpha Dyson Swarm | All production x5 |
+| Kuiper Belt | Comet Catchers | All production x5 |
 
 ### 5. Tech tree
 
@@ -631,7 +635,7 @@ The pacing (planets, megaprojects and the march to the Galactic Centre) was tune
 | Ceres / Jupiter | 5 - 17 hours |
 | Saturn / Uranus | 15 - 33 hours |
 | Neptune / Pluto | 25 - 55 hours |
-| Proxima b | 45 - 70 hours |
+| Kuiper Belt | 45 - 70 hours |
 | Every megaproject built | 50 - 100 hours |
 | The final boss (Void Throne) | 65 - 90 hours |
 | First Ascension, then every later cycle | after the boss; cycles of ~40 - 65 hours |
