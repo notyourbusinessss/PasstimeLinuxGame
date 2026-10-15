@@ -1,89 +1,102 @@
 """Every planet has its own fleet: different ships with their own names, descriptions and looks.
 
-The eight ship *classes* (Drone, Rig, Barge, Refinery, Foundry, Swarm, Tap, Engine) are the same on every planet, with
-the same costs and output, so the balance does not change. What differs is the roster: a Mars "Dune Rover" and a Saturn
-"Ring Skipper" are both Drones, but they are built differently, look different and have their own story.
+The ten ship *classes* (Drone, Rig, Barge, Refinery, Foundry, Swarm, Tap, Engine, Citadel, Ark) are the same on every planet,
+with the same costs and output. What differs is the roster: a Mars "Dune Rover" and a Saturn "Ring Skipper" are both Drones,
+but they are built differently, look different and have their own story. The two biggest classes, Citadel and Ark, are
+formations of the planet's own hulls (see gfx.make_ship).
 Pure data, no pygame.
 """
 import math
 
-CLASSES = ["Drone", "Rig", "Barge", "Refinery", "Foundry", "Swarm", "Tap", "Engine"]
+CLASSES = ["Drone", "Rig", "Barge", "Refinery", "Foundry", "Swarm", "Tap", "Engine", "Citadel", "Ark"]
 
-# per planet (same order as core.SITES): the eight ship names (a plural is made by adding "s") and a one-line description
+# per planet (same order as core.SITES): the ten ship names (a plural is made by adding "s") and a one-line description
 # for each
 ROSTERS = [
     dict(  # Earth
          names=["Mining Drone", "Laser Rig", "Mining Barge", "Refinery Ship", "Orbital Foundry", "Dyson Swarm", "Neutron Tap",
-                "Black Hole Engine"],
+                "Black Hole Engine", "Star Citadel", "Galaxy Ark"],
          blurbs=["A scrappy little miner", "Cuts rock with a focused beam", "Hauls ore by the tonne",
                  "Smelts ore on the way home", "A factory that never lands", "Mirrors that harvest a star",
-                 "Drinks from a dead star", "Eats everything, pays in ore"]),
+                 "Drinks from a dead star", "Eats everything, pays in ore",
+                 "A mobile fortress that mines whole belts", "A fleet that never comes home"]),
     dict(  # Moon
          names=["Dust Crawler", "Regolith Digger", "Lunar Hauler", "Mass-Driver Barge", "Crater Smelter", "Mare Harvester",
-                "Helium-3 Siphon", "Tide-Lock Engine"],
+                "Helium-3 Siphon", "Tide-Lock Engine", "Mare Citadel", "Earthrise Ark"],
          blurbs=["A rover that sifts moondust", "Bites craters for silicon", "Low gravity, heavy loads",
                  "Flings ore into orbit", "A furnace in a crater", "Sweeps the dark seas",
-                 "Pumps solar wind from the soil", "Earth's tides, put to work"]),
+                 "Pumps solar wind from the soil", "Earth's tides, put to work",
+                 "A crater base that learned to fly", "Carries a lunar colony to any rock"]),
     dict(  # Mars
          names=["Dune Rover", "Canyon Driller", "Ochre Hauler", "Olympus Refinery", "Phobos Foundry", "Dust-Storm Swarm",
-                "Valles Tap", "Red Planet Engine"],
+                "Valles Tap", "Red Planet Engine", "Olympus Citadel", "Ares Ark"],
          blurbs=["Rolls over rust and dust", "Bores into the canyon walls", "Red dust on every plate",
                  "Smelts copper under the volcano", "Built in the shadow of Phobos", "A storm that mines",
-                 "Taps the great canyon", "Terraforming's heavy hammer"]),
+                 "Taps the great canyon", "Terraforming's heavy hammer",
+                 "A volcano-sized fortress on treads", "A rolling city that crosses planets"]),
     dict(  # Venus
          names=["Cloud Skimmer", "Acid Lance", "Aerostat Barge", "Sulfur Refinery", "Sky Foundry", "Storm Swarm",
-                "Pressure Tap", "Deep-Crush Engine"],
+                "Pressure Tap", "Deep-Crush Engine", "Cloud Citadel", "Storm-Eye Ark"],
          blurbs=["Floats above the burning surface", "A beam that shrugs off acid", "A balloon the size of a town",
                  "Runs on sulfuric rain", "A factory hung from the clouds", "Lightning-fed mining drones",
-                 "Mines where steel melts", "Built to survive 90 atmospheres"]),
+                 "Mines where steel melts", "Built to survive 90 atmospheres",
+                 "A floating city of a hundred balloons", "A hurricane that carries a fleet"]),
     dict(  # Mercury
          names=["Sunshade Drone", "Solar Lance", "Heat-Sink Barge", "Sunforge Refinery", "Photon Foundry",
-                "Sun-Skimmer Swarm", "Flare Tap", "Corona Engine"],
+                "Sun-Skimmer Swarm", "Flare Tap", "Corona Engine", "Sunshield Citadel", "Daybreak Ark"],
          blurbs=["Hides behind a golden shield", "Burns rock with sunlight", "Carries ore through the heat",
                  "Forges at 400 degrees", "Runs on pure photons", "Dips in and out of the glare",
-                 "Rides the solar flares", "Lives inside the Sun's halo"]),
+                 "Rides the solar flares", "Lives inside the Sun's halo",
+                 "A fortress under a golden shield", "Chases the dawn across the galaxy"]),
     dict(  # Ceres
          names=["Pebble Hopper", "Ice Drill", "Belt Hauler", "Slag Refinery", "Dwarf Foundry", "Belt Swarm",
-                "Gravity Tap", "Collapsar Engine"],
+                "Gravity Tap", "Collapsar Engine", "Belt Citadel", "Rock-Fleet Ark"],
          blurbs=["Hops between floating rocks", "Drills through ancient ice", "Tows rocks through the belt",
                  "Melts slag into pure metal", "A factory on a dwarf planet", "A cloud of tiny diggers",
-                 "Taps the belt's tugging gravity", "A dying star, caged"]),
+                 "Taps the belt's tugging gravity", "A dying star, caged",
+                 "A hollow asteroid full of furnaces", "A thousand rocks in formation"]),
     dict(  # Jupiter
          names=["Gas Scoop", "Storm Lance", "Ammonia Barge", "Hydrogen Refinery", "Red Spot Foundry", "Moon-Hopper Swarm",
-                "Magnetosphere Tap", "Gas Giant Engine"],
+                "Magnetosphere Tap", "Gas Giant Engine", "Great Red Citadel", "Giant's Ark"],
          blurbs=["Skims the clouds for fuel", "Cuts through hurricane winds", "Floats on a sea of gas",
                  "Cracks hydrogen for helium-3", "Forges inside a raging storm", "Hops from moon to moon",
-                 "Drinks lightning and radiation", "Burns a whole planet's worth"]),
+                 "Drinks lightning and radiation", "Burns a whole planet's worth",
+                 "Lives in the eye of a storm", "A fleet with its own weather"]),
     dict(  # Saturn
          names=["Ring Skipper", "Ice-Ring Laser", "Ring Barge", "Cassini Refinery", "Ring Foundry", "Ring Swarm",
-                "Titan Tap", "Hex-Storm Engine"],
+                "Titan Tap", "Hex-Storm Engine", "Ring Citadel", "Ring-Lord Ark"],
          blurbs=["Skips over the ring's ice", "Slices ring ice into diamonds", "Hauls glittering ring dust",
                  "Presses carbon into diamond", "Spins diamonds in the ring plane", "Millions of ring-riding drones",
-                 "Taps Titan's methane seas", "Harnesses the polar hexagon"]),
+                 "Taps Titan's methane seas", "Harnesses the polar hexagon",
+                 "A fortress built into the ring", "A whole ring system in formation"]),
     dict(  # Uranus
          names=["Frost Drone", "Cryo Lance", "Ice-Giant Barge", "Methane Refinery", "Cold Foundry", "Sideways Swarm",
-                "Tilt Tap", "Antimatter Engine"],
+                "Tilt Tap", "Antimatter Engine", "Frost Citadel", "Glacier Ark"],
          blurbs=["Barely warm enough to move", "A beam from absolute cold", "Slides across a frozen sea",
                  "Makes fuel from methane ice", "Works at minus 220 degrees", "Orbits the sideways planet",
-                 "Taps the tilted magnetic field", "Annihilates itself for power"]),
+                 "Taps the tilted magnetic field", "Annihilates itself for power",
+                 "A fortress of frozen glass", "A drifting iceberg of a fleet"]),
     dict(  # Neptune
          names=["Gale Drone", "Deep Lance", "Diamond-Rain Barge", "Crystal Refinery", "Trident Foundry", "Tide Swarm",
-                "Triton Tap", "Dark Engine"],
+                "Triton Tap", "Dark Engine", "Abyss Citadel", "Leviathan Ark"],
          blurbs=["Rides the fastest winds", "Cuts the deep blue dark", "Catches falling diamonds",
                  "Grows crystals in the dark", "Forges where it never dawns", "Drifts on slow cold tides",
-                 "Taps the backwards moon", "Powered by what light can't reach"]),
+                 "Taps the backwards moon", "Powered by what light can't reach",
+                 "A fortress at the bottom of the sky", "The deep fleet that never surfaces"]),
     dict(  # Pluto
          names=["Ice Skipper", "Heart Lance", "Frozen Barge", "Nitrogen Refinery", "Charon Foundry", "Kuiper Swarm",
-                "Edge Tap", "Exotic Engine"],
+                "Edge Tap", "Exotic Engine", "Heartland Citadel", "Edge Ark"],
          blurbs=["Skips over nitrogen ice", "Aimed at the glacier's heart", "Drags ore over frozen plains",
                  "Cracks ice into exotic fuel", "A twin world's workshop", "Hunters at the system's edge",
-                 "Taps the last sunlight", "Bends space at the edge"]),
+                 "Taps the last sunlight", "Bends space at the edge",
+                 "A fortress on the nitrogen glacier", "The last fleet at the edge of the Sun"]),
     dict(  # Proxima b
          names=["Spore Drone", "Bloom Lance", "Hive Barge", "Quantum Refinery", "Foam Foundry", "Alien Swarm",
-                "Red-Dwarf Tap", "Foam Engine"],
+                "Red-Dwarf Tap", "Foam Engine", "Bloom Citadel", "Spore Ark"],
          blurbs=["A living seed with an engine", "A beam grown, not built", "A drifting alien hive",
                  "Refines the fabric of space", "Forges bubbles of foam", "Strange minds, many wings",
-                 "Drinks the red dwarf's glow", "Turns quantum foam to power"]),
+                 "Drinks the red dwarf's glow", "Turns quantum foam to power",
+                 "A fortress grown like a flower", "Seeds a thousand worlds"]),
 ]
 
 # How each planet's ships look and move. style: the hull family drawn by shipart.py; pal: the colours (hull, shade, trim,

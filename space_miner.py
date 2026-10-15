@@ -216,7 +216,7 @@ class App:
 
     def ship_sprite(self, p, i, icon=False):
         """The sprite of ship class i on planet p (every planet's fleet looks different)."""
-        size = 46 if icon else round((26 + i * 2) * ships.scale(p))
+        size = 46 if icon else round((26 + i * 2) * (1.3 if i >= gfx.FLEET_TIER else 1.0) * ships.scale(p))
         key = (p, i, size)
         spr = self.ship_cache.get(key)
         if spr is None:
@@ -2617,6 +2617,37 @@ def check_ship_art(app):
         shipart.beam(canvas, style, (100, 100), (180, 150), (255, 200, 120), 1.5, 3)
 
 
+def check_more_ships():
+    """Ten classes everywhere: the tables agree, the new classes are priced and powered on the same ladder, and a save from
+    the time of eight classes still loads."""
+    from core import SHIP_POWER, UPG_BY_ID
+    assert NSH == 10 == len(ships.CLASSES) == len(SHIP_POWER) == len(SHIPS)
+    assert all(len(r["names"]) == NSH and len(r["blurbs"]) == NSH for r in ships.ROSTERS), "a roster misses a class"
+    assert [n for n, *_ in SHIPS] == ships.ROSTERS[0]["names"], "Earth's roster must use the ships' own names"
+    assert all(SHIPS[i + 1][1] > SHIPS[i][1] and SHIPS[i + 1][2] > SHIPS[i][2] and SHIP_POWER[i + 1] > SHIP_POWER[i]
+               for i in range(NSH - 1)), "each class must cost, produce and fight more than the one before"
+    assert all(f"g{i}_{k}" in UPG_BY_ID for i in range(NSH) for k in range(5)), "every class has its upgrades"
+    names = {r["names"][i] for r in ships.ROSTERS for i in (8, 9)}
+    assert len(names) == 2 * len(ships.ROSTERS), "the big classes need a name of their own on every planet"
+    old_save = core.SAVE
+    d = tempfile.mkdtemp(prefix="space_miner_ships_")
+    try:
+        core.SAVE = os.path.join(d, "save.json")
+        g = core.Game(load=False, sim=True)
+        g.owned[0][0], g.owned[0][7] = 5, 3
+        g.save()
+        with open(core.SAVE) as f:
+            data = json.load(f)
+        data["owned"] = [row[:8] for row in data["owned"]]                    # what a save with eight classes holds
+        with open(core.SAVE, "w") as f:
+            json.dump(data, f)
+        h = core.Game(load=True, sim=True)
+        assert all(len(row) == NSH for row in h.owned) and h.owned[0][0] == 5 and h.owned[0][7] == 3 and h.owned[0][9] == 0
+    finally:
+        core.SAVE = old_save
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def check_galaxy():
     """The Milky Way's data and the reach map agree with a brute-force check."""
     N = galaxy.N
@@ -2656,7 +2687,7 @@ def check_fronts():
         assert abs(win_chance(core.power_for(1000.0, c), 1000.0) - c) < 1e-6, "power_for is not the inverse of win_chance"
     g = core.Game(load=False, sim=True)
     g.unlocked[2] = True
-    g.owned = [[200000, 100000, 50000, 20000, 10000, 5000, 2000, 1000] for _ in range(NSITE)]
+    g.owned = [[200000 >> i for i in range(NSH)] for _ in range(NSITE)]
     g.armory[core.JUMP] = 4
     g.recalc()
     fp = g.fleet_power()
@@ -2747,7 +2778,7 @@ def check_counter_offensives():
     def setup():
         g = core.Game(load=False, sim=True)
         g.unlocked[2] = True
-        g.owned = [[200000, 100000, 50000, 20000, 10000, 5000, 2000, 1000] for _ in range(NSITE)]
+        g.owned = [[200000 >> i for i in range(NSH)] for _ in range(NSITE)]
         g.armory[core.JUMP] = 4
         g.armory[core.COMMAND] = 2
         g.recalc()
@@ -2807,6 +2838,7 @@ def selftest_step(app, g, frames, shot):
     if frames == 1:
         check_ship_art(app)
         check_galaxy()
+        check_more_ships()
         check_fronts()
         check_counter_offensives()
         check_new_game_reset()
@@ -2855,7 +2887,7 @@ def selftest_step(app, g, frames, shot):
         g.credits = 1e15; g.science = 1e12
         for k in range(NSITE):
             g.unlocked[k] = True
-            g.owned[k] = [12 + k, 11, 10, 9, 8, 7, 6, 5]
+            g.owned[k] = [12 + k, 11, 10, 9, 8, 7, 6, 5, 4, 3]
             g.bld[k] = [5 + k, 6, 7, 3, 4, 2]
         g.projects = {0, 1, 2}
         g.recalc()
@@ -2909,7 +2941,7 @@ def selftest_step(app, g, frames, shot):
         shot("warpfx")
     if frames == 62:
         # galaxy: campaign, map view, raid
-        g.owned = [[40 + k, 30, 20, 10, 5, 2, 1, 0] for k in range(NSITE)]
+        g.owned = [[40 + k, 30, 20, 10, 5, 2, 1, 0, 0, 0] for k in range(NSITE)]
         g.conquered = {0, 1, 2}
         g.recalc()
         app.tab = T_GALAXY

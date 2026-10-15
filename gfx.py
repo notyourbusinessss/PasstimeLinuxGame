@@ -223,8 +223,46 @@ def make_asteroid(size, seed, tint=(255, 255, 255)):
 
 
 # ------------------------------------------------------------------ ships
+FLEET_TIER = 8       # the classes from here up are formations of the planet's own hulls
+
+
+def make_fleet(tier, color, size, style, pal):
+    """The two biggest classes. Citadel (tier 8): a flagship with its escorts under a halo. Ark (tier 9): a line of three
+    flagships with escorts between them, inside a double halo. Every hull is the planet's own, so the fleet still looks like
+    its planet's; drawn at twice the size and scaled down once, so the small hulls stay sharp."""
+    S = size * 2
+    surf = pygame.Surface((S, S), pygame.SRCALPHA)
+    halo = lerp_c(color, (255, 255, 255), 0.2)
+    c = S / 2
+
+    def ring(r, a, w):
+        layer = pygame.Surface((S, S), pygame.SRCALPHA)
+        pygame.draw.circle(layer, (*halo, a), (c, c), r, w)
+        surf.blit(layer, (0, 0))
+
+    def put(t, fx, fy, frac):
+        spr = make_ship(t, color, max(8, int(S * frac)), style, pal)
+        surf.blit(spr, spr.get_rect(center=(S * fx, S * fy)))
+
+    surf.blit(glow(int(S * 0.5), scale_c(color, 0.35)), (0, 0), special_flags=ADD)
+    if tier == FLEET_TIER:
+        ring(S * 0.43, 140, max(2, S // 44))
+        for fx, fy in ((0.18, 0.27), (0.18, 0.73), (0.62, 0.13), (0.62, 0.87)):
+            put(1, fx, fy, 0.25)
+        put(7, 0.54, 0.5, 0.66)
+    else:
+        ring(S * 0.45, 130, max(2, S // 50))
+        for fx, fy in ((0.11, 0.5), (0.5, 0.1), (0.5, 0.9)):
+            put(3, fx, fy, 0.2)
+        for fx, fy in ((0.7, 0.5), (0.31, 0.27), (0.31, 0.73)):
+            put(7, fx, fy, 0.37)
+    return pygame.transform.smoothscale(surf, (size, size))
+
+
 def make_ship(tier, color, size=40, style="classic", pal=None):
     """Ship class `tier` in `color`; Earth's classic hulls are drawn here, every other planet's in shipart.py."""
+    if tier >= FLEET_TIER:
+        return make_fleet(tier, color, size, style, pal)
     if style != "classic":
         import shipart
         return shipart.make(style, tier, color, size, pal)
