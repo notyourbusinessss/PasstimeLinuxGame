@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.1.0
+
+The galaxy is now the real Milky Way with thousands of systems, you can attack several fronts at once, the enemy can take your systems, and every planet has two more ship classes.
 
 - **Two new ship classes: Citadel and Ark** (10 classes now, with a name, description and look on every planet). They are the biggest ships: a Citadel is a flagship with its escorts, an Ark a line of three flagships, both built from the planet's own hulls, drawn larger and leading the fleets on the galaxy map. They cost 6.0B and 60.0B base, mine 110K and 280K ore/s, fight 1.2x better than the class before, and come with upgrades (68 per planet) and two more "Fan" achievements (182 in total). Old saves load with the new classes at zero. The balancing bot still reaches the Void Throne at about 70 hours.
 - **Multiple fronts.** Attack several systems at the same time: the new **Command** armory track (7 levels) adds one front per level, up to 8. Each attack sends a share of the fleet that is at home - the smallest force that wins with 95% (*Enough*, the default), 25%, 50% or *All* - so splitting the fleet trades odds for speed; losses count only the ships that were sent. The Galaxy tab has a Fronts card with every fleet in the field, the map shows each fleet on its own lane and each siege, the wide map's top bar lists the next arrivals, and the Fleet Admiral fills every free front by itself. Old saves with a running campaign keep it as one front. New achievements: Two-Front War, Multi-Front Command, War on Every Front.
