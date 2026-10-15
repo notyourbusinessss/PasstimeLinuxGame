@@ -39,6 +39,8 @@ SHIPS = [  # name, base cost, ore/sec each, colour
     ("Dyson Swarm",       1.4e6,   1_400,  (255, 245, 130)),
     ("Neutron Tap",       2e7,     7_800,  (110, 255, 235)),
     ("Black Hole Engine", 3.3e8,   44_000, (255, 120, 200)),
+    ("Star Citadel",      6e9,     110_000, (190, 255, 80)),
+    ("Galaxy Ark",        6e10,    280_000, (235, 240, 255)),
 ]
 NSH = len(SHIPS)
 
@@ -236,7 +238,8 @@ FACTIONS = {
     "void": dict(name="Void Cult", col=(175, 110, 255)),
     "devourer": dict(name="The Devourer", col=(255, 80, 200)),
 }
-SHIP_POWER = [1, 3, 9, 27, 81, 243, 729, 2187]          # fleet power of one ship of each type
+SHIP_POWER = [3 ** i for i in range(8)] + [2624, 3149]           # fleet power of one ship of each type (the Citadel and the
+                                                                 # Ark are built to mine and to be seen: 1.2x a class each)
 GALAXY_UNLOCK_PLANET = 2                                # the galaxy map opens when you unlock Mars
 SECTORS = galaxy.STARS            # the Milky Way: thousands of systems (name, faction, position in light-years, power, reward...)
 NSEC = galaxy.N

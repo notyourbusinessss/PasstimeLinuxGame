@@ -23,7 +23,7 @@ def sprite(p, i, size):
 
 
 def game_size(p, i):
-    return round((26 + i * 2) * ships.scale(p))
+    return round((26 + i * 2) * (1.3 if i >= gfx.FLEET_TIER else 1.0) * ships.scale(p))
 
 
 def difference(a, b):
