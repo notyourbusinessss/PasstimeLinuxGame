@@ -110,11 +110,16 @@ class Bot:
                 for p in inc["targets"]:
                     if director.incoming_chance(g, inc, p) < 0.6 and g.credits > 3 * cost:
                         director.fortify(g, inc["id"], p)
-        if g.campaign is None:
+        if g.free_fronts() > 0:               # fill the free fronts, the strongest enemy first, each with the force it needs
             fp = g.fleet_power()
-            options = [k for k in g.targets() if core.win_chance(fp, g.sector_power(k)) >= BOT_CHANCE]
-            if options:
-                g.start_campaign(max(options, key=lambda k: (core.SECTORS[k]["lp"], -core.SECTORS[k]["d"])))
+            winnable = [k for k in g.targets() if g.attacking(k) is None and core.win_chance(fp, g.sector_power(k)) >= BOT_CHANCE]
+            winnable.sort(key=lambda k: (k == core.BOSS, core.SECTORS[k]["lp"], -core.SECTORS[k]["d"]), reverse=True)   # the Throne first
+            for k in winnable:
+                if g.free_fronts() == 0 or g.free_share() < core.MIN_SHARE:
+                    break
+                if core.win_chance(g.free_power(), g.sector_power(k)) < BOT_CHANCE:
+                    break                     # the best target needs more of the fleet than is home: wait for the fleets to return
+                g.start_campaign(k)
         lost = sorted(self.conq_logged - g.conquered)
         for k in lost:
             self.log.append((g.t, f"LOST {core.SECTORS[k]['name']}"))
