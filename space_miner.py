@@ -2656,7 +2656,7 @@ def check_fronts():
         assert abs(win_chance(core.power_for(1000.0, c), 1000.0) - c) < 1e-6, "power_for is not the inverse of win_chance"
     g = core.Game(load=False, sim=True)
     g.unlocked[2] = True
-    g.owned = [[200000, 100000, 50000, 20000, 10000, 5000, 2000, 1000] for _ in range(NSITE)]
+    g.owned = [[200000 >> i for i in range(NSH)] for _ in range(NSITE)]
     g.armory[core.JUMP] = 4
     g.recalc()
     fp = g.fleet_power()
@@ -2747,7 +2747,7 @@ def check_counter_offensives():
     def setup():
         g = core.Game(load=False, sim=True)
         g.unlocked[2] = True
-        g.owned = [[200000, 100000, 50000, 20000, 10000, 5000, 2000, 1000] for _ in range(NSITE)]
+        g.owned = [[200000 >> i for i in range(NSH)] for _ in range(NSITE)]
         g.armory[core.JUMP] = 4
         g.armory[core.COMMAND] = 2
         g.recalc()
