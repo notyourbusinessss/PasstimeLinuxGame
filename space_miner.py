@@ -2246,8 +2246,10 @@ class App:
 
 USAGE = """Space Miner
 
-usage: space-miner [--fullscreen] [--resolution WxH] [--touch] [--debug] [--dev] [--selftest] [--version]
+usage: space-miner [--new-game [--yes]] [--fullscreen] [--resolution WxH] [--touch] [--debug] [--dev] [--selftest] [--version]
 
+  --new-game   erase your save and start over (asks first; --yes skips the question). A copy of the old save is kept
+               next to it as .space_miner_save.json.before-reset-DATE
   --fullscreen start in fullscreen (F11 toggles it any time; the window can also be resized or maximised)
   --resolution WxH   canvas size for this run, e.g. 1920x1080 (the Stats page saves a choice; the default is automatic)
   --touch      the touch-screen interface (tap, drag to scroll, bigger buttons), to try it with a mouse
@@ -2322,6 +2324,52 @@ def choose_resolution(setting, fullscreen):
     return best
 
 
+def new_game_reset(save, yes=False, ask=input, say=print):
+    """--new-game: erase the save (and its backup) so the next start is a brand-new game. The old save is not thrown away: it is
+    renamed to <save>.before-reset-<date>. Returns "none" if there was no save, "reset" when it was erased and "declined" when the
+    answer was not yes (or there was nobody to ask)."""
+    if not os.path.exists(save) and not os.path.exists(save + ".bak"):
+        say("There is no save to erase: a new game starts.")
+        return "none"
+    if not yes:
+        try:
+            answer = ask(f"This erases your save ({save}). A copy is kept next to it. Start over? Type yes to confirm: ")
+        except EOFError:                              # not a terminal: never wipe without an answer
+            say("Not erasing anything: there was nobody to ask. Add --yes to skip the question.")
+            return "declined"
+        if answer.strip().lower() not in ("y", "yes"):
+            say("Nothing was erased.")
+            return "declined"
+    kept = f"{save}.before-reset-{time.strftime('%Y%m%d-%H%M%S')}"
+    for path in (save, save + ".bak", save + ".tmp"):
+        if os.path.exists(path):
+            if path == save:
+                shutil.move(path, kept)
+            else:
+                os.remove(path)
+    say(f"Save erased. The old one was kept as {kept}  (delete that file if you do not want it).")
+    return "reset"
+
+
+def check_new_game_reset():
+    """--new-game: asks, keeps a copy of the old save, removes the backup, and never wipes without a yes."""
+    d = tempfile.mkdtemp(prefix="space_miner_reset_")
+    save = os.path.join(d, "save.json")
+    quiet = lambda *a: None
+    try:
+        assert new_game_reset(save, yes=True, say=quiet) == "none"
+        for p in (save, save + ".bak"):
+            with open(p, "w") as f:
+                f.write("{}")
+        assert new_game_reset(save, ask=lambda q: "no", say=quiet) == "declined" and os.path.exists(save)
+        assert new_game_reset(save, ask=lambda q: (_ for _ in ()).throw(EOFError), say=quiet) == "declined" and os.path.exists(save)
+        assert new_game_reset(save, ask=lambda q: " Yes ", say=quiet) == "reset"
+        assert not os.path.exists(save) and not os.path.exists(save + ".bak"), "the save and its backup must be gone"
+        assert [n for n in os.listdir(d) if ".before-reset-" in n], "a copy of the old save must be kept"
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     if "--help" in sys.argv or "-h" in sys.argv:
         print(USAGE)
@@ -2330,6 +2378,9 @@ def main():
         print(f"Space Miner {__version__}")
         return
     selftest = "--selftest" in sys.argv
+    if ("--new-game" in sys.argv or "--reset" in sys.argv) and not selftest:
+        if new_game_reset(core.SAVE, yes="--yes" in sys.argv) == "declined":
+            return
     dev = "--dev" in sys.argv
     if "--touch" in sys.argv:
         resources.TOUCH = True                      # the touch-screen interface, for trying it with a mouse
@@ -2580,6 +2631,7 @@ def selftest_step(app, g, frames, shot):
     if frames == 1:
         check_ship_art(app)
         check_galaxy()
+        check_new_game_reset()
     if frames == 3:
         for _ in range(25):
             app.space_click()
