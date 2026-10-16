@@ -222,7 +222,7 @@ The solar system ends at the **Kuiper Belt**: a dwarf world of ice with dark tho
 
 ![The Kuiper Belt and its fleet](screenshots/72-kuiper-belt.png)
 
-**The planets of other stars.** Liberating a star shows you what orbits it. Open the **Planets** tab and its **Other systems** page: every world you have found, nearest star first, with filters (*All*, *Habitable*, *Rocky*, *Giants*, and the star you selected on the map), a card with the world's picture, size, temperature, year and distance from its star, and a *Show on the map* button. The map's bar tells you how many worlds a system you hold has, a toast announces the stars with real planets or a habitable world, and the Planets tab shows a dot while there are worlds you have not looked at.
+**The planets of other stars.** Liberating a star shows you what orbits it. Open the **Planets** tab and its **Other systems** page: every world you have found, nearest star first, with filters (*All*, *Habitable*, *Rocky*, *Giants*, and the star you selected on the map), a card with the world's picture, size, temperature, year and distance from its star, and a *Show on the map* button. The map's bar tells you how many worlds a system you hold has, a toast announces the stars with real planets and the first habitable world you find, and the Planets tab shows a dot while there are worlds you have not looked at.
 
 ![The Other systems page: the real planets of TRAPPIST-1 and Proxima Centauri](screenshots/78-other-systems.png)
 
