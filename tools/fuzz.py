@@ -167,7 +167,7 @@ def main():
                         app.pl_page = rng.randrange(3)                                  # the Planets tab: Solar system / Colonies / All worlds
                         app.tab = sm.T_PLANETS if rng.random() < 0.6 else app.tab
                     elif r < 0.955:
-                        rng.choice((app.toggle_gal_wide, app.leave_galaxy, lambda: app.strip_click(-1), lambda: app.strip_click(-4)))()
+                        rng.choice((app.toggle_gal_wide, app.leave_galaxy, lambda: app.strip_click(-1), lambda: app.strip_click(-4), app.cycle_perf))()
                     elif r < 0.97:
                         app.set_resolution_choice(rng.choice(["auto", "1280x720", "1600x900", "1920x1080", "1600x720", "2560x1440"]))
                     elif r < 0.98:                                                          # the black hole and its bomb

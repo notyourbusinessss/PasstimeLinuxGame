@@ -130,6 +130,9 @@ class App:
         self.res_override = None            # --resolution WxH from the command line (not saved)
         self.war_confirm = 0.0
         self.war_confirm_k = None
+        self.fb, self.fb_key = None, None                              # the baked backdrop of the fast (phone) mode and what it was baked for
+        self.pc, self.pc_t, self.pc_dirty, self.pc_key, self.pc_btns = None, -9.0, True, None, []     # the panel, drawn a few times a second (fast mode)
+        self.txt_cache, self.ast_rot = {}, {}                          # rendered texts, and asteroids turned to an angle
         self.sys_k, self.sys_sel = None, None                           # the system view: the star shown and the selected body
         self.hud_btns = []
         self.orb_hits, self.orb_btns, self.orb_hover = [], [], None     # ...what was drawn last frame, for the clicks
@@ -354,6 +357,7 @@ class App:
 
     def mouse_down(self, pos, touch=False):
         g = self.g
+        self.pc_dirty = True                           # (fast mode: the panel is drawn again at once after a click or a tap)
         grow = 8 if touch else 0                       # fingers are fatter than a mouse pointer
         if g.event:
             for rect, fn in reversed(self.modal_buttons):
@@ -445,6 +449,7 @@ class App:
 
     def set_tab(self, k):
         self.tab = k
+        self.pc_dirty = True
 
     def attack(self, k):
         """ATTACK / DECLARE WAR on the Galaxy tab: invading a faction at peace needs a second click."""
@@ -454,6 +459,64 @@ class App:
             return
         self.war_confirm = 0.0
         g.start_campaign(k)
+
+    @property
+    def fast(self):
+        """Fast mode, for slow machines (phones draw in software): the backdrop with its stars, glow, vignette and panel is baked into one
+        picture, the panel is drawn a few times a second and the game runs at 30 frames a second. The Stats page chooses: Auto (the
+        phone's touch interface), On or Off."""
+        mode = self.g.settings.get("perf", "auto")
+        return mode == "on" or (mode == "auto" and resources.TOUCH)
+
+    def cycle_perf(self):
+        st = self.g.settings
+        nxt = {"auto": "on", "on": "off", "off": "auto"}[st.get("perf", "auto")]
+        st["perf"] = nxt
+        self.fb_key = None
+        self.pc_dirty = True
+        self.g.toast("Fast mode: " + {"auto": "automatic (on for phones)", "on": "always on", "off": "off"}[nxt], 3)
+
+    def fast_backdrop(self):
+        """The whole backdrop of the planet and system views in one picture: the sky with its stars and the planet's glow, the vignette and the
+        side panel's background. Made once for what is on screen (it takes a few milliseconds) and then drawn with one plain blit."""
+        g = self.g
+        gal = self.view == "galaxy"
+        key = (W, H, id(self.bg), gal, self.panel_visible(), None if gal else g.sites[g.cur]["id"] if self.view == "system" else 0)
+        if self.fb is None or self.fb_key != key or self.fb.get_size() != (W, H):
+            surf = (self.gal_backdrop if gal else self.bg).copy()
+            if not gal:
+                for x, y, d, ph, col in self.stars:                         # the stars, still (they do not twinkle in fast mode)
+                    if d >= 1.0:
+                        r = 4 if d < 1.5 else 6
+                        surf.blit(glow(r, scale_c(col, 0.8)), (x - r, y - r), special_flags=ADD)
+                    else:
+                        v = int(80 + 110 * 0.8 * d)
+                        surf.set_at((int(x), int(y)), (v, v, min(255, v + 25)))
+                if self.view == "system":
+                    surf.blit(glow(280, scale_c(g.sites[g.cur]["col"], 0.22)), (CX - 280, CY - 280), special_flags=ADD)
+            surf.blit(self.vig, (0, 0), special_flags=pygame.BLEND_RGB_MULT)
+            if self.panel_visible():
+                surf.blit(self.panel_bg, (PANEL.x - 12, 4))
+            self.fb, self.fb_key = surf.convert(), key
+        return self.fb
+
+    def draw_panel_fast(self, scr, fonts):
+        """The side panel in fast mode: it is drawn on a picture of its own a few times a second (or at once when you touch something or scroll)
+        and that picture is what each frame draws; the buttons it made stay as they were."""
+        key = (self.tab, self.scroll[self.tab], PANEL.x, PANEL.w, W, H)
+        if self.pc is None or self.pc.get_size() != (W, H) or self.pc_dirty or key != self.pc_key or self.t - self.pc_t >= 0.12 or self.t < self.pc_t:
+            if self.pc is None or self.pc.get_size() != (W, H):
+                self.pc = pygame.Surface((W, H)).convert()
+            area = pygame.Rect(PANEL.x - 12, 0, W - (PANEL.x - 12), H)
+            self.pc.blit(self.fast_backdrop(), area.topleft, area)
+            n0 = len(self.buttons)
+            self.draw_panel(self.pc, fonts)
+            self.pc_btns = self.buttons[n0:]
+            self.pc_t, self.pc_dirty, self.pc_key = self.t, False, key
+        else:
+            self.buttons.extend(self.pc_btns)
+        area = pygame.Rect(PANEL.x - 12, 0, W - (PANEL.x - 12), H)
+        scr.blit(self.pc, area.topleft, area)
 
     def orbit_area(self):
         """The part of the window the system view uses: everything left of the side panel and above the planet strip."""
@@ -865,11 +928,21 @@ class App:
         self.shooting = [s for s in self.shooting if s[2] < 0.7]
 
     # ---------------- text helpers -----------------
+    def rendered(self, font, text, col):
+        """A text as a picture, kept: drawing the same words again (most of the screen, most frames) costs a blit and no more."""
+        key = (id(font), text, col)
+        img = self.txt_cache.get(key)
+        if img is None:
+            if len(self.txt_cache) > 1500:
+                self.txt_cache.clear()
+            img = self.txt_cache[key] = font.render(text, True, col)
+        return img
+
     def txt(self, surf, font, text, pos, col=(235, 235, 245), anchor="topleft", shadow=False):
         if shadow:
-            sh = font.render(text, True, (0, 0, 8))
+            sh = self.rendered(font, text, (0, 0, 8))
             surf.blit(sh, sh.get_rect(**{anchor: (pos[0] + 2, pos[1] + 2)}))
-        img = font.render(text, True, col)
+        img = self.rendered(font, text, col)
         r = img.get_rect(**{anchor: pos})
         surf.blit(img, r)
         return r
@@ -880,13 +953,16 @@ class App:
         self.buttons = []
         self.modal_buttons = []
         self.hud_btns = []                             # buttons over the scene (not in the panel)
-        if self.view == "galaxy":                      # a different place: the star chart, not the planet's sky
+        fast = self.fast
+        if fast:                                       # one picture: sky, stars, glow, vignette and the panel's background
+            scr.blit(self.fast_backdrop(), (0, 0))
+        elif self.view == "galaxy":                    # a different place: the star chart, not the planet's sky
             scr.blit(self.gal_backdrop, (0, 0))
         else:
             scr.blit(self.bg, (0, 0))
             self.draw_stars(scr)
         site = self.g.sites[g.cur]
-        if self.view == "system":
+        if self.view == "system" and not fast:
             scr.blit(glow(280, scale_c(site["col"], 0.22)), (CX - 280, CY - 280), special_flags=ADD)
         if g.buff_mult > 1.5 and self.view == "system":
             k = 0.6 + 0.4 * math.sin(self.t * 6)
@@ -900,7 +976,8 @@ class App:
             self.draw_raiders(scr)
             self.draw_crate(scr)
         self.draw_fx(scr, fonts[1])
-        scr.blit(self.vig, (0, 0), special_flags=pygame.BLEND_RGB_MULT)
+        if not fast:
+            scr.blit(self.vig, (0, 0), special_flags=pygame.BLEND_RGB_MULT)
         if self.view == "galaxy":
             self.fv.draw_overlay(scr, fonts)
         if self.view_t < 0.45:                         # fade in when the view changes
@@ -912,7 +989,12 @@ class App:
             self.draw_dev_badge(scr, fonts)
         self.draw_strip(scr, fonts)
         if self.panel_visible():
-            self.draw_panel(scr, fonts)
+            if fast:
+                self.draw_panel_fast(scr, fonts)
+            else:
+                self.draw_panel(scr, fonts)
+        if g.settings.get("show_fps"):
+            self.txt(scr, fonts[3], f"{self.fps:.0f} FPS", (PANEL.x - 22, H - 66), (255, 220, 140), "topright", True)
         self.draw_toasts(scr, fonts[2])
         self.draw_banner(scr, fonts)
         if g.event:
@@ -1003,7 +1085,13 @@ class App:
             sprs = self.get_ast_sprites(g.cur)
             spr = sprs[a["spr"]]
             sc = 0.55 + 0.45 * a["hp"]
-            img = pygame.transform.rotozoom(spr, a["rot"], sc)
+            q, zq = int(a["rot"] / 6) % 60, int(round(sc * 20))             # (turned in steps of 6 degrees and 0.05 of size, kept)
+            key = (g.sites[g.cur]["id"], a["spr"], q, zq)
+            img = self.ast_rot.get(key)
+            if img is None:
+                if len(self.ast_rot) > 4000:
+                    self.ast_rot.clear()
+                img = self.ast_rot[key] = pygame.transform.rotozoom(spr, q * 6, zq / 20)
             scr.blit(img, img.get_rect(center=(x, y)))
             oc = self.g.sites[g.cur]["ocol"]
             for off in (0.0, 2.4):
@@ -1509,7 +1597,8 @@ class App:
     def draw_panel(self, scr, fonts):
         big, med, sm, tiny = fonts
         g = self.g
-        scr.blit(self.panel_bg, (PANEL.x - 12, 4))
+        if not self.fast:                              # (fast mode has the background in its baked picture)
+            scr.blit(self.panel_bg, (PANEL.x - 12, 4))
         tw = PANEL.w // len(self.tabs)
         for k, n in enumerate(self.tabs):                       # the tabs: an icon over the name, the number of the key in the corner
             r = pygame.Rect(PANEL.x + k * tw, 10, tw - 4, 44)
@@ -2619,6 +2708,16 @@ class App:
                         enabled=self.can_scale, panel=True, col=(50, 70, 110))
             self.txt(scr, tiny, f"Now {W}x{H}. Bigger = sharper and roomier, but needs a faster computer.", (PANEL.x + 192, y + 11), (150, 158, 190))
             y += 48
+        mode = st.get("perf", "auto")
+        self.button(scr, pygame.Rect(PANEL.x, y, 180, 36), f"Fast mode: {mode.upper()}", sm, self.cycle_perf, panel=True,
+                    col=(60, 120, 90) if self.fast else (50, 70, 110))
+        self.txt(scr, tiny, "For slow phones and computers: a lighter picture, 30 frames a second. Auto = on for phones.", (PANEL.x + 192, y + 4), (150, 158, 190))
+        self.txt(scr, tiny, f"Now {'ON' if self.fast else 'OFF'}.", (PANEL.x + 192, y + 19), (150, 158, 190))
+        y += 48
+        self.button(scr, pygame.Rect(PANEL.x, y, 180, 36), f"Show FPS: {'ON' if st.get('show_fps') else 'OFF'}", sm,
+                    lambda: st.__setitem__("show_fps", not st.get("show_fps")), panel=True,
+                    col=(60, 120, 90) if st.get("show_fps") else (50, 70, 110))
+        y += 48
         self.button(scr, pygame.Rect(PANEL.x, y, 200, 40), "Save now", sm,
                     lambda: (g.save(), g.toast("Game saved.", 2)), panel=True)
         self.button(scr, pygame.Rect(PANEL.x + 220, y, 280, 40),
@@ -2761,11 +2860,10 @@ def open_window(w, h, fullscreen=False):
 
 
 def android_canvas(dw, dh):
-    """A canvas with the shape of the phone's screen (so it fills it without black bars), at least 1280x720."""
+    """A canvas with the shape of the phone's screen (so it fills it without black bars) and 1280 pixels along its long side: the phone
+    draws in software, so every pixel saved is time saved (1280x576 on a 20:9 screen is a third fewer pixels than 1600x720)."""
     aspect = max(dw, dh) / max(1, min(dw, dh))
-    if aspect >= 16 / 9:
-        return round(720 * aspect), 720
-    return 1280, round(1280 / aspect)
+    return 1280, max(540, round(1280 / aspect))
 
 
 def choose_resolution(setting, fullscreen):
@@ -2916,7 +3014,7 @@ def main():
     try:
         while running:
             try:
-                raw = clock.tick(60) / 1000.0
+                raw = clock.tick(30 if app.fast else 60) / 1000.0
                 dt = min(raw, 0.25)
                 if selftest:
                     dt = 0.05
@@ -2999,7 +3097,7 @@ def main():
                         running = False
                 elif time.monotonic() - last_beat >= 300:                       # a line every 5 minutes: what was going on
                     secs = time.monotonic() - last_beat
-                    gamelog.LOG.info("alive: %.0f fps average, slowest frame %.0f ms | %s", beat_frames / secs, slowest * 1000,
+                    gamelog.LOG.info("alive: %.0f fps average, slowest frame %.0f ms, fast mode %s | %s", beat_frames / secs, slowest * 1000, "on" if app.fast else "off",
                                      app.describe().splitlines()[0])
                     last_beat, beat_frames, slowest = time.monotonic(), 0, 0.0
             except Exception:
@@ -3721,6 +3819,92 @@ def check_hole_ui(app):
         app.ascend_boom, app.ascend_len, app.ascend_fx = False, 3.4, 0.0
         app.set_resolution_choice("auto")
         app.rebuild_view()
+
+
+def check_fast_mode(app):
+    """Fast mode (the phone's): the canvas of a phone, a backdrop baked once, a panel drawn a few times a second whose buttons keep
+    working, cached texts and asteroids; every view draws the same in both modes."""
+    fonts = app_fonts()
+    assert android_canvas(2400, 1080) == (1280, 576) and android_canvas(1920, 1080) == (1280, 720) and android_canvas(1080, 2400) == (1280, 576)
+    assert android_canvas(2340, 1080)[0] == 1280 and 540 <= android_canvas(3200, 1080)[1] <= 600
+    g0, view0, tab0, touch0 = app.g, app.view, app.tab, resources.TOUCH
+    try:
+        g = core.Game(load=False, sim=True)
+        app.g = g
+        app.rebuild_view()
+        for touch, want in ((False, False), (True, True)):
+            resources.TOUCH = touch
+            g.settings["perf"] = "auto"
+            assert app.fast is want
+        g.settings["perf"] = "on"
+        assert app.fast
+        g.settings["perf"] = "off"
+        resources.TOUCH = True
+        assert not app.fast
+        g.settings["perf"] = "auto"
+        app.cycle_perf(); assert g.settings["perf"] == "on" and app.fast
+        app.cycle_perf(); assert g.settings["perf"] == "off" and not app.fast
+        app.cycle_perf(); assert g.settings["perf"] == "auto"
+        resources.TOUCH = False
+        g.credits = 1e30
+        for k in range(1, 4):
+            g.unlocked[k] = True
+        for q in range(NSOL):
+            g.ore[q] = 1e30
+        for mode in ("on", "off"):
+            g.settings["perf"] = mode
+            for res in ("1280x576", "1280x720", "1920x1080", "1600x720"):
+                app.set_resolution_choice(res)
+                for view in ("system", "orbit", "galaxy"):
+                    for tab in range(len(app.tabs)):
+                        app.view, app.tab = view, tab
+                        app.sys_k = 0
+                        app.update(0.016)
+                        app.draw(app.scr, fonts)
+        app.set_resolution_choice("1280x576")
+        assert (W, H) == (1280, 576) and PANEL.right <= W and PANEL.bottom <= H
+        # the panel is drawn a few times a second: the frames in between keep its buttons, and a tap shows its result at once
+        g.settings["perf"] = "on"
+        app.view, app.tab, app.gal_wide = "system", T_SHIPS, False
+        app.update(0.016); app.draw(app.scr, fonts)
+        n = len(app.buttons)
+        assert n > 10 and app.pc is not None and app.pc_key[0] == T_SHIPS
+        t0 = app.pc_t
+        app.update(0.016); app.draw(app.scr, fonts)
+        assert app.pc_t == t0 and len(app.buttons) == n, "the panel is not drawn again every frame"
+        tab_btn = next(r for r, fn in app.buttons if r.y < 60 and r.x > PANEL.x + 3 * (PANEL.w // len(app.tabs)))     # a tab to the right
+        app.mouse_down(tab_btn.center)
+        assert app.tab != T_SHIPS and app.pc_dirty
+        app.update(0.016); app.draw(app.scr, fonts)
+        assert app.pc_key[0] == app.tab and not app.pc_dirty
+        app.scroll[app.tab] += 40
+        app.update(0.016); app.draw(app.scr, fonts)
+        assert app.pc_key[1] == app.scroll[app.tab], "scrolling draws the panel again at once"
+        for _ in range(10):                                   # and it is drawn again a few times a second all the same
+            app.update(0.05); app.draw(app.scr, fonts)
+        assert app.t - app.pc_t < 0.2
+        # the baked backdrop follows what is shown
+        fb = app.fb
+        app.view = "galaxy"; app.draw(app.scr, fonts)
+        assert app.fb is not fb
+        app.view = "system"; app.draw(app.scr, fonts)
+        # cached texts and turned asteroids
+        f = fonts[3]
+        assert app.rendered(f, "cache me", (1, 2, 3)) is app.rendered(f, "cache me", (1, 2, 3))
+        assert app.ast_rot and len(app.ast_rot) < 4001
+        # the Stats page has the switches
+        app.tab = T_AWARDS
+        app.awards_cat = "Stats"
+        g.settings["show_fps"] = True
+        app.update(0.016); app.draw(app.scr, fonts)
+        g.settings["show_fps"] = False
+    finally:
+        resources.TOUCH = touch0
+        app.g, app.view, app.tab = g0, view0, tab0
+        app.awards_cat = "All"
+        app.set_resolution_choice("auto")
+        app.rebuild_view()
+        app.fb, app.pc_dirty = None, True
 
 
 def check_worlds_ui(app):
@@ -4483,6 +4667,7 @@ def selftest_step(app, g, frames, shot):
         check_attack_ui(app)
         check_sysview_ui(app)
         check_hole_ui(app)
+        check_fast_mode(app)
     if frames == 79:
         shot("ascension")
     if frames == 80:

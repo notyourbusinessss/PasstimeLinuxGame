@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.2
+
+Much faster on phones.
+
+- **Fast mode** (on by default on Android; *Awards -> Stats -> Settings -> Fast mode*: Auto / ON / OFF, which also works on a computer): the backdrop (sky, stars, glow round the planet, vignette, the panel's background) is one picture made once instead of several full-screen blends every frame, the side panel is drawn a few times a second (at once when you tap or scroll), and the game runs at 30 frames a second. In the planet view a frame takes about half of what it did on the test computer, and spares a phone's processor the full-screen blends it does slowly.
+- **Cheaper frames everywhere:** texts are kept instead of being painted again every frame, asteroids are turned in steps and kept instead of being rotated every frame, the galaxy map keeps its scaled backdrop while the camera does not move (it was the most expensive thing the map did), the fleet's power is worked out once a frame instead of a dozen times, and the 200 achievement conditions are looked at twice a second.
+- **A phone's canvas is 1280 pixels along its long side** (1280x576 on a 20:9 screen, a third fewer pixels than before).
+- **Show FPS** in the settings, and the five-minute line of the log now says whether fast mode was on.
+
 ## 2.0.1
 
 A cleaner black hole at the Void Throne.

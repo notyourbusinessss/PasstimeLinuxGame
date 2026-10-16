@@ -46,7 +46,9 @@ Space Miner also runs on Android phones and tablets (landscape).
 
 ![The galaxy map on a phone](screenshots/54-android-galaxy.png)
 
-The canvas is made to match the shape of the screen (for example 1600x720 on a 20:9 phone), so it fills it without black bars; the buttons on the galaxy map are bigger and taps are forgiving. There is no Dev tab, and no Fullscreen or Size settings (the game always fills the screen). On a small phone the text is small - it is more comfortable on a tablet or a large phone.
+The canvas is made to match the shape of the screen and is 1280 pixels along its long side (1280x576 on a 20:9 phone), so it fills it without black bars and the phone has fewer pixels to draw; the buttons on the galaxy map are bigger and taps are forgiving. There is no Dev tab, and no Fullscreen or Size settings (the game always fills the screen). On a small phone the text is small - it is more comfortable on a tablet or a large phone.
+
+**Speed.** A phone draws every pixel in software, so the game has a **fast mode** (on by default on a phone): the sky with its stars, the glow round the planet, the vignette and the side panel's background are one picture made once, the panel is redrawn a few times a second instead of every frame (it redraws at once when you tap or scroll), texts and turning asteroids are kept instead of being painted again, the galaxy map keeps its scaled backdrop while you do not move it, and the game runs at 30 frames a second. In *Awards -> Stats -> Settings*, **Fast mode** switches between Auto (on for phones), ON and OFF - it works on a computer too - and **Show FPS** puts a frame counter at the bottom of the planet view. The log (`logs/` in the app's folder) has a line every five minutes with the average frame rate and whether fast mode was on.
 
 **Build it yourself** (Linux, Java 17, about 10 GB of disk for the Android SDK and NDK; the first build takes a while):
 

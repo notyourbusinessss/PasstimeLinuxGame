@@ -107,6 +107,7 @@ class FrontView:
         self.bg_view = None             # its cached, scaled piece for the current camera
         self.terr = None                # territory layer: a glow for every system you hold, in the painted galaxy's pixels
         self.terr_held = set()
+        self._pcache = {}               # the last scaled piece of each painted layer (see _piece)
         self.terr_range = -1.0
         self.mini = None
         self.known = []
@@ -400,8 +401,10 @@ class FrontView:
             self.first_open = False
             self.home(snap=True)
 
-    def _piece(self, layer, key, smooth_ok=True):
-        """The part of a world-sized layer the camera sees, scaled to the screen (None if nothing is on screen)."""
+    def _piece(self, layer, key, smooth_ok=True, fade=1.0, stamp=0):
+        """The part of a world-sized layer the camera sees, scaled to the screen (None if nothing is on screen), dimmed by fade. The last
+        one made for each layer is kept: while the camera does not move (most of the time) it costs nothing, where scaling a big picture
+        to the screen every frame is the most expensive thing the map does. stamp says whether the layer itself has changed."""
         half = SPAN / 2
         vx0, vy0, vx1, vy1 = VIEW.x, VIEW.y, VIEW.right, VIEW.bottom - BAR
         wx0, wx1 = self.cx + (vx0 - self.mc[0]) / self.s, self.cx + (vx1 - self.mc[0]) / self.s
@@ -419,20 +422,26 @@ class FrontView:
         dh = max(1, int(round(src.h / IMG * SPAN * self.s)))
         if dw > 6000 or dh > 6000:                      # absurdly magnified: skip
             return None
+        at = (int(round(dx0)), int(round(dy0)))
+        ck = (id(layer), stamp, tuple(src), dw, dh, at, smooth_ok, round(fade, 2))
+        hit = self._pcache.get(key)
+        if hit is not None and hit[0] == ck:
+            return hit[1], at
         sub = layer.subsurface(src)
         img = pygame.transform.smoothscale(sub, (dw, dh)) if (smooth_ok and dw < src.w) else pygame.transform.scale(sub, (dw, dh))
-        return img, (int(round(dx0)), int(round(dy0)))
+        if fade < 1.0:
+            img.fill((int(255 * fade),) * 3, special_flags=pygame.BLEND_RGB_MULT)
+        self._pcache[key] = (ck, img)
+        return img, at
 
     def draw_backdrop(self, scr):
         m = self.s * SPAN / IMG                          # screen pixels per pixel of the painted galaxy
         if m > 14:
             return
-        piece = self._piece(self.ensure_bg(), "bg")
+        fade = max(0.0, 1.0 - (m - 3) / 11.0) if m > 3 else 1.0        # too magnified to look good: fade it out
+        piece = self._piece(self.ensure_bg(), "bg", fade=fade)
         if piece:
             img, at = piece
-            if m > 3:                                    # too magnified to look good: fade it out
-                f = max(0.0, 1.0 - (m - 3) / 11.0)
-                img.fill((int(255 * f),) * 3, special_flags=pygame.BLEND_RGB_MULT)
             scr.blit(img, at, special_flags=ADD)
 
     def update_territory(self, g):
@@ -461,12 +470,10 @@ class FrontView:
         if m > 9:
             return
         self.update_territory(g)
-        piece = self._piece(self.terr, "terr")
+        fade = max(0.0, 1.0 - (m - 2.5) / 6.5) if m > 2.5 else 1.0
+        piece = self._piece(self.terr, "terr", fade=fade, stamp=(len(self.terr_held), sum(self.terr_held)))
         if piece:
             img, at = piece
-            if m > 2.5:
-                f = max(0.0, 1.0 - (m - 2.5) / 6.5)
-                img.fill((int(255 * f),) * 3, special_flags=pygame.BLEND_RGB_MULT)
             scr.blit(img, at, special_flags=ADD)
 
     def refresh_known(self, g):

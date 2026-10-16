@@ -616,6 +616,8 @@ class Game:
         self.techs = set()
         self.perks = set()
         self.projects = set()
+        self.ach_t = 0.0                            # time since the achievements were last looked at
+        self._fpm, self._fp_gen = None, 0           # the memo of fleet_power() and the generation of what it depends on
         self.bomb = self.bombs = 0                 # stages of the Black Hole Bomb built; bombs set off over all the Ascensions
         self.dm = self.dm_spent = 0
         self.warps = self.clicks = self.crates = 0
@@ -924,6 +926,7 @@ class Game:
         return self._gal_fx, self._gal_sums
 
     def recalc(self):
+        self._fp_gen += 1                                   # (what the fleet's power depends on may have changed)
         E = dict(ore=1.0, click=1.0, cred=1.0, sci=1.0, disc=0.0, crate=0.0, crate_pay=1.0,
                  dm=1.0, auto=0, autoup=0, autocrate=0, start=0.0, offline=OFFLINE_EFF, minebonus=1.0,
                  clickops=0.0, frenzy=0.0, dmbase=TUNE["dmbase"], travel=1.0, fp=1.0, techcost=1.0, sd=1.0, startplanets=0, keepproj=0, keepsec=0, keeparm=0, startdm=0.0, jump=1.0, autowar=0, autoset=0)
@@ -1510,7 +1513,15 @@ class Game:
         return pw
 
     def fleet_power(self):
-        return sum(self.planet_power(p) for p in range(self.nsite) if self.unlocked[p])
+        """The power of the whole fleet. The map and the panels ask for it a dozen times a frame, so it is worked out once for as long
+        as nothing it depends on changes (recalc, which runs every step, starts it afresh; the ships you have are part of the key)."""
+        key = (self._fp_gen, self.nsite, self.armory[0], sum(sum(o) for o in self.owned))
+        m = self._fpm
+        if m is not None and m[0] == key:
+            return m[1]
+        v = sum(self.planet_power(p) for p in range(self.nsite) if self.unlocked[p])
+        self._fpm = (key, v)
+        return v
 
     def sector_power(self, k):
         return 10 ** (SECTORS[k]["lp"] + TUNE["sshift"] + (TUNE["bshift"] if k == BOSS else 0.0)) * TUNE["cpow"] ** (self.cycle - 1)
@@ -2152,7 +2163,9 @@ class Game:
         if nxt is not None and nxt != self.notified_unlock and self.can_unlock(nxt) and not self.sim:
             self.notified_unlock = nxt
             self.toast(f"You can unlock {self.sites[nxt]['name']}!  (Planets tab)", 6)
-        if not self.sim or int(self.t) % 5 == 0:
+        self.ach_t += dt
+        if (not self.sim and self.ach_t >= 0.5) or (self.sim and int(self.t) % 5 == 0):      # (twice a second is plenty, and it is all of the 200 conditions)
+            self.ach_t = 0.0
             self.check_achievements()
             if not self.sim and "col_hint" not in self.flags and self.colony_options(1):
                 self.flags.add("col_hint")
