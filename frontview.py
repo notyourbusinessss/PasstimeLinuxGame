@@ -14,6 +14,7 @@ import pygame
 import director
 import front
 import generals
+import sysview
 import galaxy
 import gfx
 import resources
@@ -970,7 +971,7 @@ class FrontView:
             return VIEW.y + 34
         camps = sorted(g.campaigns, key=lambda c: c["dur"] - c["t"])
         rows = camps[:4]
-        r = pygame.Rect(VIEW.x + 10, VIEW.y + 36, 272, 40 + 31 * len(rows) + (16 if len(camps) > 4 else 0))
+        r = pygame.Rect(VIEW.x + 10, VIEW.y + 36, 304, 40 + 31 * len(rows) + (16 if len(camps) > 4 else 0))
         bg = pygame.Surface(r.size, pygame.SRCALPHA)
         pygame.draw.rect(bg, (10, 13, 32, 210), bg.get_rect(), border_radius=9)
         pygame.draw.rect(bg, (90, 115, 185, 255), bg.get_rect(), 1, border_radius=9)
@@ -1307,6 +1308,10 @@ class FrontView:
                 bx -= 156
         rect = pygame.Rect(bx - 120, by, 120, bh)
         self.button(scr, rect, "CLOSE LOOK", (lambda k=k: self.focus(k)), sm)
+        if held and sysview.can_open(g, k):
+            bx -= 128
+            rect = pygame.Rect(bx - 132, by, 132, bh)
+            self.button(scr, rect, "OPEN SYSTEM", (lambda k=k: sysview.open_system(app, k)), sm, col=(30, 70, 60), accent=(110, 230, 190))
 
     def draw_tooltip(self, scr, fonts, k, fp):
         app, g = self.app, self.app.g

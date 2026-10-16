@@ -93,6 +93,7 @@ Missing Python or pip? Debian/Ubuntu: `sudo apt install python3 python3-pip pyth
 | Click the planets along the bottom | Travel to an unlocked planet (or open the Planets tab for a locked one) |
 | **1** - **9** | Switch panel tab (Ships, Upgrades, Colony, Planets, Galaxy, Tech, Quests, Warp, Awards) |
 | **G** | Open / close the galaxy map |
+| **S** | Open / close the star system view (the planets of the star you are on, on their orbits) |
 | Mouse wheel over the galaxy map | Zoom in and out (towards the cursor) |
 | Drag on the galaxy map | Pan the map |
 | Drag from a system you hold to a star | Attack it (see [Attacking from the map](#attacking-from-the-map)) |
@@ -235,6 +236,28 @@ About 30 of the game's real stars (TRAPPIST-1, Proxima Centauri, Kepler-186, Tau
 ![The map's bar names the worlds of a system you hold](screenshots/80-map-worlds.png)
 
 They come with achievements of their own: *First Light* to *Worldbuilder* (5,000 worlds), *Goldilocks* to *A Home for Everyone* (habitable worlds), *Known Worlds* and *Exoplanet Archivist* (real planets), *Planetary Zoo* (all ten kinds) and *Seven Sisters* (liberate TRAPPIST-1).
+
+#### Three levels: the galaxy, a star system, a planet
+
+The game now has three places and they open into each other:
+
+- the **galaxy map** (**G**) shows the stars and your war,
+- the **star system view** (**S**, the sun button next to the galaxy button in the strip, the **SYSTEM** chip next to the planet's name, or **OPEN SYSTEM** on the map's command bar and in the Galaxy tab) shows one star with its worlds on their orbits,
+- the **planet view** is where you mine, with its ships and its tabs.
+
+The system view is the Sun's with its twelve planets and the Moon round the Earth (at their real order, the ones you have not found yet are dark shapes), or the star of any system you hold with every one of its worlds: the real planets of TRAPPIST-1 or Proxima Centauri on their real orbits, a generated system for the other stars. Each star looks like what it is (a red dwarf, a binary pair, a red giant, a pulsar with its beams...). Worlds you hold are lit and ringed, the one you are on has a gold ring, a world you can settle or unlock right now pulses, the others wait dimmed.
+
+Click a world to select it. The card at the bottom says what it is, what it makes and what it costs, and its button does the next thing: **TRAVEL HERE** (a second click on a world you hold does the same), **OPEN PLANET**, **SETTLE** or **UNLOCK** - so you can settle the worlds of a star from its own picture. **SHOW THE STAR** and a click on the star show the star's card, the arrow keys step through the worlds, and the bar at the top (**GALAXY > Sol > Earth**) takes you up and down the levels.
+
+![The solar system: the planets on their orbits, the Moon round the Earth, the ones you have not found as dark shapes](screenshots/88-system-sol.png)
+
+![TRAPPIST-1 and its seven real planets: three settled, one ready to settle](screenshots/89-system-trappist.png)
+
+![The map's command bar has an OPEN SYSTEM button for the systems you hold](screenshots/90-open-system.png)
+
+The side panel got a new look at the same time: every tab has an icon (and its key number in the corner), and under the tabs a header names the tab and says in one line what is in it (the planets and colonies you have, the systems and the fleet, the techs and the science, the Dark Matter...), with the buy quantity next to it on the Ships and Colony tabs.
+
+![The planet view: the SYSTEM chip, the new tabs and the header](screenshots/91-planet-header.png)
 
 #### Colony worlds: the whole galaxy is the game
 
@@ -742,6 +765,8 @@ Enemy raids and counter-offensives are included in these numbers (the bot defend
 | `worlds.py` | The planets of the other star systems: real ones from the Open Exoplanet Catalogue, generated ones for the rest, their kinds and the achievements they bring. No pygame |
 | `colonies.py` | Colony worlds: turns any world into a planet you can settle (tier from the strength of its star, ore, bonus, ship family) and holds the balance numbers. No pygame |
 | `worldview.py` | The *Colonies* and *All worlds* pages of the Planets tab and the worlds line of the map's bar |
+| `sysview.py` | The star system view: a star and its worlds on their orbits, the navigation bar and the world card |
+| `icons.py` | The vector icons of the side panel's tabs |
 | `milkyway.py` | The shape of the galaxy (spiral arms, bar, bulge) used to place the systems and to paint the map. No pygame |
 | `sim.py` | A greedy bot that plays the game headless and prints a pacing timeline |
 | `calibrate.py` | Searches for planet, megaproject and enemy-strength values that hit a target timeline using the bot |

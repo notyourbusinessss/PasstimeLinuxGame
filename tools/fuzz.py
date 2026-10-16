@@ -91,7 +91,8 @@ def main():
         app.set_resolution(1280, 720)
         rng = random.Random(SEED)
         keys = [pygame.K_1 + i for i in range(9)] + [pygame.K_g, pygame.K_z, pygame.K_PLUS, pygame.K_MINUS, pygame.K_UP,
-                                                    pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT, pygame.K_SPACE]
+                                                    pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT, pygame.K_SPACE,
+                                                    pygame.K_s, pygame.K_s]
         errors = 0
         for frame in range(FRAMES):
             try:
@@ -153,6 +154,8 @@ def main():
                             app.set_tab(k - pygame.K_1)
                         elif k == pygame.K_g:
                             app.strip_click(-1)
+                        elif app.system_key(k):
+                            pass
                         else:
                             app.galaxy_key(k)
                     elif r < 0.95 and dev:
@@ -163,7 +166,7 @@ def main():
                         app.pl_page = rng.randrange(3)                                  # the Planets tab: Solar system / Colonies / All worlds
                         app.tab = sm.T_PLANETS if rng.random() < 0.6 else app.tab
                     elif r < 0.955:
-                        rng.choice((app.toggle_gal_wide, app.leave_galaxy, lambda: app.strip_click(-1)))()
+                        rng.choice((app.toggle_gal_wide, app.leave_galaxy, lambda: app.strip_click(-1), lambda: app.strip_click(-4)))()
                     elif r < 0.97:
                         app.set_resolution_choice(rng.choice(["auto", "1280x720", "1600x900", "1920x1080", "1600x720", "2560x1440"]))
                     else:
