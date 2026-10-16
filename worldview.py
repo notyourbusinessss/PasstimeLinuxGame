@@ -5,9 +5,12 @@ clicks. The functions take the App, like frontview does, and read the side panel
 """
 import pygame
 
+import colonies
+import core
 import galaxy
 import gfx
 import worlds
+from core import fmt
 from gfx import scale_c
 
 PANEL = pygame.Rect(660, 104, 600, 608)       # the side panel: space_miner shares its own rectangle here (and resizes it in place)
@@ -56,14 +59,18 @@ def has_news(app):
 
 
 def draw_toggle(app, scr, fonts, y):
-    """The two pages of the Planets tab. Returns the y under them."""
+    """The three pages of the Planets tab: the solar system, the colony worlds you can settle, every world you found."""
     big, med, sm_f, tiny = fonts
-    n = worlds.stats(app.g.conquered)["total"]
-    w = (PANEL.w - 8) // 2
-    for i, label in enumerate(["Solar system", f"Other systems ({n:,})"]):
+    g = app.g
+    n = worlds.stats(g.conquered)["total"]
+    ready = sum(1 for k in range(core.NSOL, core.NSITE) if not g.unlocked[k] and g.can_unlock(k))
+    labels = ["Solar system", f"Colonies {g.n_colonies}/{core.NSITE - core.NSOL}", f"All worlds ({n:,})"]
+    w = (PANEL.w - 16) // 3
+    for i, label in enumerate(labels):
         r = pygame.Rect(PANEL.x + i * (w + 8), y, w, 28)
+        dot = (i == 1 and ready > 0 and app.pl_page != 1) or (i == 2 and app.pl_page != 2 and has_news(app))
         app.button(scr, r, label, sm_f, (lambda i=i: set_page(app, i)), col=(78, 100, 176) if app.pl_page == i else (34, 42, 74),
-                   panel=True, selected=app.pl_page == i, dot=i == 1 and app.pl_page == 0 and has_news(app))
+                   panel=True, selected=app.pl_page == i, dot=dot)
     return y + 38
 
 
@@ -144,6 +151,98 @@ def draw_page(app, scr, fonts, y):
     for i in range(first, last):
         draw_row(app, scr, fonts, pygame.Rect(P.x, y + i * ROW_H, P.w, ROW_H - 4), lst[i], w)
     return y + len(lst) * ROW_H
+
+
+CL_FILTERS = [("open", "Open"), ("ready", "Ready"), ("settled", "Settled"), ("locked", "Locked"), ("all", "All")]
+CL_RANK = dict(settled=0, ready=1, waiting=2, locked=3)
+
+
+def colony_state(g, k):
+    """settled; ready (its star is liberated and its tier reached); waiting (liberated, tier not reached yet); locked (star not liberated)."""
+    if g.unlocked[k]:
+        return "settled"
+    c = core.SITES[k]
+    if c["sys"] not in g.conquered:
+        return "locked"
+    return "ready" if g.unlocked[c["tier"]] else "waiting"
+
+
+def draw_colonies(app, scr, fonts, y):
+    """The Colonies page: the 89 real planets of other stars that you can settle and play like the planets of the solar system."""
+    big, med, sm_f, tiny = fonts
+    g = app.g
+    P = PANEL
+    y = draw_toggle(app, scr, fonts, y)
+    ks = list(range(core.NSOL, core.NSITE))
+    state = {k: colony_state(g, k) for k in ks}
+    count = {st: sum(1 for k in ks if state[k] == st) for st in CL_RANK}
+    shown = {"open": count["settled"] + count["ready"] + count["waiting"], "ready": count["ready"], "settled": count["settled"],
+             "locked": count["locked"], "all": len(ks)}
+    app.txt(scr, sm_f, f"{g.n_colonies} of {len(ks)} colony worlds settled", (P.x + 4, y), (230, 232, 250))
+    nxt = colonies.COST_BASE * colonies.COST_GROWTH ** g.n_colonies
+    app.txt(scr, tiny, f"next colony: {nxt:.2g}x the price of its tier", (P.right - 4, y + 4), (160, 170, 200), "topright")
+    y += 24
+    app.txt(scr, tiny, "Liberate a star, reach its planet's tier, then settle it: own ore, fleet, colony, bonus.",
+            (P.x + 4, y), (150, 160, 190))
+    y += 24
+    cw = (P.w - 4 * (len(CL_FILTERS) - 1)) // len(CL_FILTERS)
+    for i, (key, label) in enumerate(CL_FILTERS):
+        on = app.cl_filter == key
+        app.button(scr, pygame.Rect(P.x + i * (cw + 4), y, cw, 26), f"{label} {shown[key]}", tiny, (lambda key=key: set_cl_filter(app, key)),
+                   col=(78, 100, 176) if on else (34, 42, 74), panel=True, selected=on)
+    y += 36
+    pick = [k for k in ks if (app.cl_filter == "all" or (app.cl_filter == "open" and state[k] != "locked") or state[k] == app.cl_filter)]
+    pick.sort(key=lambda k: (CL_RANK[state[k]], k))
+    if not pick:
+        near = []
+        for k in sorted(ks, key=lambda q: galaxy.STARS[core.SITES[q]["sys"]]["d"]):
+            nm = galaxy.STARS[core.SITES[k]["sys"]]["name"]
+            if nm not in near:
+                near.append(nm)
+        app.txt(scr, sm_f, "Nothing here yet." if app.cl_filter != "open" else "No colony world is open yet.", (P.x + 4, y + 4), (200, 205, 230))
+        if app.cl_filter == "open":
+            app.txt(scr, tiny, "Liberate a star with planets. The nearest are " + ", ".join(near[:3]) + ".", (P.x + 4, y + 30), (150, 160, 190))
+        return y + 60
+    good, bad = (130, 255, 150), (230, 130, 130)
+    for k in pick:
+        c = core.SITES[k]
+        st = state[k]
+        star = galaxy.STARS[c["sys"]]
+        lines = [(c["perk"], (170, 175, 205))]
+        rt, ok, fn, dim = None, True, None, False
+        if st == "settled":
+            rt = "YOU ARE HERE" if k == g.cur else "TRAVEL"
+            fn = (lambda k=k: app.strip_click(k)) if k != g.cur else None
+            lines.append((f"{fmt(g.ore[k])} {c['ore']} stored   (+{fmt(g.s_ops[k])}/s)", (205, 210, 230)))
+        elif st == "ready":
+            ores, cr = g.unlock_cost(k)
+            for pp, amt in ores:
+                if amt > 0:
+                    lines.append((f"{fmt(amt)} {core.SITES[pp]['ore']}   (have {fmt(g.ore[pp])})", good if g.ore[pp] >= amt else bad))
+            if cr > 0:
+                lines.append((f"{fmt(cr)} credits   (have {fmt(g.credits)})", good if g.credits >= cr else bad))
+            ok = g.can_unlock(k)
+            rt, fn = "SETTLE", (lambda k=k: g.unlock_planet(k))
+        elif st == "waiting":
+            lines.append((f"Unlock {core.SITES[c['tier']]['name']} (planet {c['tier'] + 1}) first: this world is on its tier", (230, 190, 130)))
+            rt, ok, dim = "WAITING", False, True
+        else:
+            lines.append((f"Liberate {star['name']} ({galaxy.fmt_ly(star['d'])}) to settle it", (230, 190, 130)))
+            rt, ok, dim, fn = "LOCKED", False, True, (lambda s=c["sys"]: show_on_map(app, s))
+        r = pygame.Rect(P.x, y, P.w, 54 + 15 * len(lines))
+        y += r.h + 6
+        if not r.colliderect(P):
+            continue
+        icon = (app.planet_dark[k] if dim else app.planet_icons[k])
+        app.row(scr, fonts, r, c["name"], f"{worlds.KIND_NAMES[c['wkind']]}  -  {star['name']}, {galaxy.fmt_ly(star['d'])}  -  tier {c['tier']}",
+                rt, f"{core.SITES[c['tier']]['name']}-class", ok, c["col"], fn, dim=dim, icon=icon, lines=lines,
+                tcol=c["col"] if not dim else (130, 135, 160))
+    return y
+
+
+def set_cl_filter(app, key):
+    app.cl_filter = key
+    app.scroll[app.tab] = 0
 
 
 def set_filter(app, grp, sysid):

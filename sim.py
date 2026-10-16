@@ -8,7 +8,7 @@ import sys
 import core
 import director
 import generals
-from core import (BUILDINGS, NB, NSH, NSITE, SC, SHIPS, SITES, TECHS, PERKS, GROWTH, geo_max, fmt)
+from core import (BUILDINGS, NB, NSH, NSITE, NSOL, SC, SHIPS, SITES, TECHS, PERKS, GROWTH, geo_max, fmt)
 
 
 def site_mult(g, p):
@@ -53,7 +53,18 @@ def options(g, p):
 
 
 def next_locked(g):
-    return next((k for k in range(1, NSITE) if not g.unlocked[k]), None)
+    return next((k for k in range(1, NSOL) if not g.unlocked[k]), None)         # the next planet of the solar system
+
+
+def colony_to_settle(g, res, cres):
+    """The cheapest colony world the bot can pay for out of what the next solar planet does not need."""
+    for c in range(NSOL, NSITE):
+        if g.unlocked[c] or not g.can_unlock(c):
+            continue
+        ores, cr = g.unlock_cost(c)
+        if all(g.ore[p] - res[p] >= amt for p, amt in ores) and g.credits - cres >= cr:
+            return c
+    return None
 
 
 def reserves(g):
@@ -73,6 +84,7 @@ def reserves(g):
 
 WARP_FRAC = 1.0
 BOT_CHANCE = 0.85
+COLONIES = True                       # col=0: the bot never settles a colony world
 GENERALS = True                       # gens=0: the bot gives its generals no orders (they stay off)
 
 
@@ -207,6 +219,11 @@ class Bot:
                     self.log.append((g.t, f"project {core.PROJECTS[p][0]}"))
                     changed = True
             res, cres = reserves(g)
+            c = colony_to_settle(g, res, cres) if COLONIES else None
+            if c is not None:
+                g.unlock_planet(c)
+                self.log.append((g.t, f"unlock {SITES[c]['name']}"))
+                changed = True
             for p in range(NSITE):
                 if not g.unlocked[p]:
                     continue
@@ -268,6 +285,8 @@ def main():
     global BOT_CHANCE, GENERALS
     BOT_CHANCE = float(kw.pop("bot_chance", 0.85))
     GENERALS = kw.pop("gens", "1") != "0"
+    global COLONIES
+    COLONIES = kw.pop("col", "1") != "0"
     core.apply_tune(**{k: float(v) for k, v in kw.items()})
     global WARP_FRAC
     WARP_FRAC = warp_frac
@@ -294,7 +313,7 @@ def main():
             print(f"{fmt_t(g.t)} planets={g.n_unlocked:2d} techs={len(g.techs):2d} DM={g.dm:<7d} warps={g.warps:<3d} "
                   f"ops(norm)={fmt(g.norm_ops):>8} cred/s={fmt(g.cred_ops):>8} sci/s={fmt(g.sci_ops):>8} "
                   f"G={fmt(g.G)} ships={g.total_ships()} FP={fmt(g.fleet_power())} sectors={len(g.conquered) - 1}")
-        if g.n_unlocked == NSITE and len(g.techs) == len(TECHS) and g.warps > 3 and g.t > 3600 * 20:
+        if g.n_sol == NSOL and len(g.techs) == len(TECHS) and g.warps > 3 and g.t > 3600 * 20:
             pass
     print(f"END {fmt_t(g.t)} planets={g.n_unlocked} techs={len(g.techs)}/{len(TECHS)} DM={g.dm} warps={g.warps} "
           f"achievements={len(g.ach)}/{len(core.ACHIEVEMENTS)}")

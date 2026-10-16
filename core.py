@@ -7,6 +7,7 @@ import shutil
 import time
 from collections import deque
 
+import colonies
 import galaxy
 import gamelog
 import resources
@@ -84,9 +85,13 @@ SITES = [
     dict(name="Kuiper Belt", ore="Tholin", ocol=(255, 175, 255), col=(176, 150, 176), kind="kuiper", bonus=-1,
          perk="Comet harvesters: all ore production x3, buildings x1.5", fx=[("ore", 3)], unlock=(2e17, 4e15, 2.4e13)),
 ]
+NSOL = len(SITES)                 # the planets of the solar system; the colony worlds of other stars (colonies.py) come after them
+assert NSOL == colonies.NSOL
+SITES += colonies.COLONIES
 NSITE = len(SITES)
-SC = [SCALE ** p for p in range(NSITE)]
-CSC = [CSCALE ** p for p in range(NSITE)]
+TIER = list(range(NSOL)) + [c["tier"] for c in colonies.COLONIES]      # the economy tier of every planet: its ore is worth 10 ** tier
+SC = [SCALE ** t for t in TIER]
+CSC = [CSCALE ** t for t in TIER]
 
 # ------------------------------------------------------------------ tech tree (Science)
 TECHS = [  # id, name, science cost, prereqs, description, effects
@@ -143,7 +148,7 @@ def apply_tune(**kw):
     """Rebuild planet unlock prices / tech prices from the knobs."""
     global DM_DIV, DM_POW
     TUNE.update(kw)
-    for k in range(1, NSITE):
+    for k in range(1, NSOL):
         a = 10 ** (UNLOCK_LOG[k - 1] + TUNE["ushift"])
         b = a / TUNE["B"] if k >= 2 else 0
         cr = TUNE["ccoef"] * a ** 0.6 if k >= 3 else 0
@@ -404,7 +409,7 @@ def build_achievements():
             lambda g, i=i: max(o[i] for o in g.owned) >= 100, lambda g, i=i: (max(o[i] for o in g.owned), 100))
     add("Diversified", "Own every ship type on Earth", "Fleet", "bronze", lambda g: all(o > 0 for o in g.owned[0]),
         lambda g: (sum(1 for o in g.owned[0] if o > 0), NSH))
-    ms("Fleet", [("Full Roster", 6, "silver"), ("Fleet Admiral", NSITE, "platinum")],
+    ms("Fleet", [("Full Roster", 6, "silver"), ("Fleet Admiral", NSOL, "platinum")],
        lambda t: f"Own every ship type on {t} planets at once", lambda g: sum(1 for row in g.owned if all(o > 0 for o in row)))
     # --- Planets
     for name, k, tier in [("Moonwalker", 1, "bronze"), ("Red Planet", 2, "bronze"), ("Morning Star", 3, "bronze"),
@@ -412,8 +417,10 @@ def build_achievements():
                           ("Lord of the Rings", 7, "gold"), ("Ice Giant", 8, "gold"), ("Deep Blue", 9, "gold"),
                           ("Edge of the System", 10, "platinum"), ("Last Frontier", 11, "platinum")]:
         add(name, f"Unlock {SITES[k]['name']}", "Planets", tier, lambda g, k=k: g.unlocked[k])
-    ms("Planets", [("Tourist", 5, "bronze"), ("Grand Tour", NSITE, "gold")],
+    ms("Planets", [("Tourist", 5, "bronze"), ("Grand Tour", NSOL, "gold")],
        lambda t: f"Visit {t} different planets", lambda g: len(g.visited))
+    ms("Planets", [("Settler", 1, "bronze"), ("Colonist", 5, "silver"), ("Colonial Empire", 20, "gold"), ("Worlds Without End", 50, "platinum")],
+       lambda t: f"Settle {t} colony world{'s' if t > 1 else ''} of other stars", lambda g: g.n_colonies)
     ms("Planets", [("Frequent Traveler", 10, "bronze"), ("Interplanetary Commuter", 50, "silver"), ("Space Trucker", 250, "gold")],
        lambda t: f"Travel between planets {t} times", lambda g: g.travels)
     # --- Colony
@@ -427,7 +434,7 @@ def build_achievements():
         lambda g: (max(sum(min(x, BMAX) for x in row) for row in g.bld), NB * BMAX))
     # --- Projects
     ms("Projects", [("First Wonder", 1, "bronze"), ("Megabuilder", 4, "silver"), ("Master Builder", 8, "gold"),
-                    ("Wonders of the System", NSITE, "platinum")], lambda t: f"Complete {t} megaprojects", lambda g: len(g.projects))
+                    ("Wonders of the System", NSOL, "platinum")], lambda t: f"Complete {t} megaprojects", lambda g: len(g.projects))
     # --- Science
     ms("Science", [("Eureka!", 1, "bronze"), ("Student", 5, "bronze"), ("Scientist", 15, "silver"), ("Professor", 25, "gold"),
                    ("Omniscient", len(TECHS), "platinum")], lambda t: f"Research {t} techs", lambda g: len(g.techs))
@@ -746,7 +753,7 @@ class Game:
             self.all_norm = float(d["all_norm"]); self.run_norm = float(d["run_norm"])
             self.techs = {t for t in d["techs"] if t in TECH_BY_ID}
             self.perks = {p for p in d["perks"] if p in PERK_BY_ID}
-            self.projects = {int(p) for p in d.get("projects", []) if 0 <= int(p) < NSITE}
+            self.projects = {int(p) for p in d.get("projects", []) if 0 <= int(p) < NSOL}
             self.dm = int(d["dm"]); self.dm_spent = int(d["dm_spent"])
             self.warps = int(d["warps"]); self.clicks = int(d["clicks"]); self.crates = int(d["crates"])
             self.bought = int(d["bought"]); self.bldg = int(d["bldg"])
@@ -874,6 +881,16 @@ class Game:
     def n_unlocked(self):
         return sum(self.unlocked)
 
+    @property
+    def n_sol(self):
+        """The planets of the solar system you have unlocked."""
+        return sum(self.unlocked[:NSOL])
+
+    @property
+    def n_colonies(self):
+        """The colony worlds of other stars you have settled."""
+        return sum(self.unlocked[NSOL:])
+
     def dm_avail(self):
         return self.dm - self.dm_spent
 
@@ -959,7 +976,7 @@ class Game:
             buff *= b["mult"]
         self.buff_mult = buff
         self.G = ((1 + E["dmbase"] * math.sqrt(self.dm)) * ach * E["ore"] * (1 + reactor)
-                  * (1 + 0.05 * (self.n_unlocked - 1)) * buff * self.dev_mult * sd_bonus(self.sd_total))
+                  * (1 + 0.05 * (self.n_sol - 1) + colonies.G_BONUS * self.n_colonies) * buff * self.dev_mult * sd_bonus(self.sd_total))
         self.crate_rate = 1 + E["crate"] + crate
         self.cred_ops = cred * E["cred"] * ach
         self.sci_ops = sci * E["sci"] * ach
@@ -1029,9 +1046,22 @@ class Game:
         return 1 + TUNE["cdiff"] * (self.cycle - 1)
 
     def unlock_cost(self, k):
-        a, b, cr = SITES[k]["unlock"]
-        m = self.cycle_mult()
-        return [(k - 1, a * m * SC[k - 1]), (k - 2, b * m * SC[k - 2] if k >= 2 else 0)], cr * m ** 0.6
+        """(the ore of two earlier planets, the credits) a planet costs. A colony costs a share of the solar planet of its tier, and
+        more for every colony you already hold."""
+        if k >= NSOL:
+            t = TIER[k]
+            a, b, cr = SITES[t]["unlock"]
+            m = self.cycle_mult() * colonies.COST_BASE * colonies.COST_GROWTH ** self.n_colonies
+        else:
+            t = k
+            a, b, cr = SITES[k]["unlock"]
+            m = self.cycle_mult()
+        return [(t - 1, a * m * SC[t - 1]), (t - 2, b * m * SC[t - 2] if t >= 2 else 0)], cr * m ** 0.6
+
+    def can_settle(self, k):
+        """A colony needs its star liberated and the solar planet of its tier unlocked."""
+        c = SITES[k]
+        return k >= NSOL and c["sys"] in self.conquered and self.unlocked[c["tier"]]
 
     def project_cost(self, p):
         ore, cr, sci = project_cost(p)
@@ -1039,7 +1069,7 @@ class Game:
         return ore * m, cr * m ** 0.6, sci * m ** 0.6
 
     def can_unlock(self, k):
-        if k <= 0 or k >= NSITE or self.unlocked[k] or not self.unlocked[k - 1]:
+        if k <= 0 or k >= NSITE or self.unlocked[k] or not (self.can_settle(k) if k >= NSOL else self.unlocked[k - 1]):
             return False
         ores, cr = self.unlock_cost(k)
         return all(self.ore[p] >= amt for p, amt in ores) and self.credits >= cr
@@ -1172,7 +1202,7 @@ class Game:
         return True
 
     def can_buy_project(self, p):
-        if p in self.projects or not self.unlocked[p]:
+        if p >= NSOL or p in self.projects or not self.unlocked[p]:                 # colonies have no megaproject
             return False
         ore, cr, sci = self.project_cost(p)
         return self.ore[p] >= ore and self.credits >= cr and self.science >= sci
@@ -1310,7 +1340,7 @@ class Game:
     def planet_power(self, p, defense=False):
         """Fleet power of the ships stationed on planet p."""
         raw = sum(self.owned[p][i] * SHIP_POWER[i] for i in range(NSH))
-        pw = raw * (1 + 0.1 * p) * self.E["fp"] * 1.2 ** self.armory[0] * self.tech_level()
+        pw = raw * (1 + 0.1 * TIER[p]) * self.E["fp"] * 1.2 ** self.armory[0] * self.tech_level()
         if defense:
             pw *= 1 + 0.1 * self.bld[p][5]
         return pw
@@ -1662,7 +1692,7 @@ class Game:
         for pk in ([only] if only else [SD_BY_ID[i] for i in sorted(self.sd_perks)]):
             for e in pk[4]:
                 if e[0] == "startplanets":
-                    for k in range(1, min(NSITE, 1 + int(e[1]))):
+                    for k in range(1, min(NSOL, 1 + int(e[1]))):
                         if not self.unlocked[k]:
                             self.unlocked[k] = True
                             self.add_ore(k, (SUPPLY + self.E["start"]) * SC[k])
@@ -1942,12 +1972,15 @@ class Game:
             t[1] -= dt
         self.toasts = [t for t in self.toasts if t[1] > 0][-4:]
         # one-time hint when the next planet becomes affordable
-        nxt = next((k for k in range(1, NSITE) if not self.unlocked[k]), None)
+        nxt = next((k for k in range(1, NSOL) if not self.unlocked[k]), None)
         if nxt is not None and nxt != self.notified_unlock and self.can_unlock(nxt) and not self.sim:
             self.notified_unlock = nxt
             self.toast(f"You can unlock {SITES[nxt]['name']}!  (Planets tab)", 6)
         if not self.sim or int(self.t) % 5 == 0:
             self.check_achievements()
+            if not self.sim and "col_hint" not in self.flags and any(self.can_unlock(k) for k in range(NSOL, NSITE)):
+                self.flags.add("col_hint")
+                self.toast("A colony world of another star is ready to settle: Planets tab -> Colonies.", 8)
         if not self.sim:
             self.autosave_t += dt
             if self.autosave_t > 15:

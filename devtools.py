@@ -9,7 +9,7 @@ Using any cheat marks the save as having cheated (which unlocks a secret achieve
 import core
 import director
 import generals
-from core import BMAX, NB, NSH, NSITE, NSEC, ARMORY, STARDUST_PERKS, PERKS, PROJECTS, SC, SITES, TECHS, UPGRADES, ACHIEVEMENTS, fmt
+from core import BMAX, NB, NSH, NSITE, NSOL, NSEC, ARMORY, STARDUST_PERKS, PERKS, PROJECTS, SC, SITES, TECHS, UPGRADES, ACHIEVEMENTS, fmt
 
 EVENT_NAMES = [("Meteor shower", "meteor"), ("Pirate raid", "pirates"), ("Solar flare", "flare"),
                ("Cosmic lottery", "lottery"), ("Derelict ship", "derelict"), ("Alien trader", "trader"),
@@ -60,13 +60,17 @@ def sections(app):
             g.fx("unlock", k)
 
     def unlock_next():
-        k = next((i for i in range(1, NSITE) if not g.unlocked[i]), None)
+        k = next((i for i in range(1, NSITE) if not g.unlocked[i]), None)      # the solar system first, then the colony worlds
         if k is not None:
             unlock(k)
             g.toast(f"{SITES[k]['name']} unlocked (cheat)", 3)
 
     def unlock_all():
-        for k in range(1, NSITE):
+        for k in range(1, NSOL):
+            unlock(k)
+
+    def settle_all():
+        for k in range(NSOL, NSITE):
             unlock(k)
 
     def relock_all():
@@ -333,7 +337,8 @@ def sections(app):
         ]),
         ("Planets", [
             ("Unlock next planet (free)", cheat(unlock_next), False),
-            ("Unlock ALL planets", cheat(unlock_all, "All planets unlocked"), False),
+            ("Unlock ALL solar planets", cheat(unlock_all, "All solar planets unlocked"), False),
+            ("Settle ALL colony worlds", cheat(settle_all, "All colony worlds settled"), False),
             ("Relock everything but Earth", cheat(relock_all), False),
         ]),
         ("Fleet & upgrades", [
@@ -348,7 +353,7 @@ def sections(app):
             (f"{nm}: max all buildings", cheat(lambda: max_buildings()), False),
             ("ALL planets: max all buildings", cheat(lambda: max_buildings(True)), False),
             (f"{nm}: build megaproject", cheat(lambda: g.projects.add(p)), False),
-            ("Build ALL megaprojects", cheat(lambda: g.projects.update(range(NSITE))), False),
+            ("Build ALL megaprojects", cheat(lambda: g.projects.update(range(NSOL))), False),
             ("Remove all megaprojects", cheat(g.projects.clear), False),
         ]),
         ("Tech, perks & quests", [

@@ -8,6 +8,8 @@ Pure data, no pygame.
 """
 import math
 
+import colonies
+
 CLASSES = ["Drone", "Rig", "Barge", "Refinery", "Foundry", "Swarm", "Tap", "Engine", "Citadel", "Ark"]
 
 # per planet (same order as core.SITES): the ten ship names (a plural is made by adding "s") and a one-line description
@@ -128,6 +130,8 @@ LOOKS = [
 ]
 for _r, _look in zip(ROSTERS, LOOKS):
     _r.update(_look)
+for _c in colonies.COLONIES:                      # a colony world flies the ships of the solar planet its kind of world looks like
+    ROSTERS.append(dict(ROSTERS[_c["family"]]))
 
 
 def name(p, i):
