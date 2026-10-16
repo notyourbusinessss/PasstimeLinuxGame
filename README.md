@@ -300,11 +300,11 @@ Power grows with the distance from the Sun, from a few thousand near home to the
 - **Famous places** have rewards of their own (Alpha Centauri: all production x1.3, Sirius: science x2, Procyon: clicks x10, the Orion Nebula, the Crab Nebula, the Galactic Core, the Void Throne...), listed at the end of this section. About 45 of them, from Fomalhaut to Eta Carinae, give smaller bonuses.
 - **Generated systems** give a small bonus that depends on what they are: red and orange dwarfs and clusters add production, yellow dwarfs and blue giants credits, white dwarfs, pulsars and supernova remnants science, binaries, supergiants and neutron stars fleet power, brown dwarfs clicks, black holes Dark Matter, nebulae supply crates, and white stars cheaper ships. Stronger systems give more, and the sum of all of them counts with diminishing returns so that thousands of conquests stay balanced.
 
-![The Galaxy tab: the Jump Drive, the Fronts card and the Fleet Admiral](screenshots/64-jump-drive.png)
+![The Galaxy tab: the Jump Drive, the Campaigns card and the Fleet Admiral](screenshots/64-jump-drive.png)
 
 **Fleet power.** Your fleet's strength comes from the ships you own on all your planets (bigger ships count for far more), boosted by your Weapons upgrades, your Defense Grids, your overall production bonus and the systems you have liberated. It is shown on the Galaxy tab.
 
-**Campaigns.** Pick a system you can reach on the map or in the *Galaxy* tab and press **ATTACK** (or **DECLARE WAR**, if you are at peace with that faction - see [War and peace](#war-and-peace)). The part of your fleet that is sent is committed (see [Fronts](#fronts-several-attacks-at-once)) and a campaign timer runs while you keep playing: longer against stronger systems, plus the flight from your nearest system. When it ends the game rolls the dice using the win chance shown beforehand (it depends on the power sent against the system's).
+**Campaigns.** Pick a system you can reach on the map or in the *Galaxy* tab and press **ATTACK** (or **DECLARE WAR**, if you are at peace with that faction - see [War and peace](#war-and-peace)). The part of your fleet that is sent is committed (see [Generals and wardens](#generals-and-wardens-the-war-on-standing-orders)) and a campaign timer runs while you keep playing: longer against stronger systems, plus the flight from your nearest system. When it ends the game rolls the dice using the win chance shown beforehand (it depends on the power sent against the system's).
 
 - **Victory** - the system is liberated and its **permanent bonus** is yours. You lose a few ships: about 1% of the ships you sent for an even fight, far less for an easy win.
 - **Defeat** - you lose about 8% of the ships you sent and can try again once you are stronger.
@@ -313,33 +313,47 @@ Power grows with the distance from the Sun, from a few thousand near home to the
 
 The **Targets** list at the bottom of the Galaxy tab shows what is in range: the strongest systems you can beat, the easiest ones, or the famous places.
 
-**Fleet Admiral.** The tech of that name (31st in the Tech tree) lets your fleet launch campaigns by itself: against the factions you are **at war with** only, and only against systems that the fleet at home beats with the chosen odds (70%, 85% or 95%), sending just the force that gives those odds. It fills every free front (see below). Switch it on in the Galaxy tab. It never declares a war on its own.
+**Fleet Admiral.** The tech of that name (31st in the Tech tree) lets your fleet launch campaigns by itself: against the factions you are **at war with** only, and only against systems that the manual pool beats with the chosen odds (70%, 85% or 95%), sending just the force that gives those odds. It fills the manual campaign slots; your generals have their own orders (see below). Switch it on in the Galaxy tab. It never declares a war on its own.
 
 ![A system liberated](screenshots/22-sector-liberated.png)
 
-#### Fronts: several attacks at once
+#### Generals and wardens: the war on standing orders
 
-You do not have to wait for a campaign to end: with the **Command** upgrade (Armory, 7 levels) you can run **one more front per level - up to 8 at the same time**. The **Fronts** card at the top of the Galaxy tab shows every fleet in the field with its timer, its win chance and how much of your fleet it carries, and how much of the fleet is still at home.
+You do not have to launch every campaign yourself. **Liberating a famous star earns you a commander for good**: eight **generals** run the offence and four **wardens** the defence. The twelve *command systems* are marked on the map with a ring (gold for a general, blue with a triangle for a warden), and the *Generals* and *Defence* pages of the Galaxy tab list the ones you have still to earn:
 
-![The Fronts card: four fleets out at once](screenshots/66-fronts-panel.png)
+| Command system | Distance | Commander | Role | Trait |
+|---|---|---|---|---|
+| Alpha Centauri | 4.4 ly | Ada Voss | General | Pathfinder: Campaigns are 15% faster |
+| Barnard's Star | 6.0 ly | Bastion Hale | Warden | Bastion: Defence of its region x1.3 |
+| Sirius | 8.6 ly | Mara Okoye | General | Quartermaster: Loses 30% fewer ships |
+| Epsilon Eridani | 10 ly | Ines Marlow | Warden | Bulwark: Defence of its region x1.45 |
+| Tau Ceti | 12 ly | Ilya Brandt | General | Tactician: Fights as if 15% stronger |
+| Vega | 25 ly | Soren Ito | General | Warlord: Runs one more campaign at a time |
+| Arcturus | 37 ly | Zhen Ma | General | Diplomat: Attacks anger the factions half as much |
+| Capella | 43 ly | Tomas Reyes | General | Pathfinder: Campaigns are 15% faster |
+| Aldebaran | 65 ly | Koa Draven | Warden | Citadel: Defence of its region x1.6 |
+| Polaris | 433 ly | Petra Lund | Warden | Aegis: Defence of its region x1.8 |
+| Betelgeuse | 548 ly | Nia Calder | General | Tactician: Fights as if 15% stronger |
+| Cygnus X-1 | 7,200 ly | Yara Quill | General | Warlord: Runs one more campaign at a time |
 
-How much each attack sends is up to the **Send** selector:
+![The Generals page: orders, conditions and army of each general](screenshots/73-generals.png)
 
-| Send | What it does |
-|---|---|
-| **Enough** (the default) | The smallest force that wins with 95%: against weak systems that is a sliver of the fleet, so many fronts fit |
-| **25%** / **50%** | That share of your whole fleet (or what is at home, if less) |
-| **All** | Everything that is at home |
+**Three pools of the fleet.** Your whole fleet is split into the **defence** (a slider on the Defence page, 35% to start), the **armies** of your generals and the **manual pool** that is left for the campaigns you launch yourself with ATTACK (the *Send* selector and the Command track work as before, on the manual pool only). Armies on campaign defend nothing, and the defence never leaves home.
 
-The win chance you see on the attack button is for what would be sent. Losses count only the ships that were sent, and the ships come home when the campaign ends. Splitting the fleet is a trade: **Enough** keeps the odds at 95% but the biggest systems need most of the fleet, and with **All** on one big target nothing is left for a second front (the button says *NO FLEET FREE*; *FRONTS FULL* means every front is busy).
+**A general's orders** are set once, on its card:
+- **Where:** *Heading* ("keep going that way": a compass direction), *Toward a place* (it closes in on a system, one step at a time), *Clear a region* or *Anywhere in reach*. **Pick on map** turns your next click on the map into the order (Esc cancels); a heading shows as an arrow, a place as a dashed line.
+- **Under what circumstances:** the minimum win chance (70% to 95%), whether it may **start a war** or fights only factions at war with you, what it prefers (nearest, weakest, strongest, famous places) and when to stop (never, or after 3 / 10 / 25 / 100 conquests).
+- **Army:** its share of the fleet. A campaign takes only the smallest force that wins with the chosen odds, so a small army takes many weak systems but never one stronger than it can beat.
 
-On the map every fleet sails down its own lane with the share it carries, and the system it besieges gets a ring that fills up as the campaign advances. The slim top bar of the wide map lists the next three fleets to arrive:
+The general then picks its own targets under those orders and runs its own campaigns (an army marches slowly: its campaign takes eight times as long as a strike), levels up with every conquest (*Recruit* to *Warlord*; the *General* and *Warlord* ranks and the *Warlord* trait add simultaneous campaigns) and **pauses after two defeats in a row** until you resume it.
 
-![Four fronts on the map](screenshots/67-fronts-map.png)
+![A general's orders on the map: arrows, dashed lines and the command systems](screenshots/77-map-orders.png)
 
-![Close look at one of them](screenshots/68-fronts-closeup.png)
+**Defence is simple on purpose.** One slider sets how much of the fleet guards your territory. Every region of the galaxy where an enemy at war with you touches your border gets a **posture** - *Skeleton*, *Balanced* or *Fortress* (shares of 1 : 2 : 3.5) - that decides its share of the pool. A system is held by its **garrison** or by its region's share, whichever is bigger, and attacks that arrive in the same region together share it. A **warden** assigned to a region multiplies its defence (x1.3 to x1.8) and, with *Retake* on, sends part of the defence to take back a system you lose there by itself.
 
-The **Fleet Admiral** fills every free front by itself (one launch every few seconds), each with just the force it needs for the odds you chose. Achievements: *Two-Front War*, *Multi-Front Command* (4 at once) and *War on Every Front* (8).
+![The Defence page: the split of the fleet, a posture for each region, the wardens](screenshots/75-defence.png)
+
+**While you are away** the commanders keep fighting by the same rules, for up to 8 hours: campaigns arrive and generals launch new ones, and a message tells you what happened. The enemy never attacks while the game is closed. The dice are saved with the game, so closing and reopening it cannot reroll a battle. Achievements: *Two-Front War*, *Multi-Front Command* (4 campaigns at once) and *War on Every Front* (8).
 
 #### The galaxy screen
 
@@ -388,7 +402,7 @@ The **Galaxy tab** has **Close look**, **Home** and **Whole galaxy** buttons and
 | Shields | 10 | Raid losses -8% per level |
 | Intel | 8 | Enemy attacks are announced earlier and in more detail (see *The Threat Director* below) |
 | Jump Drive | 22 | Jump range x1.5 per level (6 ly at level 0): you can attack any system within range of one you hold |
-| Command | 7 | +1 front per level: attack up to 8 systems at the same time (see [Fronts](#fronts-several-attacks-at-once)) |
+| Command | 7 | +1 manual campaign at a time per level (your generals run their own: see [Generals and wardens](#generals-and-wardens-the-war-on-standing-orders)) |
 
 **Raids.** While you are at war with a faction whose systems border your territory (a system *borders* yours when it is one of its nearest neighbours on the map), it **raids your planets**. Your ships and **Defense Grid** buildings (+10% defense per level) fight them off: you get credits for repelling a raid, or lose some of that planet's ore if the defence fails. If you are on the raided planet you watch it happen:
 
@@ -436,7 +450,7 @@ The enemy is not random: while you are at war, a **Threat Director** watches how
 | System invasion | 8 systems | x6 | 3 at once | 10x the credits | 14% of each planet's ore |
 
   Your Shields upgrade reduces what a lost raid costs.
-- **Counter-offensives** try to **take back a system you liberated** that borders enemy territory. They come from **every enemy faction at war with you at once** (a wave of up to three attacks, never two on the same system) and hit as hard as the enemy next door allows: from 0.8x up to 6x the power of the system they attack, the stronger the enemy system they start from the harder. A system is defended by its **garrison** (the force you sent to take it) or by **the ships you have at home** - half of the fleet that is not out on a campaign, shared between attacks that arrive together - whichever is bigger. So **fleets in the field defend nothing**: an empire that sends everything out and spreads thin is the easiest to take apart, and the enemy grows bolder and strikes sooner while your fleets are away. If a system falls you lose its permanent bonus until you liberate it again (which earns the *Comeback* achievement).
+- **Counter-offensives** try to **take back a system you liberated** that borders enemy territory. They come from **every enemy faction at war with you at once** (a wave of up to three attacks, never two on the same system) and hit as hard as the enemy next door allows: from 0.8x up to 6x the power of the system they attack, the stronger the enemy system they start from the harder. A system is defended by its **garrison** (the force you sent to take it) or by the **defence pool of its region** (see [Generals and wardens](#generals-and-wardens-the-war-on-standing-orders)), whichever is bigger. So **armies on campaign defend nothing**, and an empire with a thin defence, or with its postures on *Skeleton*, is the easiest to take apart; the enemy also grows bolder and strikes sooner while your armies are away or the defence is small. If a system falls you lose its permanent bonus until you liberate it again (which earns the *Comeback* achievement) - or a warden retakes it for you.
 - **Hostility.** Every campaign you start angers the faction you attack: its raids and offensives hit up to 2x harder, and the anger fades over a couple of hours.
 - **Grace periods.** The enemy never attacks while the game is closed, and stays quiet for 10 minutes after you load a save, 15 after a Warp and 20 after an Ascension.
 
@@ -607,7 +621,7 @@ Press **F1** to jump to the Dev tab and back. A red `DEV MODE` badge shows in th
 | Colonies & megaprojects | Max every building, build one or all megaprojects |
 | Tech, perks & quests | Research everything, grant or reset every Dark Matter perk, complete or reroll quests |
 | Events & crates | Trigger any of the 9 random events, spawn a supply crate, start a Mining Frenzy |
-| Galaxy & enemies | Liberate the weakest reachable system / 25 / 250 / every system, liberate the Void Throne, max the Jump Drive, max the Command track (8 fronts), finish or force-win every running campaign, max the armory (and Intel), declare war on everyone / make peace / push a faction to invade, trigger raids you win or lose, summon a small / regional / system raid or a counter-offensive (arrives in seconds), resolve or clear all incoming attacks, lose a sector, anger every faction, skip the enemy's grace period |
+| Galaxy & enemies | Liberate the weakest reachable system / 25 / 250 / every system, liberate the Void Throne, max the Jump Drive, max the Command track, earn every general and warden, promote the generals, resume paused ones, finish or force-win every running campaign, max the armory (and Intel), declare war on everyone / make peace / push a faction to invade, trigger raids you win or lose, summon a small / regional / system raid or a counter-offensive (arrives in seconds), resolve or clear all incoming attacks, lose a sector, anger every faction, skip the enemy's grace period |
 | Ascension (New Game+) | Add Stardust, force an Ascension, grant or refund every Stardust perk |
 | Achievements & warp | Unlock or lock every achievement, force a warp |
 | Game | Save, reload from disk, wipe the save, show an FPS counter |
@@ -648,9 +662,9 @@ Enemy raids and counter-offensives are included in these numbers (the bot defend
 - Don't spend everything. Unlocking the next planet needs a big stockpile of the previous planet's ore, so stop buying ships on it once the progress bar is close.
 - Visit new planets right after unlocking them: clicking there bootstraps a fleet quickly, and each planet bonus helps every other planet.
 - Research *Auto-Drones* and *Auto-Engineers* early and the game mostly plays itself while you travel.
-- Zoom into your fronts (**Z**): systems with red *Vulnerable* shields are the ones the enemy will take back, so Fortify them when an attack is announced - or just send the fleet out and win the fight first.
-- Check the Galaxy tab every so often: a glowing dot appears on it when a front is free and a campaign has a good win chance. Liberating systems is one of the biggest production boosts in the game.
-- Buy **Command** early: with *Enough* selected a weak system costs only a sliver of the fleet, so extra fronts conquer the weak systems around you several times faster. Keep an eye on the share of the fleet at home before you send *All* - while it is out, nothing defends your border.
+- Zoom into your fronts (**Z**): systems with red *Vulnerable* shields are the ones the enemy will take back, so Fortify them when an attack is announced - or raise the defence share and put a *Fortress* posture on that region.
+- Check the Galaxy tab every so often: a glowing dot appears on it when a manual campaign slot is free and a campaign has a good win chance. Liberating systems is one of the biggest production boosts in the game.
+- Liberate Alpha Centauri first: it earns your first **general**. Give it a heading and let it run; add generals as you earn them, and keep the defence share high enough that a lost system stays rare. Before the final assault on the Void Throne, set the defence and the armies low so the whole fleet goes.
 - After the boss, Ascend: spend the Stardust on the planet-starting perks and the "keep" perks first - they make every later cycle much faster.
 - Put credits and science into the Armory (Weapons first) - your win chances jump quickly, and Armor makes failed campaigns cheaper.
 - Peace is yours to break: stay at peace while you build up and invade when you are ready - but the factions on your border will not wait for ever, so keep an eye on their tension bars. A ceasefire is cheap once a war has dragged on.
@@ -666,6 +680,7 @@ Enemy raids and counter-offensives are included in these numbers (the bot defend
 | `space_miner.py` | The game window, input and all the UI |
 | `core.py` | Game rules, state, the galaxy / combat model and the achievement list. No pygame in here, so it runs headless |
 | `director.py` | The Threat Director: aggression, raid and counter-offensive scheduling, Intel warnings, Fortify. No pygame either |
+| `generals.py` | The generals and wardens: command systems, orders and target choice, armies, the defence pool and postures. No pygame either |
 | `front.py` | The frontline model: where each battle line sits, status of a front, garrison and hold chances. No pygame either |
 | `frontview.py` | The zoomable galaxy view: camera, mini-map, fleets and battle lines |
 | `touch.py` | Touch input: taps, drag-to-scroll with momentum, pinch to zoom the galaxy map |

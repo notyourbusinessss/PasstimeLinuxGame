@@ -4,6 +4,14 @@
 
 - **The Kuiper Belt replaces Proxima b** as the 12th and last planet of the solar system: Proxima b belongs to another star, so the first part of the game is now the solar system only. Same place in the game (price, ore production x3, buildings x1.5, megaproject x5), new look: an ice dwarf world with tholin patches, Tholin ore, the *Comet Catchers* megaproject and a fleet of comets and snowballs (Comet Skiff ... Eris Citadel, Halley Ark) that sweep round the planet on long comet orbits. Saves are unchanged (the Interstellar achievement is now Last Frontier and is kept).
 
+## Unreleased
+
+- **Generals and wardens.** The war now runs on standing orders. Liberating one of twelve famous *command systems* (Alpha Centauri, Barnard's Star, Sirius, ... Cygnus X-1) earns you a commander for good: eight **generals** for the offence, four **wardens** for the defence. A general commands an army (a share of the fleet) and carries orders you give once - **where** (a heading on the map, toward a place, clear a region, anywhere) and **under what circumstances** (minimum odds, which factions it may fight and whether it may start a war, what it prefers, when to stop) - and then picks its own targets and runs its own campaigns, offline too. Generals have traits and ranks and pause after two defeats in a row. Pick a direction by clicking on the map; headings show as arrows.
+- **Defence separate from offence.** The fleet is split into a defence pool (a slider, 35% to start), the generals' armies and a manual pool for the campaigns you launch yourself (the Send selector and the Command track now work on that pool). Armies defend nothing; the defence never leaves home. Each region where an enemy at war with you touches your border has a posture (Skeleton / Balanced / Fortress) deciding its share of the pool, and a warden multiplies a region's defence and can retake lost systems by itself.
+- **The war while you are away.** Campaigns now keep going (and generals keep launching new ones) for up to 8 hours of absence, by the same rules as active play; the enemy still never attacks while the game is closed. The dice are saved: reloading cannot reroll a battle.
+- **The Void Throne is about 3x stronger** (a boss-only tuning knob): with the war automated and a defence that holds, the bot-played first Ascension had moved from ~75 to ~47 hours, and this brings it back to 65 - 90.
+- The Galaxy tab has three pages (War room, Generals, Defence); new dev cheats for commanders; the balancing bot gives its generals orders and stands the defence down for the Void Throne.
+
 ## 1.1.0
 
 The galaxy is now the real Milky Way with thousands of systems, you can attack several fronts at once, the enemy can take your systems, and every planet has two more ship classes.

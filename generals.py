@@ -58,7 +58,7 @@ COMMANDER_AT = {k: i for i, k in enumerate(SYSTEM_OF)}
 
 RANKS = [0, 3, 10, 25, 60, 150, 400]                                 # conquests needed for each rank
 RANK_NAMES = ["Recruit", "Captain", "Major", "Colonel", "General", "Marshal", "Warlord"]
-SLOT_RANKS = (2, 4, 6)                                               # ranks that each add a simultaneous campaign
+SLOT_RANKS = (4, 6)                                               # ranks that each add a simultaneous campaign
 GEN_PERIOD = 2.0                                                     # seconds between a general's looks at the map
 IDLE_WAIT = 20.0                                                     # how long it waits after finding no target
 
@@ -72,7 +72,7 @@ POSTURES = ["skeleton", "balanced", "fortress"]
 POSTURE_W = {"skeleton": 1.0, "balanced": 2.0, "fortress": 3.5}
 POSTURE_NAMES = {"skeleton": "Skeleton", "balanced": "Balanced", "fortress": "Fortress"}
 REGIONS = sorted({s["region"] for s in galaxy.STARS[1:]})
-MARCH = 3.0                                                          # an army's campaign takes this much longer than a strike
+MARCH = 8.0                                                          # an army's campaign takes this much longer than a strike
 STOP_DEFEATS = 2                                                     # a general pauses after this many defeats in a row
 WARDEN_RETAKE = 0.3                                                  # share of the defence pool a warden may send to retake
 ARMY_DEFAULT = 0.10
