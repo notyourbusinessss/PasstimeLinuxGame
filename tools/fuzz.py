@@ -23,6 +23,7 @@ import gamelog
 import generals
 import sim
 import space_miner as sm
+import sysview
 
 ARGS = dict(a.split("=") for a in sys.argv[1:] if "=" in a)
 FRAMES = int(ARGS.get("frames", 2500))
@@ -169,6 +170,15 @@ def main():
                         rng.choice((app.toggle_gal_wide, app.leave_galaxy, lambda: app.strip_click(-1), lambda: app.strip_click(-4)))()
                     elif r < 0.97:
                         app.set_resolution_choice(rng.choice(["auto", "1280x720", "1600x900", "1920x1080", "1600x720", "2560x1440"]))
+                    elif r < 0.98:                                                          # the black hole and its bomb
+                        g.conquered.add(core.BOSS)
+                        g.bomb = rng.randrange(6) if rng.random() < 0.5 else g.bomb
+                        if rng.random() < 0.3:
+                            g.ore[core.NSOL - 1] = max(g.ore[core.NSOL - 1], 1e200)
+                            g.credits, g.science = max(g.credits, 1e200), max(g.science, 1e200)
+                            g.unlocked[core.NSOL - 1] = True
+                            g.build_bomb()
+                        sysview.open_system(app, core.BOSS)
                     else:
                         app.select_sector(rng.randrange(1, core.NSEC))
                 dt = rng.choice((0.016, 0.016, 0.033, 0.1, 0.25, 5.0, 60.0)) if rng.random() < 0.97 else rng.choice((600.0, 3600.0))

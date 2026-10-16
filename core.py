@@ -7,6 +7,7 @@ import shutil
 import time
 from collections import deque
 
+import blackhole
 import colonies
 import galaxy
 import gamelog
@@ -485,6 +486,9 @@ def build_achievements():
             lambda g, ids=ids: sum(1 for k in ids if k in g.conquered) >= 100,
             lambda g, ids=ids: (min(100, sum(1 for k in ids if k in g.conquered)), 100))
     add("Devourer's Bane", "Defeat The Devourer on The Void Throne", "Galaxy", "platinum", lambda g: BOSS in g.conquered)
+    add("Bomb Maker", "Build all five stages of the Black Hole Bomb", "Projects", "platinum",
+        lambda g: g.bomb >= blackhole.N or g.bombs > 0, lambda g: (g.bomb if g.bombs == 0 else blackhole.N, blackhole.N))
+    add("Big Bang", "Set off the Black Hole Bomb by Ascending with it armed", "Projects", "platinum", lambda g: g.bombs > 0)
     ms("Galaxy", [("Stargazer", 5, "bronze"), ("Constellation Hunter", 25, "silver"), ("Skywatcher", 60, "gold"),
                   ("Keeper of the Sky", 120, "platinum")],
        lambda t: f"Liberate {t} famous places: real stars, nebulae, pulsars and clusters",
@@ -612,6 +616,7 @@ class Game:
         self.techs = set()
         self.perks = set()
         self.projects = set()
+        self.bomb = self.bombs = 0                 # stages of the Black Hole Bomb built; bombs set off over all the Ascensions
         self.dm = self.dm_spent = 0
         self.warps = self.clicks = self.crates = 0
         self.bought = self.bldg = self.events_done = self.quests_done = 0
@@ -676,7 +681,7 @@ class Game:
                  ups=[sorted(u) for u in self.ups], unlocked=self.unlocked, bld=self.bld,
                  credits=self.credits, all_cred=self.all_cred, science=self.science, all_sci=self.all_sci,
                  all_norm=self.all_norm, run_norm=self.run_norm, techs=sorted(self.techs),
-                 perks=sorted(self.perks), projects=sorted(self.projects), dm=self.dm, dm_spent=self.dm_spent, warps=self.warps,
+                 perks=sorted(self.perks), projects=sorted(self.projects), bomb=self.bomb, bombs=self.bombs, dm=self.dm, dm_spent=self.dm_spent, warps=self.warps,
                  clicks=self.clicks, crates=self.crates, bought=self.bought, bldg=self.bldg,
                  events_done=self.events_done, quests_done=self.quests_done, ach=sorted(self.ach),
                  quests=self.quests, cur=self.cur, play_time=self.play_time, ups_bought=self.ups_bought,
@@ -759,6 +764,7 @@ class Game:
             self.techs = {t for t in d["techs"] if t in TECH_BY_ID}
             self.perks = {p for p in d["perks"] if p in PERK_BY_ID}
             self.projects = {int(p) for p in d.get("projects", []) if 0 <= int(p) < NSOL}
+            self.bomb = max(0, min(blackhole.N, int(d.get("bomb", 0)))); self.bombs = max(0, int(d.get("bombs", 0)))
             self.dm = int(d["dm"]); self.dm_spent = int(d["dm_spent"])
             self.warps = int(d["warps"]); self.clicks = int(d["clicks"]); self.crates = int(d["crates"])
             self.bought = int(d["bought"]); self.bldg = int(d["bldg"])
@@ -1338,6 +1344,46 @@ class Game:
         self.recalc()
         return True
 
+    # ---- the Black Hole Bomb, built at the Void Throne
+    def bomb_cost(self, stage):
+        """(ore, credits, science) of a stage of the bomb: a multiple of the price of the last megaproject."""
+        ore, cr, sci = self.project_cost(NSOL - 1)
+        m = blackhole.STAGES[stage]["mult"]
+        return ore * m, cr * m, sci * m
+
+    def bomb_planet(self):
+        """The planet whose ore pays for the bomb: the richest one you have of the bomb's tier, or None."""
+        have = [p for p in range(self.nsite) if self.tier[p] == blackhole.TIER and self.unlocked[p]]
+        return max(have, key=lambda p: self.ore[p]) if have else None
+
+    def bomb_armed(self):
+        return self.bomb >= blackhole.N
+
+    def can_build_bomb(self):
+        if BOSS not in self.conquered or self.bomb >= blackhole.N:
+            return False
+        p = self.bomb_planet()
+        ore, cr, sci = self.bomb_cost(self.bomb)
+        return p is not None and self.ore[p] >= ore and self.credits >= cr and self.science >= sci
+
+    def build_bomb(self):
+        """Build the next stage of the Black Hole Bomb."""
+        if not self.can_build_bomb():
+            return False
+        p = self.bomb_planet()
+        ore, cr, sci = self.bomb_cost(self.bomb)
+        self.ore[p] -= ore
+        self.credits -= cr
+        self.science -= sci
+        self.bomb += 1
+        if self.bomb >= blackhole.N:
+            self.toast(f"The {blackhole.NAME} is armed! It goes off when you Ascend: Stardust x{blackhole.SD_MULT:g}.", 9)
+        else:
+            self.toast(f"{blackhole.stage_name(self.bomb - 1)} built ({self.bomb}/{blackhole.N}).", 6)
+        log.info("Black Hole Bomb: stage %d built (play time %.1f h)", self.bomb, self.play_time / 3600)
+        self.fx("bomb", self.bomb)
+        return True
+
     def tech_cost(self, tid):
         return TECH_BY_ID[tid][2] * self.E["techcost"]
 
@@ -1800,7 +1846,8 @@ class Game:
 
     def sd_gain(self):
         x = max(0.0, self.cyc_norm / 1e25) ** TUNE["sdpow"]
-        return int((TUNE["sdbase"] + TUNE["sdcoef"] * x) * self.E["sd"] * (1 + 0.1 * self.ascensions))
+        bomb = blackhole.SD_MULT if self.bomb_armed() else 1.0
+        return int((TUNE["sdbase"] + TUNE["sdcoef"] * x) * self.E["sd"] * (1 + 0.1 * self.ascensions) * bomb)
 
     def buy_sd_perk(self, pid):
         pk = SD_BY_ID[pid]
@@ -1830,11 +1877,14 @@ class Game:
         if not (force or self.can_ascend()):
             return False
         gain = max(1, self.sd_gain())
-        log.info("Ascension: +%d Stardust, starting cycle %d", gain, self.cycle + 1)
+        boom = self.bomb_armed()
+        log.info("Ascension: +%d Stardust, starting cycle %d%s", gain, self.cycle + 1, " (the bomb went off)" if boom else "")
         self.stardust += gain
         self.sd_total += gain
         self.cycle += 1
         self.ascensions += 1
+        self.bombs += 1 if boom else 0
+        self.bomb = 0                                                            # a bomb is used up; an unfinished one is lost
         keep_proj = {k for k in self.projects if k < self.E["keepproj"]}
         keep_sec = set(sorted((k for k in self.conquered if k), key=lambda k: SECTORS[k]["d"])[:int(self.E["keepsec"])]) | {0}
         keep_arm = list(self.armory) if self.E["keeparm"] else [0] * len(ARMORY)
@@ -1874,8 +1924,8 @@ class Game:
         add = (SUPPLY + self.E["start"]) * self.sc[0]
         self.add_ore(0, add)
         self.apply_sd_start()
-        self.toast(f"ASCENDED! Cycle {self.cycle} begins.  +{gain} Stardust", 8)
-        self.fx("ascend", dict(gain=gain, cycle=self.cycle))
+        self.toast(f"ASCENDED! Cycle {self.cycle} begins.  +{gain} Stardust" + ("  (the bomb went off: x%g)" % blackhole.SD_MULT if boom else ""), 8)
+        self.fx("ascend", dict(gain=gain, cycle=self.cycle, boom=boom))
         self.save()
         return True
 

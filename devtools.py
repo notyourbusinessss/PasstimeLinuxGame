@@ -6,6 +6,7 @@ These are only reachable when the game is started from a terminal with the --dev
 
 Using any cheat marks the save as having cheated (which unlocks a secret achievement).
 """
+import blackhole
 import core
 import director
 import generals
@@ -360,6 +361,8 @@ def sections(app):
             (f"{nm}: build megaproject", cheat(lambda: g.projects.add(p)), False),
             ("Build ALL megaprojects", cheat(lambda: g.projects.update(range(NSOL))), False),
             ("Remove all megaprojects", cheat(g.projects.clear), False),
+            ("Black Hole Bomb: build every stage", cheat(lambda: setattr(g, "bomb", blackhole.N)), False),
+            ("Black Hole Bomb: take it apart", cheat(lambda: setattr(g, "bomb", 0)), False),
         ]),
         ("Tech, perks & quests", [
             ("Research ALL techs", cheat(research_all), False),

@@ -89,11 +89,13 @@ WARP_FRAC = 1.0
 BOT_CHANCE = 0.85
 COLONIES = True                       # col=0: the bot never settles a colony world
 COLONY_MAX = 60                       # colmax=N: the most colonies the bot settles
+BOMB, BOMB_WAIT = False, 12.0           # bomb=1: build the Black Hole Bomb after the Void Throne (waiting at most bomb_wait hours) before Ascending
 GENERALS = True                       # gens=0: the bot gives its generals no orders (they stay off)
 
 
 class Bot:
     def __init__(self, g, click_rate=4.0, active_after=300.0):
+        self.boss_t, self.bombs_seen = None, 0
         self.g = g
         self.click_rate = click_rate
         self.active_after = active_after
@@ -183,10 +185,20 @@ class Bot:
     def ascend(self):
         g = self.g
         if g.can_ascend():
+            if BOMB:                                          # build the Black Hole Bomb first, for at most BOMB_WAIT hours
+                if self.boss_t is None:
+                    self.boss_t = g.t
+                    self.log.append((g.t, "the Void Throne is ours"))
+                while g.build_bomb():
+                    self.log.append((g.t, f"bomb stage {g.bomb} of {core.blackhole.N}"))
+                if not g.bomb_armed() and g.t - self.boss_t < BOMB_WAIT * 3600:
+                    return
+            self.boss_t = None
             gain, old = g.sd_gain(), g.cycle
             g.ascend()
             self.stand_down()
-            self.log.append((g.t, f"ASCEND to cycle {g.cycle} (+{gain} Stardust, {g.sd_total} total)"))
+            self.log.append((g.t, f"ASCEND to cycle {g.cycle} (+{gain} Stardust, {g.sd_total} total{', the bomb went off' if g.bombs and g.bombs != self.bombs_seen else ''})"))
+            self.bombs_seen = g.bombs
             self.last_warp = g.t
             self.click_until = g.t + self.active_after
             self.click_site = 0
@@ -290,6 +302,9 @@ def main():
     global BOT_CHANCE, GENERALS
     BOT_CHANCE = float(kw.pop("bot_chance", 0.85))
     GENERALS = kw.pop("gens", "1") != "0"
+    global BOMB, BOMB_WAIT
+    BOMB = kw.pop("bomb", "0") != "0"
+    BOMB_WAIT = float(kw.pop("bomb_wait", 12))
     global COLONIES, COLONY_MAX
     COLONIES = kw.pop("col", "1") != "0"
     COLONY_MAX = int(kw.pop("colmax", 60))
@@ -311,7 +326,7 @@ def main():
             t, msg = bot.log[seen]
             if not quiet:
                 print(f"  [{fmt_t(t)}] {msg}")
-            elif msg.startswith(("unlock", "settle", "project", "conquer", "ASCEND", "LOST")):
+            elif msg.startswith(("unlock", "settle", "project", "conquer", "ASCEND", "LOST", "bomb", "the Void")):
                 print(f"  [{fmt_t(t)}] {msg}")
             seen += 1
         if g.t >= next_report and not quiet:

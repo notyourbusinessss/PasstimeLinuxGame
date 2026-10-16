@@ -25,6 +25,7 @@ import galaxy
 import gamelog
 import resources
 import generals
+import blackhole
 import icons
 import shipart
 import ships
@@ -111,6 +112,7 @@ class App:
         self.hover_sector = None
         self.warp_view = "warp"
         self.ascend_fx = 0.0
+        self.ascend_len, self.ascend_boom = 3.4, False       # how long the Ascension effect lasts, and whether the bomb went off in it
         self.ascend_confirm = 0.0
         self.ascend_cycle = 1
         self.ach_new = False
@@ -727,6 +729,10 @@ class App:
                 self.rings.append([CX, CY, 0.0, self.g.sites[data]["col"]])
                 self.burst(CX, CY, self.g.sites[data]["col"], 40)
                 self.snd.play("unlock")
+            elif kind == "bomb":
+                self.rings.append([CX, CY, 0.0, (255, 170, 120)])
+                self.burst(CX, CY, (255, 170, 120), 40)
+                self.snd.play("project")
             elif kind == "project":
                 self.rings.append([CX, CY, 0.0, (255, 220, 120)])
                 self.burst(CX, CY, (255, 220, 120), 50)
@@ -749,12 +755,15 @@ class App:
                                          right=f"+{TIER_BONUS[a['tier']] * 100:g}%", tier=a["tier"], sound="ach",
                                          col=MEDAL[a["tier"]]))
             elif kind == "ascend":
-                self.ascend_fx = 3.4
+                self.ascend_boom = bool(data.get("boom"))
+                self.ascend_len = 5.0 if self.ascend_boom else 3.4
+                self.ascend_fx = self.ascend_len
                 self.ascend_cycle = data["cycle"]
                 self.view = "system"
                 self.warp_view = "ascend"
                 self.snd.play("ascend")
-                self.add_banner(dict(header="ASCENSION", title=f"Cycle {data['cycle']} begins", sub="The universe resets - you keep your Stardust.",
+                self.add_banner(dict(header="ASCENSION", title=f"Cycle {data['cycle']} begins",
+                                     sub="The bomb went off: Stardust x%g." % blackhole.SD_MULT if self.ascend_boom else "The universe resets - you keep your Stardust.",
                                      right=f"+{data['gain']}", sound=None, col=(255, 215, 120), glyph="*", dur=5.0))
             elif kind == "campaign":
                 self.snd.play("buy")
@@ -2374,6 +2383,12 @@ class App:
         gain = max(1, g.sd_gain())
         self.txt(scr, med, f"Ascend now for: +{gain} Stardust", (x, y), (130, 255, 150) if can else (180, 120, 120))
         y += 28
+        text, armed = blackhole.status(g.bomb)
+        if g.bomb or core.BOSS in g.conquered:
+            for l in wrap(tiny, text, PANEL.w - 24):
+                self.txt(scr, tiny, l, (x, y), (255, 150, 130) if armed else (190, 170, 150))
+                y += 16
+            y += 6
         m = 1 + core.TUNE["cdiff"] * g.cycle
         self.txt(scr, tiny, f"Next cycle: planets and megaprojects cost x{m:.0f}, enemy fleets x{core.TUNE['cpow'] ** g.cycle:.1f} stronger.",
                  (x, y), (190, 160, 130))
@@ -2404,8 +2419,13 @@ class App:
         return y
 
     def draw_ascend_fx(self, scr, fonts):
-        prog = self.ascend_fx / 3.4                    # 1 -> 0
+        prog = self.ascend_fx / self.ascend_len        # 1 -> 0
         grow = 1 - prog
+        if self.ascend_boom:                           # the bomb: shock waves that sweep the screen, red then white
+            for i in range(3):
+                rad = (grow * 1.3 - i * 0.16) * W * 0.9
+                if rad > 0:
+                    pygame.draw.circle(scr, lerp_c((255, 110, 80), (255, 245, 225), i / 2), (CX, CY), int(rad), max(2, int(26 * prog)))
         for a, sp in self.streaks:
             d0 = 20 + grow * sp * 520
             d1 = d0 + 30 + grow * 300 * sp
@@ -2421,7 +2441,7 @@ class App:
             img = fonts[0].render(f"CYCLE {self.ascend_cycle}", True, (255, 245, 215))
             img.set_alpha(int(255 * k))
             scr.blit(img, img.get_rect(center=(CX, CY - 30)))
-            img2 = fonts[1].render("NEW GAME+", True, (255, 215, 120))
+            img2 = fonts[1].render("THE BOMB GOES OFF" if self.ascend_boom else "NEW GAME+", True, (255, 170, 130) if self.ascend_boom else (255, 215, 120))
             img2.set_alpha(int(255 * k))
             scr.blit(img2, img2.get_rect(center=(CX, CY + 10)))
 
@@ -3562,6 +3582,147 @@ def card_y(app):
     return sysview.card_rect(app).y
 
 
+def check_blackhole():
+    """The Black Hole Bomb: five stages paid in the ore of a tier-11 planet, credits and science once you hold the Void Throne;
+    a finished one doubles the Stardust of the Ascension it goes off in and is used up; saves, Warp and Ascension."""
+    g = core.Game(load=False, sim=True)
+    assert g.bomb == 0 and g.bombs == 0 and not g.bomb_armed() and not g.can_build_bomb()
+    costs = [g.bomb_cost(i) for i in range(blackhole.N)]
+    base = g.project_cost(NSOL - 1)
+    assert all(abs(costs[i][j] / (base[j] * blackhole.STAGES[i]["mult"]) - 1) < 1e-9 for i in range(blackhole.N) for j in range(3))
+    assert all(costs[i + 1][0] > costs[i][0] for i in range(blackhole.N - 1)), "every stage costs more than the one before"
+    g.credits, g.science = 3 * sum(c[1] for c in costs), 3 * sum(c[2] for c in costs)      # (stocks of the same size as the prices: floats keep the differences)
+    g.ore = [3 * sum(c[0] for c in costs)] * g.nsite
+    assert not g.can_build_bomb() and not g.build_bomb(), "the Void Throne must be yours first"
+    g.conquered.add(core.BOSS)
+    assert g.bomb_planet() is None and not g.can_build_bomb(), "the Kuiper Belt (tier 11) pays for it: it must be unlocked"
+    g.unlocked[NSOL - 1] = True
+    assert g.bomb_planet() == NSOL - 1 and g.can_build_bomb()
+    sci = g.science
+    g.science = costs[0][2] * 0.5
+    assert not g.can_build_bomb(), "science is needed too"
+    g.science = sci
+    unarmed = None
+    for st in range(blackhole.N):
+        ore0, cr0, sci0 = g.ore[NSOL - 1], g.credits, g.science
+        if st == blackhole.N - 1:
+            unarmed = g.sd_gain()
+        assert g.build_bomb() and g.bomb == st + 1
+        assert abs((ore0 - g.ore[NSOL - 1]) / costs[st][0] - 1) < 1e-6 and abs((cr0 - g.credits) / costs[st][1] - 1) < 1e-6
+    assert g.bomb_armed() and not g.can_build_bomb() and not g.build_bomb() and g.bomb == blackhole.N
+    assert g.sd_gain() >= 2 * unarmed - 1 and g.sd_gain() > unarmed, "an armed bomb doubles the Stardust"
+    assert "Bomb Maker" in {a["id"] for a in core.ACHIEVEMENTS} and core.ACH_BY_ID["Bomb Maker"]["cond"](g)
+    assert not core.ACH_BY_ID["Big Bang"]["cond"](g)
+    # Warp keeps the bomb; it is part of the galaxy you hold
+    assert g.do_warp(force=True) and g.bomb == blackhole.N
+    # saves: it comes back, and a save from before there was a bomb loads with none
+    old_save = core.SAVE
+    d = tempfile.mkdtemp(prefix="space_miner_bomb_")
+    try:
+        core.SAVE = os.path.join(d, "save.json")
+        g.bombs = 2
+        g.save()
+        h = core.Game(load=True, sim=True)
+        assert h.bomb == blackhole.N and h.bombs == 2
+        with open(core.SAVE) as f:
+            data = json.load(f)
+        data.pop("bomb"), data.pop("bombs")
+        with open(core.SAVE, "w") as f:
+            json.dump(data, f)
+        h = core.Game(load=True, sim=True)
+        assert h.bomb == 0 and h.bombs == 0
+        data["bomb"] = 99
+        with open(core.SAVE, "w") as f:
+            json.dump(data, f)
+        assert core.Game(load=True, sim=True).bomb == blackhole.N, "a damaged save cannot build a sixth stage"
+    finally:
+        core.SAVE = old_save
+        shutil.rmtree(d, ignore_errors=True)
+    # Ascension: the armed bomb goes off (Stardust x2, used up); a half-built one is lost
+    g.bombs = 0
+    gain, sd0 = g.sd_gain(), g.stardust
+    g.toasts.clear()
+    assert g.ascend(force=True) and g.stardust == sd0 + max(1, gain) and g.bomb == 0 and g.bombs == 1
+    assert any("bomb went off" in t[0] for t in g.toasts)
+    assert core.ACH_BY_ID["Big Bang"]["cond"](g) and core.ACH_BY_ID["Bomb Maker"]["cond"](g)
+    g.conquered.add(core.BOSS)
+    g.bomb = 3
+    g.toasts.clear()
+    assert g.ascend(force=True) and g.bomb == 0 and g.bombs == 1
+    assert not any("bomb went off" in t[0] for t in g.toasts), "an unfinished bomb does not go off"
+    text, armed = blackhole.status(blackhole.N)
+    assert armed and "Stardust x2" in text and not blackhole.status(2)[1] and "lost" in blackhole.status(2)[0]
+
+
+def check_hole_ui(app):
+    """The Void Throne opens as a black hole in the system view, at every size and at every stage of the bomb; the card builds the
+    stages; the Ascension screen and the detonation draw."""
+    fonts = app_fonts()
+    g0, view0, tab0, wv0 = app.g, app.view, app.tab, app.warp_view
+    skey0 = (app.sys_k, app.sys_sel)
+    try:
+        g = core.Game(load=False, sim=True)
+        app.g = g
+        app.rebuild_view()
+        assert not sysview.can_open(g, core.BOSS) and not sysview.open_system(app, core.BOSS)
+        g.conquered.add(core.BOSS)
+        for q in range(NSOL):
+            g.unlocked[q] = True
+            g.ore[q] = 1e300
+        g.credits = g.science = 1e300
+        assert sysview.can_open(g, core.BOSS) and sysview.open_system(app, core.BOSS) and app.view == "orbit"
+        for res in ("1920x1080", "1280x720", "1600x720", "2560x1440"):
+            app.set_resolution_choice(res)
+            for stage in range(blackhole.N + 1):
+                g.bomb = stage
+                app.update(0.016)
+                app.draw(app.scr, fonts)
+        app.set_resolution_choice("1280x720")
+        g.bomb = 0
+        app.update(0.016)
+        app.draw(app.scr, fonts)
+        assert not app.orb_hits and app.orb_btns, "nothing to click but the card's button"
+        fn = [f for r, f in app.orb_btns if r.collidepoint((sysview.card_rect(app).right - 60, sysview.card_rect(app).y + 26))]
+        assert fn, "the BUILD button is on the card"
+        for stage in range(blackhole.N):
+            app.update(0.016)
+            app.draw(app.scr, fonts)
+            fn = [f for r, f in app.orb_btns if r.collidepoint((sysview.card_rect(app).right - 60, sysview.card_rect(app).y + 26))]
+            assert fn, stage
+            fn[0]()
+            assert g.bomb == stage + 1
+        app.update(0.016)
+        app.draw(app.scr, fonts)
+        assert not [1 for r, f in app.orb_btns if r.collidepoint((sysview.card_rect(app).right - 60, sysview.card_rect(app).y + 26))], \
+            "an armed bomb has nothing left to build"
+        app.mouse_down((app.orbit_area().centerx, 200))                          # a click on the black hole does nothing
+        app.view, app.sel_sector = "galaxy", core.BOSS                           # the map's command bar offers to open it
+        app.update(0.016)
+        app.draw(app.scr, fonts)
+        # the Ascension screen says what the bomb will do, and the detonation draws
+        app.view, app.tab, app.warp_view = "system", T_WARP, "ascend"
+        app.update(0.016)
+        app.draw(app.scr, fonts)
+        g.sim = False                                                            # (the effects are only made for a game that is played)
+        for _ in range(2):
+            app.do_ascend()
+        app.update(0.016)
+        assert app.ascend_boom and app.ascend_len > 3.4 and g.bombs == 1 and g.bomb == 0
+        for _ in range(8):
+            app.update(0.4)
+            app.draw(app.scr, fonts)
+        g.conquered.add(core.BOSS)
+        g.bomb = 2
+        app.update(0.016)
+        app.draw(app.scr, fonts)                                                 # an unfinished bomb: the warning on the Ascension screen
+    finally:
+        app.g, app.view, app.tab, app.warp_view = g0, view0, tab0, wv0
+        app.sys_k, app.sys_sel = skey0
+        app.ascend_boom, app.ascend_len, app.ascend_fx = False, 3.4, 0.0
+        app.set_resolution_choice("auto")
+        app.rebuild_view()
+
+
 def check_worlds_ui(app):
     """The Other systems page draws and answers clicks with nothing found, a few worlds and every world of the galaxy."""
     fonts = app_fonts()
@@ -4119,6 +4280,7 @@ def selftest_step(app, g, frames, shot):
         check_fronts()
         check_attack_flow()
         check_sysview()
+        check_blackhole()
         check_generals()
         check_counter_offensives()
         check_new_game_reset()
@@ -4320,6 +4482,7 @@ def selftest_step(app, g, frames, shot):
     if frames == 81:
         check_attack_ui(app)
         check_sysview_ui(app)
+        check_hole_ui(app)
     if frames == 79:
         shot("ascension")
     if frames == 80:

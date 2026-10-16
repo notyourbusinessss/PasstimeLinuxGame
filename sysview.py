@@ -16,6 +16,7 @@ import colonies
 import core
 import galaxy
 import gfx
+import holeview
 import worlds
 from core import fmt
 from gfx import glow, lerp_c, scale_c
@@ -115,7 +116,8 @@ def current_star(app):
 
 
 def can_open(g, k):
-    return k == 0 or (k in g.conquered and bool(worlds.count_of(k)))
+    """A system you can open: the Sun, a star you hold that has worlds, and the Void Throne (the black hole with the bomb)."""
+    return k == 0 or (k in g.conquered and (bool(worlds.count_of(k)) or k == core.BOSS))
 
 
 # ------------------------------------------------------------------ states
@@ -287,6 +289,10 @@ def draw(app, scr, fonts):
     star = galaxy.STARS[k]
     sel = app.sys_sel
     app.orb_hits = []
+    if k == core.BOSS:                                           # one big black hole and nothing else
+        app.orb_hover = None
+        holeview.draw(app, scr, geo)
+        return
     # the orbits
     for b in bs:
         if b["parent"] is not None:
@@ -483,6 +489,10 @@ def star_line(app, scr, fonts, k):
     ws = bodies(k)
     held = sum(1 for b in ws if b["parent"] is None and state_of(g, b) in ("here", "owned"))
     n = sum(1 for b in ws if b["parent"] is None)
+    if k == core.BOSS:
+        app.txt(scr, tiny, f"Black hole  -  Sagittarius A*, 4.3 million suns  -  {galaxy.fmt_ly(star['d'])} away",
+                (14, 46), (160, 172, 210), "topleft", True)
+        return
     if k == 0:
         sub = f"{star['kind']}  -  your home  -  {held} of {n} planets unlocked"
     else:
@@ -571,6 +581,9 @@ def draw_card(app, scr, fonts, k):
     pygame.draw.rect(bg, (10, 13, 32, 238), bg.get_rect(), border_radius=10)
     pygame.draw.rect(bg, (90, 115, 185, 255), bg.get_rect(), 1, border_radius=10)
     scr.blit(bg, r)
+    if k == core.BOSS:
+        holeview.draw_card(app, scr, fonts, r)
+        return
     b = body_of(k, app.sys_sel) if app.sys_sel not in (None, "star") else None
     if b is None:
         app.sys_sel = None if app.sys_sel != "star" else "star"
