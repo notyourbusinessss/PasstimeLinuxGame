@@ -6,8 +6,8 @@ tier-11 planet, credits and science. A finished bomb goes off when you Ascend (i
 doubled and the galaxy shakes. An unfinished bomb is lost at the Ascension.
 
 The costs are multiples of the price of the last megaproject (the Comet Catchers): see core.Game.bomb_cost. The five together are
-13 times that price: when you first beat the Devourer the first three come out of what you have saved up, and the last two take
-about ten hours of credit and science income (worked out from the stocks and incomes of the balancing bot at that moment).
+13 times that price: when you first beat the Devourer the first four come out of what you have saved up, and the last takes
+about eight hours of credit and science income (worked out from the stocks and incomes of the balancing bot at that moment).
 """
 
 SD_MULT = 2.0                    # Stardust gain of the Ascension that sets a finished bomb off

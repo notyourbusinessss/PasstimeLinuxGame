@@ -273,7 +273,7 @@ And you can build something on it: a **Black Hole Bomb**, a megabuild in five st
 | 4. Spin-up Rings | engine rings and jets out of the poles; the disk turns faster | x3.5 |
 | 5. Trigger Array | eight satellites aimed at the middle: the bomb is **armed** | x4.5 |
 
-Each stage costs ore of your richest **tier-11 planet** (the Kuiper Belt, or a colony of that tier), credits and science. The first stages come out of what you have saved up by the time you beat the Devourer; the last two take about ten hours of income. The card at the bottom of the view shows the next stage, what it costs and the **BUILD** button.
+Each stage costs ore of your richest **tier-11 planet** (the Kuiper Belt, or a colony of that tier), credits and science. The first four come out of what you have saved up by the time you beat the Devourer; the Trigger Array takes about eight hours of income (a bot that plays like a careful player: `sim.py bomb=1`). The card at the bottom of the view shows the next stage, what it costs and the **BUILD** button.
 
 ![The Void Throne: one big black hole, and the card of the first stage of the bomb](screenshots/92-black-hole.png)
 
