@@ -45,6 +45,7 @@ from gfx import glow, scale_c, lerp_c
 BASE_W, BASE_H = 1280, 720
 W, H = BASE_W, BASE_H
 PANEL = pygame.Rect(660, 104, 600, 608)
+worldview.PANEL = PANEL                         # the same rectangle, resized in place by apply_layout
 CX, CY = 325, 392                    # centre of the planet view
 PLANET_R = 58
 RESOLUTIONS = [(1280, 720), (1600, 900), (1920, 1080), (2560, 1440)]      # the choices in the settings ("auto" picks one)
@@ -2990,6 +2991,19 @@ def check_worlds_ui(app):
         g.conquered = {0, k}
         g.unlocked[core.GALAXY_UNLOCK_PLANET] = True
         app.scroll[T_PLANETS] = 0
+        for res in ("1920x1080", "2560x1440", "1600x720", "1280x720"):      # the page follows the side panel on every canvas
+            app.set_resolution_choice(res)
+            assert worldview.PANEL == PANEL, res
+            app.buttons.clear()
+            app.draw(app.scr, fonts)
+            inside = [r for r, _ in app.buttons if r.y > PANEL.y and r.y < PANEL.y + 80 and PANEL.contains(r)]
+            assert len(inside) >= 2, (res, "the Other systems page is not drawn inside the side panel", PANEL, inside)
+        g.conquered = {0}
+        app.w_known = app.w_sig = None
+        g.toasts.clear()
+        app.update(0.016)                                                      # the first look only learns what you hold
+        assert not g.toasts
+        g.conquered = {0, k}
         app.update(0.016)
         assert any("7 worlds" in t[0] for t in g.toasts), "liberating a star with real planets should be announced"
         app.draw(app.scr, fonts)
