@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.4
+
+Losing a system now costs you its colonies.
+
+- **A system that falls takes its colonies with it.** When an enemy counter-offensive retakes a star, every world you had settled there is destroyed: the planet disappears from your list with its ore, ships, upgrades and buildings (retaking the system does not bring them back). The planets after it move up, and everything that holds a planet number moves with them (the planet you are on - you land back on Earth if it was one of the lost ones - a journey, the places you have visited, quests, raids on their way).
+- **You can see what is at stake:** the system's card on the map says how many colonies it holds, the incoming-attack chips and the warnings name them ("Counter-offensive -> Vel 9291 (3 colonies)"), and the toast and the log say how many were lost.
+
 ## 2.0.3
 
 No more stall when Mars is unlocked on a phone.

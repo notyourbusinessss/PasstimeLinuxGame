@@ -377,6 +377,8 @@ def describe(g, inc, level_=None):
         if lv <= 1:
             return "Unknown ships are massing near your territory"
         s = SECTORS[inc["target"]]["name"]
+        n = sum(1 for c in g.colonies if c[0] == inc["target"])
+        s += f" (your {n} colon{'ies' if n > 1 else 'y'} there would be lost with it)" if n else ""
         return f"{fname} counter-offensive against {s}" if lv < 3 else \
             f"{fname} counter-offensive against {s}  ({incoming_chance(g, inc) * 100:.0f}% to hold)" if lv >= 4 else \
             f"{fname} counter-offensive against {s}  (power {fmt(inc['power'])})"
@@ -478,8 +480,11 @@ def resolve_offensive(g, inc):
         g.lost_sectors.add(k)
         g.sectors_lost += 1
         g.garrison.pop(k, None)
-        g.toast(f"SECTOR LOST! {fname} retook {nm}.  Its bonus is gone until you liberate it again.", 9)
-        log(g, f"{nm} LOST to the {fname}")
+        gone = g.lose_colonies(k)                                  # the worlds you had settled there go with it
+        extra = (f"  The {len(gone)} world{'s' if len(gone) > 1 else ''} you had settled there {'are' if len(gone) > 1 else 'is'} lost with it: "
+                 f"their ore, ships and buildings are gone." if gone else "")
+        g.toast(f"SECTOR LOST! {fname} retook {nm}.  Its bonus is gone until you liberate it again.{extra}", 9 if not gone else 11)
+        log(g, f"{nm} LOST to the {fname}" + (f" ({len(gone)} colonies with it)" if gone else ""))
         g.fx("sector_lost", k)
         g.recalc()
 
@@ -515,8 +520,9 @@ def step(g, dt):
     for inc in list(g.incoming):
         inc["t"] += dt
         if inc["t"] >= inc["eta"]:
-            g.incoming.remove(inc)
-            resolve(g, inc)
+            if inc in g.incoming:                       # (a system that fell earlier in this step may have taken it away)
+                g.incoming.remove(inc)
+                resolve(g, inc)
     # hostility cools down slowly
     for fac in list(g.hostility):
         g.hostility[fac] = max(0.0, g.hostility[fac] - dt / 6000.0)

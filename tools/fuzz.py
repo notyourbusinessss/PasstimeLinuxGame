@@ -20,6 +20,8 @@ import pygame
 
 import core
 import gamelog
+import worlds
+import director
 import generals
 import sim
 import space_miner as sm
@@ -179,6 +181,16 @@ def main():
                             g.unlocked[core.NSOL - 1] = True
                             g.build_bomb()
                         sysview.open_system(app, core.BOSS)
+                    elif r < 0.985:                                                         # a system falls, with the worlds settled in it
+                        held = [k for k in g.conquered if k]
+                        if held:
+                            k = rng.choice(held)
+                            g.credits = max(g.credits, 1e200)
+                            g.ore = [max(o, 1e150) for o in g.ore]
+                            for i in range(min(3, worlds.count_of(k))):
+                                g.settle(k, i)
+                            director.resolve_offensive(g, dict(id=rng.randrange(10 ** 6), kind="offensive", tier=-1, fac="pirates", src=k,
+                                                               target=k, targets=[], t=0.0, eta=0.0, fort=[], power=1e300))
                     else:
                         app.select_sector(rng.randrange(1, core.NSEC))
                 dt = rng.choice((0.016, 0.016, 0.033, 0.1, 0.25, 5.0, 60.0)) if rng.random() < 0.97 else rng.choice((600.0, 3600.0))

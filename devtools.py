@@ -84,6 +84,10 @@ def sections(app):
         g.unlocked = [True] + [False] * (n - 1)
         g.cur = 0
         g.travel = None
+        g.visited = {0}                                     # (nothing may still hold the number of a planet that is gone)
+        g.incoming = [i for i in g.incoming if i["kind"] != "raid"]
+        for q in g.quests:
+            q["site"] = 0
 
     def give_ships(n, all_planets=False):
         for p in (range(g.nsite) if all_planets else [here()]):
