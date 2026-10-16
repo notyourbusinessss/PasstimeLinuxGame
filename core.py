@@ -1021,7 +1021,7 @@ class Game:
             base = self.sc[p] * sum(self.owned[p][i] * SHIPS[i][2] * g[i] for i in range(NSH))
             self.s_base[p] = base
             if self.unlocked[p]:
-                self.s_ops[p] = base * (1 + mine[p] * E["minebonus"]) * self.G * sm
+                self.s_ops[p] = base * (1 + mine[p] * E["minebonus"]) * self.G * sm * (colonies.OUTPUT if p >= NSOL else 1.0)
             self.s_click[p] = (E["click"] * cm * self.sc[p] + (E["clickops"] + co) * base) * self.G * sm
         self.norm_ops = sum(self.s_ops[p] / self.sc[p] for p in range(self.nsite))
 
@@ -1204,10 +1204,9 @@ class Game:
         self.ore[p] += x
         self.run_ore[p] += x
         self.all_ore[p] += x
-        x = x * (colonies.NORM if p >= NSOL else 1.0) / self.sc[p]            # what counts towards Dark Matter, in Earth-equivalent ore
-        self.run_norm += x
-        self.cyc_norm += x
-        self.all_norm += x
+        self.run_norm += x / self.sc[p]
+        self.cyc_norm += x / self.sc[p]
+        self.all_norm += x / self.sc[p]
 
     def add_credits(self, x):
         self.credits += x
@@ -1459,7 +1458,7 @@ class Game:
     def planet_power(self, p, defense=False):
         """Fleet power of the ships stationed on planet p."""
         raw = sum(self.owned[p][i] * SHIP_POWER[i] for i in range(NSH))
-        pw = raw * (1 + 0.1 * self.tier[p]) * (colonies.FLEET if p >= NSOL else 1.0) * self.E["fp"] * 1.2 ** self.armory[0] * self.tech_level()
+        pw = raw * (1 + 0.1 * self.tier[p]) * self.E["fp"] * 1.2 ** self.armory[0] * self.tech_level()
         if defense:
             pw *= 1 + 0.1 * self.bld[p][5]
         return pw
