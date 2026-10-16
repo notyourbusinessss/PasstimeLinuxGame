@@ -6,18 +6,18 @@ tier-11 planet, credits and science. A finished bomb goes off when you Ascend (i
 doubled and the galaxy shakes. An unfinished bomb is lost at the Ascension.
 
 The costs are multiples of the price of the last megaproject (the Comet Catchers): see core.Game.bomb_cost. The five together are
-about 4.7 times that price, which is some ten hours of the credit and science income you have when you first beat the Devourer
-(measured with sim.py bomb=1).
+13 times that price: when you first beat the Devourer the first three come out of what you have saved up, and the last two take
+about ten hours of credit and science income (worked out from the stocks and incomes of the balancing bot at that moment).
 """
 
 SD_MULT = 2.0                    # Stardust gain of the Ascension that sets a finished bomb off
 TIER = 11                        # the ore the stages are paid in: the richest planet of this economy tier (the Kuiper Belt is one)
 STAGES = [
-    dict(name="Mirror Shell", mult=0.4, text="A shell of mirrors round the black hole: the light it throws out comes back to it."),
-    dict(name="Superradiant Core", mult=0.6, text="A ring of lasers feeds the hole's spin back into the light, which grows with every pass."),
-    dict(name="Containment Lattice", mult=0.9, text="Pylons hold the shell together against the light pressing on it from inside."),
-    dict(name="Spin-up Rings", mult=1.2, text="Rings of engines drag the hole round faster, until its edge turns at nearly the speed of light."),
-    dict(name="Trigger Array", mult=1.6, text="Eight satellites to open the shell at the one moment all that light has to go somewhere."),
+    dict(name="Mirror Shell", mult=1.0, text="A shell of mirrors round the black hole: the light it throws out comes back to it."),
+    dict(name="Superradiant Core", mult=1.5, text="A ring of lasers feeds the hole's spin back into the light, which grows with every pass."),
+    dict(name="Containment Lattice", mult=2.5, text="Pylons hold the shell together against the light pressing on it from inside."),
+    dict(name="Spin-up Rings", mult=3.5, text="Rings of engines drag the hole round faster, until its edge turns at nearly the speed of light."),
+    dict(name="Trigger Array", mult=4.5, text="Eight satellites to open the shell at the one moment all that light has to go somewhere."),
 ]
 N = len(STAGES)
 NAME = "Black Hole Bomb"

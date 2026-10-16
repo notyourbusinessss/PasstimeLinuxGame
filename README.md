@@ -267,13 +267,13 @@ And you can build something on it: a **Black Hole Bomb**, a megabuild in five st
 
 | Stage | What you see | Price (of the Comet Catchers megaproject) |
 |---|---|---|
-| 1. Mirror Shell | a shell of mirror panels round everything | x0.4 |
-| 2. Superradiant Core | a ring of lasers close to the hole | x0.6 |
-| 3. Containment Lattice | pylons from the shell to a hexagon round the hole | x0.9 |
-| 4. Spin-up Rings | engine rings and jets out of the poles; the disk turns faster | x1.2 |
-| 5. Trigger Array | eight satellites aimed at the middle: the bomb is **armed** | x1.6 |
+| 1. Mirror Shell | a shell of mirror panels round everything | x1 |
+| 2. Superradiant Core | a ring of lasers close to the hole | x1.5 |
+| 3. Containment Lattice | pylons from the shell to a hexagon round the hole | x2.5 |
+| 4. Spin-up Rings | engine rings and jets out of the poles; the disk turns faster | x3.5 |
+| 5. Trigger Array | eight satellites aimed at the middle: the bomb is **armed** | x4.5 |
 
-Each stage costs ore of your richest **tier-11 planet** (the Kuiper Belt, or a colony of that tier), credits and science - together about ten hours of the income you have when you first beat the Devourer. The card at the bottom of the view shows the next stage, what it costs and the **BUILD** button.
+Each stage costs ore of your richest **tier-11 planet** (the Kuiper Belt, or a colony of that tier), credits and science. The first stages come out of what you have saved up by the time you beat the Devourer; the last two take about ten hours of income. The card at the bottom of the view shows the next stage, what it costs and the **BUILD** button.
 
 ![The Void Throne: one big black hole, and the card of the first stage of the bomb](screenshots/92-black-hole.png)
 
