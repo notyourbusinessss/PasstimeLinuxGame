@@ -21,6 +21,7 @@ TIER_CAP = 11                    # the richest tier: the Kuiper Belt
 COST_BASE = 0.5                  # the first colony costs this much of a solar planet of its tier...
 COST_GROWTH = 1.35               # ...and every colony you already hold makes the next one this much dearer
 G_BONUS = 0.02                   # every colony adds this to the production multiplier (a solar planet adds 0.05)
+YIELD = 0.2                      # a colony's banks and labs make this share of the credits and science of a solar planet of its tier
 
 # kind of world -> (the ore it yields, the colour of the ore, the planet bonus text, the bonus effect)
 ORE = dict(temperate="Verdite", ocean="Brinite", rocky="Basalt", desert="Dune Glass", ice="Cryolite", lava="Magmite",

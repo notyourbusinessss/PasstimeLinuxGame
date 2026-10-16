@@ -961,9 +961,9 @@ class Game:
                 if b == 0:
                     mine[p] += 0.03 * L * f
                 elif b == 1:
-                    cred += 0.5 * L * f * CSC[p]
+                    cred += 0.5 * L * f * CSC[p] * (colonies.YIELD if p >= NSOL else 1.0)
                 elif b == 2:
-                    sci += 0.15 * L * f * CSC[p]
+                    sci += 0.15 * L * f * CSC[p] * (colonies.YIELD if p >= NSOL else 1.0)
                 elif b == 3:
                     disc[p] += 0.006 * L * f
                 elif b == 4:

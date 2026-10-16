@@ -1548,9 +1548,9 @@ class App:
         if b == 0:
             return f"(now +{L * 3 * f * E['minebonus']:.0f}%)"
         if b == 1:
-            return f"(now {fmt(0.5 * L * f * core.CSC[p] * E['cred'])}/s)"
+            return f"(now {fmt(0.5 * L * f * core.CSC[p] * (core.colonies.YIELD if p >= NSOL else 1.0) * E['cred'])}/s)"
         if b == 2:
-            return f"(now {fmt(0.15 * L * f * core.CSC[p] * E['sci'])}/s)"
+            return f"(now {fmt(0.15 * L * f * core.CSC[p] * (core.colonies.YIELD if p >= NSOL else 1.0) * E['sci'])}/s)"
         if b == 3:
             return f"(now -{0.6 * L * f:.1f}%)"
         if b == 4:
