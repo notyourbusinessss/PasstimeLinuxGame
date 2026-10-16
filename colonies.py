@@ -17,10 +17,11 @@ NSOL = 12                        # the planets of the solar system (core.SITES)
 TIER_CAP = 11                    # the richest tier: the Kuiper Belt
 COST_BASE = 0.4                  # a colony costs this much of a solar planet of its tier...
 COST_GROWTH = 1.06               # ...and every colony you already hold makes the next one this much dearer
-G_BONUS = 0.01                   # every colony adds this to the production multiplier (a solar planet adds 0.05)
-YIELD = 0.05                     # a colony's banks and labs make this share of the credits and science of a solar planet of its tier
+G_BONUS = 0.003                  # every colony adds this to the production multiplier (a solar planet adds 0.05)
+YIELD = 0.01                     # a colony's banks and labs make this share of the credits and science of a solar planet of its tier
 GLOBAL = 0.02                    # and its reactors and silos (they boost ALL production and the crates) count this share: dozens of colonies must not stack them
 OUTPUT = 0.1                     # a colony mines this share of the ore a solar planet of its tier would: dozens of full planets would be dozens of engines
+FLEET = 0.1                      # and its ships fight at this share of the strength of a solar planet's (the fleets of dozens of colonies took the Void Throne in hours)
 
 # kind of world -> the ore it yields, and its colour
 ORE = dict(temperate="Verdite", ocean="Brinite", rocky="Basalt", desert="Dune Glass", ice="Cryolite", lava="Magmite",
