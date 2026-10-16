@@ -34,6 +34,19 @@ MAP_R = 58000.0                      # the camera stays within this many light-y
 MINE = (120, 190, 255)
 LASER_MINE = (150, 225, 255)
 SPAN, IMG = gfx.MW_SPAN, 1300        # the painted galaxy: SPAN light-years across, IMG pixels wide
+
+
+def milky_way_picture():
+    """The painted Milky Way. It ships as assets/milky_way.png (made by tools/make_milky_way.py): painting it takes half a second on a
+    computer but ten seconds or more on a phone, where it stalled the game right after Mars was unlocked. It is painted here only when
+    the file is missing or is not the size the map expects."""
+    try:
+        img = pygame.image.load(resources.resource("assets/milky_way.png"))
+        if img.get_size() == (IMG, IMG):
+            return img
+    except (pygame.error, OSError):
+        pass
+    return gfx.make_milky_way(IMG)
 XS, YS = galaxy.XS, galaxy.YS
 
 
@@ -373,14 +386,14 @@ class FrontView:
 
     # ------------------------------------------------------------------ painted layers
     def prebuild(self):
-        """Paint the Milky Way in a background thread (about a third of a second of work) so opening the map never stalls."""
+        """Get the Milky Way ready in a background thread, so opening the map never stalls (see milky_way_picture)."""
         if self.bg is not None or self._building is not None:
             return
 
         def work():
             try:
-                self._made = gfx.make_milky_way(IMG)
-            except Exception:                     # (the map then paints it itself when it is first drawn)
+                self._made = milky_way_picture()
+            except Exception:                     # (the map then gets it itself when it is first drawn)
                 self._made = None
         self._building = threading.Thread(target=work, daemon=True)
         self._building.start()
@@ -392,7 +405,8 @@ class FrontView:
                 self._building = None
                 self.bg = self._made
             if self.bg is None:
-                self.bg = gfx.make_milky_way(IMG)
+                self.bg = milky_way_picture()
+            self.bg = self.bg.convert()                        # (in the display's own format: it is blitted every frame)
         return self.bg
 
     def opened(self):
@@ -684,7 +698,7 @@ class FrontView:
                 fcol = FCOL[fac]
                 r = max(1.6, R)
                 if r >= 3.5:
-                    pulse = 0.55 + 0.45 * math.sin(pulse_t + k)
+                    pulse = round(0.55 + 0.45 * math.sin(pulse_t + k), 1)                 # (a few steps: every glow made is kept)
                     gr = int(r * 5) // 4 * 4 + 4
                     tgt.blit(glow(gr, scale_c(fcol, 0.25 + 0.2 * pulse)), (dx - gr, dy - gr), special_flags=ADD)
                     pygame.draw.circle(tgt, scale_c(fcol, 0.22), (dx, dy), r)

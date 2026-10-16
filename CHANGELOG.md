@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.3
+
+No more stall when Mars is unlocked on a phone.
+
+- **The Milky Way ships as a picture** (`assets/milky_way.png`, made by `tools/make_milky_way.py`): the game painted it itself in the background as soon as Mars opened the galaxy map - half a second on a computer, but ten seconds or more on a phone, during which everything crawled.
+- **Fast mode adapts:** it times its own frames and, when they are too slow, draws less (no weapon beams, sparkles or long trails; then at most three ships of a class; then one) and brings the detail back after half a minute of quick frames. *Show FPS* shows the level (Q0 is everything).
+- **Effects that cost a new picture every frame are fixed:** the pulsing ring on the next planet you can unlock, the sparkles on asteroids, particles, supply crates and the enemy targets of the galaxy map used a slightly different colour every frame, so a new glow was painted and kept every time. Their brightness now moves in a few steps, enemy raiders are turned in steps and kept, and the pictures kept are limited.
+
 ## 2.0.2
 
 Much faster on phones.

@@ -130,6 +130,8 @@ class App:
         self.res_override = None            # --resolution WxH from the command line (not saved)
         self.war_confirm = 0.0
         self.war_confirm_k = None
+        self.q, self.q_work, self.q_n, self.q_time, self.q_slow, self.q_fast = 0, 0.0, 0, 0.0, 0, 0.0      # fast mode's quality level (0 full ... 3 least) and what decides it
+        self.raid_rot = {}
         self.fb, self.fb_key = None, None                              # the baked backdrop of the fast (phone) mode and what it was baked for
         self.pc, self.pc_t, self.pc_dirty, self.pc_key, self.pc_btns = None, -9.0, True, None, []     # the panel, drawn a few times a second (fast mode)
         self.txt_cache, self.ast_rot = {}, {}                          # rendered texts, and asteroids turned to an angle
@@ -467,6 +469,37 @@ class App:
         phone's touch interface), On or Off."""
         mode = self.g.settings.get("perf", "auto")
         return mode == "on" or (mode == "auto" and resources.TOUCH)
+
+    QUALITY_CAP = (99, 99, 3, 1)           # the most ships of a class drawn round the planet at each quality level
+
+    def perf_sample(self, work):
+        """The time (seconds) one frame's update and drawing took, from the main loop. In fast mode the game keeps itself smooth: when two
+        spells of frames in a row average more than 26 ms (that is under 30 a second with nothing to spare; a spell is 30 frames or 0.8
+        seconds of work) it draws less - first no weapon beams, sparkles or long trails, then at most three ships of a class, then one - and
+        when frames are quick (under 11 ms) for half a minute it draws more again. The Stats page's Show FPS shows the level (Q0 is
+        everything)."""
+        if not self.fast:
+            self.q = 0
+            return
+        self.q_work += work
+        self.q_n += 1
+        self.q_time += self.dt
+        if self.q_n < 30 and self.q_work < 0.8:
+            return
+        avg, span = self.q_work / self.q_n, self.q_time
+        self.q_work, self.q_n, self.q_time = 0.0, 0, 0.0
+        if avg > 0.026:
+            self.q_slow += 1
+            self.q_fast = 0.0
+            if self.q_slow >= 2 and self.q < 3:
+                self.q, self.q_slow = self.q + 1, 0
+        elif avg < 0.011 and self.q > 0:
+            self.q_fast += span
+            self.q_slow = 0
+            if self.q_fast >= 30.0:
+                self.q, self.q_fast = self.q - 1, 0.0
+        else:
+            self.q_slow, self.q_fast = 0, 0.0
 
     def cycle_perf(self):
         st = self.g.settings
@@ -965,7 +998,7 @@ class App:
         if self.view == "system" and not fast:
             scr.blit(glow(280, scale_c(site["col"], 0.22)), (CX - 280, CY - 280), special_flags=ADD)
         if g.buff_mult > 1.5 and self.view == "system":
-            k = 0.6 + 0.4 * math.sin(self.t * 6)
+            k = round(0.6 + 0.4 * math.sin(self.t * 6), 1)
             scr.blit(glow(260, scale_c((140, 100, 20), k)), (CX - 260, CY - 260), special_flags=ADD)
         if self.view == "galaxy":
             self.fv.draw(scr, fonts)
@@ -994,7 +1027,7 @@ class App:
             else:
                 self.draw_panel(scr, fonts)
         if g.settings.get("show_fps"):
-            self.txt(scr, fonts[3], f"{self.fps:.0f} FPS", (PANEL.x - 22, H - 66), (255, 220, 140), "topright", True)
+            self.txt(scr, fonts[3], f"{self.fps:.0f} FPS" + (f"  Q{self.q}" if self.fast else ""), (PANEL.x - 22, H - 66), (255, 220, 140), "topright", True)
         self.draw_toasts(scr, fonts[2])
         self.draw_banner(scr, fonts)
         if g.event:
@@ -1038,7 +1071,7 @@ class App:
             x, y, ang = self.ast_pos(a)
             (behind if math.sin(ang) < 0 else front).append(("a", a, x, y))
         for i in range(NSH):
-            n = ships.shown(self.fam(p), g.owned[p][i])
+            n = min(ships.shown(self.fam(p), g.owned[p][i]), self.QUALITY_CAP[self.q] if self.fast else 99)
             d = 1 if i % 2 == 0 else -1
             for j in range(n):
                 dx, dy, depth = ships.orbit(self.fam(p), i, j, n, self.t, d)
@@ -1060,7 +1093,7 @@ class App:
         for item in front:
             self.draw_item(scr, item)
         style = ships.style(self.fam(p))
-        for item in behind + front:
+        for item in (behind + front if not (self.fast and self.q >= 1) else ()):       # (the weapon beams are the first thing to go when frames are slow)
             if item[0] == "s":
                 i, j, hd, d = item[1]
                 if math.sin(self.t * 5 + j * 2 + i) > 0.9:
@@ -1085,7 +1118,7 @@ class App:
             sprs = self.get_ast_sprites(g.cur)
             spr = sprs[a["spr"]]
             sc = 0.55 + 0.45 * a["hp"]
-            q, zq = int(a["rot"] / 6) % 60, int(round(sc * 20))             # (turned in steps of 6 degrees and 0.05 of size, kept)
+            q, zq = (int(a["rot"] / 6) % 60 if self.q < 3 else 0), int(round(sc * 20))     # (turned in steps of 6 degrees and 0.05 of size, kept)
             key = (g.sites[g.cur]["id"], a["spr"], q, zq)
             img = self.ast_rot.get(key)
             if img is None:
@@ -1094,16 +1127,16 @@ class App:
                 img = self.ast_rot[key] = pygame.transform.rotozoom(spr, q * 6, zq / 20)
             scr.blit(img, img.get_rect(center=(x, y)))
             oc = self.g.sites[g.cur]["ocol"]
-            for off in (0.0, 2.4):
+            for off in ((0.0, 2.4) if not (self.fast and self.q >= 1) else ()):
                 ga = math.radians(a["rot"]) + off
                 gx = x + math.cos(ga) * spr.get_width() * 0.2 * sc
                 gy = y + math.sin(ga) * spr.get_width() * 0.2 * sc
-                f = 0.55 + 0.45 * math.sin(self.t * 4 + a["ph"] + off)
+                f = round(0.55 + 0.45 * math.sin(self.t * 4 + a["ph"] + off), 1)         # (a few steps: every glow made is kept, so it must not be a new one every frame)
                 scr.blit(glow(7, scale_c(oc, 0.9 * f)), (gx - 7, gy - 7), special_flags=ADD)
             return
         i, j, ta, d = data
         col = self.ship_color(g.cur, i)
-        for tc in (1, 2, 3):
+        for tc in ((1, 2, 3) if (not self.fast or self.q == 0) else (1,) if self.q == 1 else ()):
             bx = x - math.cos(ta) * tc * 7
             by = y - math.sin(ta) * tc * 7
             scr.blit(glow(7 - tc, scale_c(col, 0.55 / tc)), (bx - (7 - tc), by - (7 - tc)), special_flags=ADD)
@@ -1119,7 +1152,7 @@ class App:
         if not c:
             return
         x, y = c["x"], c.get("yy", c["y"])
-        k = 0.7 + 0.3 * math.sin(self.t * 8)
+        k = round(0.7 + 0.3 * math.sin(self.t * 8), 1)
         scr.blit(glow(46, scale_c((200, 150, 30), k)), (x - 46, y - 46), special_flags=ADD)
         scr.blit(self.crate_spr, self.crate_spr.get_rect(center=(x, y)))
         c["rect"] = pygame.Rect(0, 0, 58, 58)
@@ -1129,8 +1162,8 @@ class App:
         for r in self.rings:
             t = r[2] / 0.7
             pygame.draw.circle(scr, scale_c(r[3], 1 - t), (int(r[0]), int(r[1])), int(12 + 110 * t), 2)
-        for p in self.parts:
-            k = max(0.0, min(1.0, p[4] * 1.6))
+        for p in (self.parts if not (self.fast and self.q >= 3) else ()):
+            k = round(max(0.0, min(1.0, p[4] * 1.6)), 1)                   # (a few steps of brightness: see draw_item)
             rad = 5 if k > 0.5 else 3
             scr.blit(glow(rad, scale_c(p[5], k)), (p[0] - rad, p[1] - rad), special_flags=ADD)
         for x, y, text, life, col in self.floats:
@@ -1423,7 +1456,7 @@ class App:
                     colr = (255, 215, 110) if can else (90, 100, 150)
                     pygame.draw.circle(scr, colr, (x, STRIP_Y), 20, 1)
                     if can:
-                        scr.blit(glow(26, scale_c((255, 200, 60), 0.5 + 0.4 * math.sin(self.t * 5))), (x - 26, STRIP_Y - 26),
+                        scr.blit(glow(26, scale_c((255, 200, 60), round(0.5 + 0.4 * math.sin(self.t * 5), 1))), (x - 26, STRIP_Y - 26),
                                  special_flags=ADD)
                     self.txt(scr, tiny, "?", (x, STRIP_Y), (160, 168, 210), "center")
             if rect.collidepoint(self.mouse) and self.mouse[0] < PANEL.x - 10:
@@ -1928,7 +1961,10 @@ class App:
             ang = math.degrees(math.atan2(-dy, dx))
             col = FACTIONS[r["fac"]]["col"]
             scr.blit(glow(12, scale_c(col, 0.5)), (r["x"] - 12, r["y"] - 12), special_flags=ADD)
-            img = pygame.transform.rotate(self.enemy_big[r["fac"]], ang)
+            rk = (r["fac"], int(round(ang / 6.0)) % 60)                      # (turned in steps of 6 degrees, kept)
+            img = self.raid_rot.get(rk)
+            if img is None:
+                img = self.raid_rot[rk] = pygame.transform.rotate(self.enemy_big[r["fac"]], rk[1] * 6.0)
             scr.blit(img, img.get_rect(center=(r["x"], r["y"])))
             d = math.hypot(dx, dy) or 1.0
             if d < 300 and math.sin(self.t * 16 + idx * 1.7) > 0.2:      # your defences open fire
@@ -3084,9 +3120,12 @@ def main():
                         app.went_to_background()
                     elif e.type in LIFECYCLE_FOREGROUND:
                         app.came_back()
+                work0 = time.perf_counter()
                 app.touch.update(dt)
                 app.update(dt)
                 app.draw(app.scr, fonts)
+                if not selftest:
+                    app.perf_sample(time.perf_counter() - work0)
                 pygame.display.flip()
                 frames += 1
                 beat_frames += 1
@@ -3907,6 +3946,65 @@ def check_fast_mode(app):
         app.fb, app.pc_dirty = None, True
 
 
+def check_quality(app):
+    """The quality levels of fast mode: slow frames lower them (and quick ones raise them again, slowly), every level draws every view, and
+    the shipped Milky Way is the picture the map would paint."""
+    fonts = app_fonts()
+    g0, view0, tab0 = app.g, app.view, app.tab
+    q0 = app.q
+    try:
+        g = core.Game(load=False, sim=True)
+        app.g = g
+        app.rebuild_view()
+        g.settings["perf"] = "on"
+        for k in range(1, 4):
+            g.unlocked[k] = True
+        g.owned = [[30 - 3 * i for i in range(NSH)] for _ in range(NSOL)]
+        g.recalc()
+        app.q, app.dt = 0, 0.033
+        for _ in range(20):                                                      # a spell of 40 ms frames is too slow; two of them lower the level
+            app.perf_sample(0.040)
+        assert app.q == 0
+        for _ in range(20):
+            app.perf_sample(0.040)
+        assert app.q == 1, app.q
+        for _ in range(400):
+            app.perf_sample(0.040)
+        assert app.q == 3, "it goes down to the lowest level and no further"
+        for _ in range(600):
+            app.perf_sample(0.020)                                               # in between: nothing changes
+        assert app.q == 3
+        for _ in range(2000):                                                    # quick frames bring it back, a level every half minute
+            app.perf_sample(0.006)
+        assert app.q == 1, app.q
+        app.q = 3
+        g.settings["perf"] = "off"
+        app.perf_sample(0.2)
+        assert app.q == 0, "outside fast mode the game always draws everything"
+        g.settings["perf"] = "on"
+        for q in range(4):
+            app.q = q
+            app.view, app.tab = "system", T_SHIPS
+            app.parts.append([CX, CY, 10.0, 10.0, 0.5, (255, 200, 100)])
+            app.spawn_raid(dict(tier=0, faction="pirates", win=False, lost=[]))
+            for _ in range(3):
+                app.update(0.016)
+                app.draw(app.scr, fonts)
+        app.raiders.clear()
+        assert app.raid_rot, "the turned raiders are kept"
+    finally:
+        app.q = q0
+        app.g, app.view, app.tab = g0, view0, tab0
+        app.rebuild_view()
+    # the shipped Milky Way is what gfx would paint (and has the size the map expects)
+    shipped = pygame.image.load(resources.resource("assets/milky_way.png"))
+    assert shipped.get_size() == (frontview.IMG, frontview.IMG), "run tools/make_milky_way.py"
+    assert frontview.milky_way_picture().get_size() == (frontview.IMG, frontview.IMG)
+    painted = gfx.make_milky_way(frontview.IMG)
+    for x, y in ((650, 650), (300, 700), (900, 400), (100, 100), (1200, 1250), (640, 500), (700, 820)):
+        assert tuple(shipped.get_at((x, y)))[:3] == tuple(painted.get_at((x, y)))[:3], ("assets/milky_way.png is out of date: run tools/make_milky_way.py", x, y)
+
+
 def check_worlds_ui(app):
     """The Other systems page draws and answers clicks with nothing found, a few worlds and every world of the galaxy."""
     fonts = app_fonts()
@@ -4668,6 +4766,7 @@ def selftest_step(app, g, frames, shot):
         check_sysview_ui(app)
         check_hole_ui(app)
         check_fast_mode(app)
+        check_quality(app)
     if frames == 79:
         shot("ascension")
     if frames == 80:

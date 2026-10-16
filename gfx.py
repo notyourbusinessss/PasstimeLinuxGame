@@ -19,7 +19,7 @@ def scale_c(c, k):
     return (max(0, min(255, int(c[0] * k))), max(0, min(255, int(c[1] * k))), max(0, min(255, int(c[2] * k))))
 
 
-@lru_cache(maxsize=None)
+@lru_cache(maxsize=1500)
 def glow(r, color):
     """Soft radial light, meant for additive blitting (BLEND_RGB_ADD)."""
     r = max(2, int(r))
