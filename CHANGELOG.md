@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.1
+
+A cleaner black hole at the Void Throne.
+
+- **The black hole looks right.** Its disk is now light that glows (white-hot at the inner edge, red at the outer) over a sky that is darkened round the hole, the bent light hugs the edge of the hole instead of being a big orange blob, the near side of the disk is brighter without a seam, the rings of the bomb pass behind the hole and its beams stop at the edge, so the hole stays black. New screenshots.
+
 ## 2.0.0
 
 **The whole galaxy is the game now.** Every world of every star you liberate (about 15,900) is a planet you can settle and play, the war runs on generals and wardens, you attack by dragging on the map, there is a star system view between the galaxy and the planets, and the black hole at the middle of the galaxy can be visited - and turned into a bomb.
