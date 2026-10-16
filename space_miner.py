@@ -25,8 +25,10 @@ import galaxy
 import gamelog
 import resources
 import generals
+import icons
 import shipart
 import ships
+import sysview
 import devtools
 import director
 import front
@@ -64,7 +66,7 @@ def apply_layout(w, h):
     frontview.set_layout(PANEL.x, W, H)
 ADD = pygame.BLEND_RGB_ADD
 STRIP_Y = H - 30
-STRIP_X0, STRIP_DX = 96, 46
+STRIP_X0, STRIP_DX = 142, 42
 BASE_TABS = ["Ships", "Upgrades", "Colony", "Planets", "Galaxy", "Tech", "Quests", "Warp", "Awards"]
 T_SHIPS, T_UPG, T_COLONY, T_PLANETS, T_GALAXY, T_TECH, T_QUESTS, T_WARP, T_AWARDS, T_DEV = range(10)
 
@@ -126,6 +128,9 @@ class App:
         self.res_override = None            # --resolution WxH from the command line (not saved)
         self.war_confirm = 0.0
         self.war_confirm_k = None
+        self.sys_k, self.sys_sel = None, None                           # the system view: the star shown and the selected body
+        self.hud_btns = []
+        self.orb_hits, self.orb_btns, self.orb_hover = [], [], None     # ...what was drawn last frame, for the clicks
         self.g.stage_w, self.g.stage_h = PANEL.x - 12, H
         self.touch = touch.Touch(self, PANEL, lambda: (W, H))
         self.bg_since = None
@@ -368,8 +373,15 @@ class App:
             if rect.inflate(grow, grow).collidepoint(pos):
                 self.strip_click(k)
                 return
+        for rect, fn in self.hud_btns:
+            if rect.inflate(grow, grow).collidepoint(pos):
+                fn()
+                return
         if self.view == "galaxy":
             self.fv.click(pos)
+            return
+        if self.view == "orbit":
+            sysview.click(self, pos, grow)
             return
         best, bd = None, 1e9
         for a in self.asts:
@@ -414,6 +426,9 @@ class App:
                     g.toast("The Milky Way: attack any system within your jump range of one you hold. "
                             "Upgrade the Jump Drive in the Galaxy tab to reach further.", 9)
             return
+        if k == -4:                                 # the star system button
+            sysview.toggle(self)
+            return
         if k in (-2, -3):                           # the strip's arrows
             self.strip_off = max(0, self.strip_off + (-4 if k == -2 else 4))
             return
@@ -438,6 +453,20 @@ class App:
         self.war_confirm = 0.0
         g.start_campaign(k)
 
+    def orbit_area(self):
+        """The part of the window the system view uses: everything left of the side panel and above the planet strip."""
+        return pygame.Rect(0, 0, PANEL.x - 6, STRIP_Y - 30)
+
+    def system_key(self, key):
+        """S opens the star system view (or goes back to the planet); in it the arrow keys step through the bodies."""
+        if key == pygame.K_s:
+            sysview.toggle(self)
+            return True
+        if self.view == "orbit" and key in (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN):
+            sysview.select_next(self, 1 if key in (pygame.K_RIGHT, pygame.K_DOWN) else -1)
+            return True
+        return False
+
     def panel_visible(self):
         """The side panel is hidden while the galaxy map is shown wide."""
         return not (self.view == "galaxy" and self.gal_wide)
@@ -459,7 +488,7 @@ class App:
 
     def back_pressed(self):
         """The Android back button: leave the galaxy view; never quits (use Home)."""
-        if not self.g.event and self.view == "galaxy":
+        if not self.g.event and self.view in ("galaxy", "orbit"):
             self.view = "system"
 
     def went_to_background(self):
@@ -841,6 +870,7 @@ class App:
         g = self.g
         self.buttons = []
         self.modal_buttons = []
+        self.hud_btns = []                             # buttons over the scene (not in the panel)
         if self.view == "galaxy":                      # a different place: the star chart, not the planet's sky
             scr.blit(self.gal_backdrop, (0, 0))
         else:
@@ -854,6 +884,8 @@ class App:
             scr.blit(glow(260, scale_c((140, 100, 20), k)), (CX - 260, CY - 260), special_flags=ADD)
         if self.view == "galaxy":
             self.fv.draw(scr, fonts)
+        elif self.view == "orbit":
+            sysview.draw(self, scr, fonts)
         else:
             self.draw_scene(scr)
             self.draw_raiders(scr)
@@ -1113,6 +1145,9 @@ class App:
         if self.view == "galaxy":
             self.draw_hud_galaxy(scr, fonts)
             return
+        if self.view == "orbit":
+            sysview.draw_hud(self, scr, fonts)
+            return
         big, med, sm, tiny = fonts
         g = self.g
         p = g.cur
@@ -1123,6 +1158,13 @@ class App:
         title = site["name"] if site.get("colony") else site["name"].upper()          # "TRAPPIST-1 e": the planet's letter stays small
         self.txt(scr, med, title, (22, 12), site["col"], shadow=True)
         self.txt(scr, tiny, f"mining {site['ore']}", (22 + med.size(title)[0] + 10, 18), (170, 175, 200), shadow=True)
+        sx = 22 + med.size(title)[0] + 10 + tiny.size(f"mining {site['ore']}")[0] + 14
+        srect = pygame.Rect(sx, 12, 70, 22)
+        hot = srect.collidepoint(self.mouse) and not resources.TOUCH
+        pygame.draw.rect(scr, (60, 84, 150) if hot else (24, 32, 66), srect, border_radius=7)
+        pygame.draw.rect(scr, (120, 150, 215), srect, 1, border_radius=7)
+        self.txt(scr, tiny, "SYSTEM", srect.center, (225, 235, 255), "center")
+        self.hud_btns.append((srect, lambda: sysview.open_system(self)))
         self.txt(scr, big, fmt(g.ore[p], 2), (20, 32), (255, 255, 255), shadow=True)
         self.txt(scr, med, f"{fmt(g.s_ops[p], 2)} {site['ore']}/s", (22, 74), lerp_c(oc, (255, 255, 255), 0.35), shadow=True)
         self.txt(scr, sm, f"Click: +{fmt(g.s_click[p])}", (22, 100), (205, 205, 220), shadow=True)
@@ -1242,6 +1284,26 @@ class App:
             pygame.draw.circle(scr, (255, 220, 90), (gx + 15, STRIP_Y - 15), 3)
         if grect.collidepoint(self.mouse) and self.mouse[0] < PANEL.x - 10:
             hover = -1
+        # the star system button: the solar system, or the system of the planet you are on
+        sx = 94
+        srect = pygame.Rect(sx - 19, STRIP_Y - 19, 38, 38)
+        self.strip_hits.append((srect, -4))
+        sact = self.view == "orbit"
+        scol = (255, 215, 110) if sact else (130, 170, 255)
+        if sact:
+            scr.blit(glow(26, scale_c(scol, 0.5)), (sx - 26, STRIP_Y - 26), special_flags=ADD)
+        pygame.draw.circle(scr, (14, 18, 40), (sx, STRIP_Y), 19)
+        pygame.draw.circle(scr, scol, (sx, STRIP_Y), 19, 2)
+        scr.blit(glow(10, (110, 84, 30)), (sx - 10, STRIP_Y - 10), special_flags=ADD)
+        pygame.draw.circle(scr, (255, 214, 120), (sx, STRIP_Y), 4)
+        for rr, sp, col in ((8, 1.7, (150, 205, 255)), (13, 1.0, (255, 170, 120))):          # two planets on their orbits
+            pygame.draw.circle(scr, scale_c(scol, 0.45), (sx, STRIP_Y), rr, 1)
+            a = self.t * sp + rr
+            pygame.draw.circle(scr, col, (int(sx + rr * math.cos(a)), int(STRIP_Y + rr * math.sin(a))), 2)
+        if worldview.colony_ready(self) or any(g.can_unlock(i) for i in range(1, NSOL)):
+            pygame.draw.circle(scr, (255, 220, 90), (sx + 14, STRIP_Y - 15), 3)
+        if srect.collidepoint(self.mouse) and self.mouse[0] < PANEL.x - 10:
+            hover = -4
         for i, k in enumerate(shown):
             x = x0 + (i + (1 if over else 0)) * STRIP_DX
             self.strip_pos[k] = x
@@ -1276,7 +1338,12 @@ class App:
         big, med, sm, tiny = fonts
         g = self.g
         lines = []
-        if k < 0:
+        if k == -4:
+            here = sysview.star_of_site(g.sites[g.cur])
+            lines.append((f"Star system: {SECTORS[here]['name']}", (130, 170, 255)))
+            lines.append(("Its planets on their orbits", (225, 225, 240)))
+            lines.append(("Click to " + ("go back to the planet" if self.view == "orbit" else "open the system view") + "  (S)", (255, 215, 110)))
+        elif k < 0:
             if g.galaxy_open:
                 lines.append(("Galaxy map", (130, 170, 255)))
                 lines.append((f"Fleet power {fmt(g.fleet_power())}   {len(g.conquered) - 1:,} systems held", (225, 225, 240)))
@@ -1307,7 +1374,7 @@ class App:
             lines.append(("???  (locked)", (140, 146, 180)))
         w = max(sm.size(t)[0] for t, _ in lines) + 24
         h = len(lines) * 20 + 14
-        cx = 44 if k < 0 else self.strip_pos.get(k, STRIP_X0)
+        cx = (94 if k == -4 else 44) if k < 0 else self.strip_pos.get(k, STRIP_X0)
         x = max(8, min(cx - w // 2, PANEL.x - 20 - w))
         r = pygame.Rect(x, STRIP_Y - 44 - h, w, h)
         bg = pygame.Surface(r.size, pygame.SRCALPHA)
@@ -1413,25 +1480,55 @@ class App:
             return self.ach_new
         return False
 
+    def tab_summary(self, k):
+        """The one-line summary on the right of a tab's header: (text, colour) or None."""
+        g = self.g
+        if k == T_PLANETS:
+            return f"{sum(1 for p in range(NSOL) if g.unlocked[p])} solar planets  -  {g.n_colonies:,} colonies", (150, 200, 225)
+        if k == T_GALAXY:
+            return (f"{len(g.conquered) - 1:,} systems  -  fleet {fmt(g.fleet_power())}", (180, 160, 235)) if g.galaxy_open else None
+        if k == T_TECH:
+            return f"{len(g.techs)}/{len(TECHS)} researched  -  {fmt(g.science)} science", (120, 225, 215)
+        if k == T_QUESTS:
+            return f"{g.quests_done} completed", (240, 190, 130)
+        if k == T_WARP:
+            return f"{g.dm_avail()} Dark Matter" + (f"  -  {g.stardust} Stardust" if g.sd_total else ""), (240, 150, 200)
+        if k == T_AWARDS:
+            return f"{len(g.ach)}/{len(ACHIEVEMENTS)}  -  +{g.ach_bonus * 100:.1f}% production", (240, 205, 100)
+        return None
+
     def draw_panel(self, scr, fonts):
         big, med, sm, tiny = fonts
         g = self.g
         scr.blit(self.panel_bg, (PANEL.x - 12, 4))
         tw = PANEL.w // len(self.tabs)
-        for k, n in enumerate(self.tabs):
-            r = pygame.Rect(PANEL.x + k * tw, 14, tw - 4, 30)
-            self.button(scr, r, n, tiny if sm.size(n)[0] > tw - 10 else sm, (lambda k=k: self.set_tab(k)),
-                        col=(78, 100, 176) if self.tab == k else (34, 42, 74), dot=self.tab != k and self.tab_alert(k),
-                        selected=self.tab == k, danger=(n == "Dev"))
+        for k, n in enumerate(self.tabs):                       # the tabs: an icon over the name, the number of the key in the corner
+            r = pygame.Rect(PANEL.x + k * tw, 10, tw - 4, 44)
+            on = self.tab == k
+            accent = icons.TAB_ACCENT[n]
+            self.button(scr, r, "", tiny, (lambda k=k: self.set_tab(k)), col=(66, 88, 160) if on else (30, 38, 70),
+                        dot=not on and self.tab_alert(k), selected=on, danger=(n == "Dev"))
+            ic = icons.tab_icon(n, 20, accent if on else scale_c(accent, 0.8))
+            scr.blit(ic, ic.get_rect(center=(r.centerx, r.y + 15)))
+            self.txt(scr, tiny, n, (r.centerx, r.y + 34), (255, 255, 255) if on else (170, 180, 215), "center")
+            if k < 9:
+                self.txt(scr, tiny, str((k + 1) % 10), (r.x + 5, r.y + 2), (110, 120, 160) if not on else (170, 190, 235))
+            if on:
+                pygame.draw.rect(scr, accent, (r.x + 8, r.bottom - 3, r.w - 16, 3), border_radius=2)
+        accent = icons.TAB_ACCENT[self.tabs[self.tab]]
+        self.txt(scr, med, self.tabs[self.tab].upper(), (PANEL.x + 2, 62), accent)
         if self.tab in (T_SHIPS, T_COLONY):
-            self.txt(scr, tiny, "Buy:", (PANEL.x + 2, 70), (170, 175, 200))
             for k, (lab, m) in enumerate([("x1", 1), ("x10", 10), ("x100", 100), ("Max", 0)]):
-                r = pygame.Rect(PANEL.x + 40 + k * 62, 58, 56, 26)
+                r = pygame.Rect(PANEL.right - 4 * 54 + k * 54 + 2, 62, 50, 26)
                 self.button(scr, r, lab, sm, (lambda m=m: setattr(g, "buy_mode", m)),
                             col=(66, 128, 92) if g.buy_mode == m else (34, 42, 74))
         site = self.g.sites[g.cur]
+        summary = self.tab_summary(self.tab)
+        if summary:
+            self.txt(scr, tiny, summary[0], (PANEL.right - 2, 69), summary[1], "topright")
         if self.tab in (T_SHIPS, T_UPG, T_COLONY):
-            self.txt(scr, tiny, f"{site['name']}  -  paid in {site['ore']}", (PANEL.right, 70), site["col"], "topright")
+            right = PANEL.right - (4 * 54 + 8 if self.tab != T_UPG else 0)
+            self.txt(scr, tiny, f"{site['name']}  -  paid in {site['ore']}", (right, 69), site["col"], "topright")
         pygame.draw.line(scr, (50, 58, 100), (PANEL.x, PANEL.y - 7), (PANEL.right, PANEL.y - 7))
         if self.tab == T_AWARDS:
             self.ach_new = False
@@ -2000,11 +2097,13 @@ class App:
         self.button(scr, r, "Back to the solar system" if self.view == "galaxy" else "Open the galaxy map", sm,
                     lambda: self.strip_click(-1), panel=True, col=(60, 84, 150))
         y += 38
-        third = (PANEL.w - 16) // 3
-        self.button(scr, pygame.Rect(PANEL.x, y, third, 30), "Close look", sm, self.close_look, panel=True, col=(150, 74, 74))
-        self.button(scr, pygame.Rect(PANEL.x + third + 8, y, third, 30), "Home", sm, self.go_home, panel=True, col=(50, 100, 110))
-        self.button(scr, pygame.Rect(PANEL.x + 2 * (third + 8), y, third, 30), "Whole galaxy", sm, self.zoom_out, panel=True,
-                    col=(50, 70, 110))
+        quarter = (PANEL.w - 24) // 4
+        sk = self.sel_sector if sysview.can_open(g, self.sel_sector) else None
+        for i, (label, fn, col, ok) in enumerate((("Close look", self.close_look, (150, 74, 74), True), ("Home", self.go_home, (50, 100, 110), True),
+                                                  ("Whole galaxy", self.zoom_out, (50, 70, 110), True),
+                                                  ("Open system", (lambda: sysview.open_system(self, sk)), (46, 110, 84), sk is not None))):
+            self.button(scr, pygame.Rect(PANEL.x + i * (quarter + 8), y, quarter, 30), label, sm if len(label) < 12 else tiny, fn, panel=True,
+                        col=col, enabled=ok)
         y += 40
         pw = (PANEL.w - 16) // 3
         for i, label in enumerate(self.GAL_PAGES):
@@ -2832,6 +2931,8 @@ def main():
                             app.set_tab(9)
                         elif e.key == pygame.K_g:
                             app.strip_click(-1)
+                        elif not g.event and app.system_key(e.key):
+                            pass
                         elif app.galaxy_key(e.key):
                             pass
                         elif e.key == pygame.K_F1 and dev:
@@ -3291,6 +3392,174 @@ def check_attack_ui(app):
         app.fv.best_t = -9.0
         app.fv.aim = app.fv.drag = None
         app.set_resolution_choice("auto")
+
+
+def check_sysview():
+    """The layout of a star's worlds: every star that has worlds gets a sane, deterministic set of orbits."""
+    sol = sysview.bodies(0)
+    assert len(sol) == NSOL and [b["name"] for b in sol if b["parent"] is None][:3] == ["Mercury", "Venus", "Earth"], "the planets are in order from the Sun"
+    assert [b["name"] for b in sol if b["parent"] is not None] == ["Moon"] and sol[-1]["parent"] == ("s", 0), "the Moon orbits the Earth"
+    assert sorted(b["p"] for b in sol) == list(range(NSOL)) and sysview.bodies(0) is sol, "every solar planet once, cached"
+    planets = [b for b in sol if b["parent"] is None]
+    assert all(0 <= b["u"] <= 1 for b in planets) and [b["u"] for b in planets] == sorted(b["u"] for b in planets)
+    assert sysview.can_open(core.Game(load=False, sim=True), 0)
+    t1 = galaxy.BY_NAME["TRAPPIST-1"]
+    tb = sysview.bodies(t1)
+    assert len(tb) == 7 and [b["name"][-1] for b in tb] == list("bcdefgh") and all(0 <= b["u"] <= 1 for b in tb)
+    n = 0
+    for k in range(1, galaxy.N):
+        ws = worlds.count_of(k)
+        if not ws:
+            assert sysview.bodies(k) == []
+            continue
+        bs = sysview.bodies(k)
+        assert len(bs) == ws and len({b["key"] for b in bs}) == ws, k
+        assert all(0 <= b["u"] <= 1 and b["size"] >= 16 and 0 < b["w"] <= 0.6 for b in bs), k
+        assert all(sysview.STAR_LOOK.get(galaxy.STARS[k]["kind"]) for _ in (0,)), galaxy.STARS[k]["kind"]
+        n += 1
+    assert n > 3000
+    g = core.Game(load=False, sim=True)
+    assert not sysview.can_open(g, t1) and not sysview.can_open(g, galaxy.BY_NAME["Nebula 1"] if "Nebula 1" in galaxy.BY_NAME else 1)
+    g.conquered.add(t1)
+    assert sysview.can_open(g, t1)
+    assert sysview.state_of(g, sol[2]) == "here" and sysview.state_of(g, sysview.body_of(0, ("s", 5))) in ("next", "locked")
+    assert sysview.state_of(g, sysview.body_of(0, ("s", 1))) == "next"                      # the Moon is the next planet
+    g.ore[0] = 1e30
+    g.credits = 1e30
+    assert sysview.state_of(g, sysview.body_of(0, ("s", 1))) == "ready"
+    assert sysview.primary(type("A", (), dict(g=g))(), sysview.body_of(0, ("s", 1)))[0] == "UNLOCK"
+
+
+def check_sysview_ui(app):
+    """The system view draws at every canvas size for the Sun and for a star with worlds, answers clicks on the worlds, the star, the
+    buttons and the keys, and the strip's button, S and the Android back button move between the three levels."""
+    fonts = app_fonts()
+    g0, view0, tab0 = app.g, app.view, app.tab
+    sel0, skey0 = app.sel_sector, (app.sys_k, app.sys_sel)
+    try:
+        g = core.Game(load=False, sim=True)
+        app.g = g
+        app.rebuild_view()
+        t1 = galaxy.BY_NAME["TRAPPIST-1"]
+        g.credits = 1e80
+        g.conquered.add(t1)
+        for k in range(1, 4):
+            g.unlocked[k] = True
+        for q in range(NSOL):
+            g.ore[q] = 1e70
+        g.galaxy_open or g.recalc()
+        app.view, app.tab = "system", T_PLANETS
+        # the three levels: planet -> system (button, S key, strip) -> back
+        app.update(0.016)
+        app.draw(app.scr, fonts)
+        assert app.system_key(pygame.K_s) and app.view == "orbit" and sysview.current_star(app) == 0
+        app.update(0.016)
+        app.draw(app.scr, fonts)
+        assert app.system_key(pygame.K_s) and app.view == "system"
+        app.strip_click(-4)
+        assert app.view == "orbit"
+        app.back_pressed()
+        assert app.view == "system"
+        assert any(k == -4 for _, k in app.strip_hits), "the strip has the star system button"
+        app.update(0.016)
+        app.draw(app.scr, fonts)
+        for r, fn in app.hud_btns:                                        # the SYSTEM chip of the planet view
+            fn()
+        assert app.view == "orbit"
+        # the Sun: click on a planet selects it, a second click on one you hold goes there
+        for res in ("1920x1080", "1280x720", "1600x720", "2560x1440"):
+            app.set_resolution_choice(res)
+            for k in (0, t1):
+                app.sys_k, app.sys_sel = k, None
+                app.view = "orbit"
+                for tab in (T_PLANETS, T_SHIPS):
+                    app.tab = tab
+                    app.update(0.016)
+                    app.draw(app.scr, fonts)
+        app.set_resolution_choice("1280x720")
+        app.sys_k, app.sys_sel, app.view = 0, None, "orbit"
+        app.update(0.016)
+        app.draw(app.scr, fonts)
+        hits = {key: (x, y) for x, y, r, key in app.orb_hits}
+        assert ("s", 2) in hits and "star" in hits and len(app.orb_hits) == NSOL + 1
+        x, y = hits[("s", 2)]
+        app.mouse_down((int(x), int(y)))
+        assert app.sys_sel == ("s", 2)
+        app.draw(app.scr, fonts)
+        assert app.orb_btns, "the card has buttons"
+        x, y = hits["star"]
+        app.mouse_down((int(x), int(y)))
+        assert app.sys_sel is None
+        app.draw(app.scr, fonts)
+        app.sys_sel = ("s", 1)
+        for _ in range(3):
+            sysview.select_next(app, 1)
+        assert app.sys_sel not in (None, ("s", 1))
+        app.system_key(pygame.K_LEFT)
+        # the planets you hold: go there; the card unlocks the next planet
+        g.cur = 0
+        app.sys_sel = ("s", 3)
+        app.update(0.016)
+        app.draw(app.scr, fonts)
+        label, fn, ok = sysview.primary(app, sysview.body_of(0, ("s", 3)))
+        assert label == "TRAVEL HERE" and ok
+        fn()
+        assert app.view == "system" and g.cur == 3                          # (a sim game travels at once)
+        app.sys_sel, app.view = ("s", 4), "orbit"
+        app.update(0.016)
+        app.draw(app.scr, fonts)
+        label, fn, ok = sysview.primary(app, sysview.body_of(0, ("s", 4)))
+        assert label == "UNLOCK" and ok
+        fn()
+        assert g.unlocked[4]
+        # a star with worlds: settle one from the card, then it is lit
+        app.sys_k, app.view, app.sys_sel = t1, "orbit", ("w", t1, 3)
+        app.update(0.016)
+        app.draw(app.scr, fonts)
+        n0 = g.n_colonies
+        label, fn, ok = sysview.primary(app, sysview.body_of(t1, ("w", t1, 3)))
+        assert label == "SETTLE" and ok, label
+        pressed = [f for r, f in app.orb_btns if r.collidepoint((app.orbit_area().right - 90, card_y(app) + 30))]
+        assert pressed, "the card's main button is on screen"
+        pressed[0]()
+        assert g.n_colonies == n0 + 1 and sysview.state_of(g, sysview.body_of(t1, ("w", t1, 3))) == "owned"
+        app.update(0.016)
+        app.draw(app.scr, fonts)
+        label, fn, ok = sysview.primary(app, sysview.body_of(t1, ("w", t1, 3)))
+        assert label == "TRAVEL HERE"
+        fn()
+        assert g.cur == g.colony_planet[(t1, 3)] and app.view == "system"
+        # a star you do not hold has no system view; the galaxy view's buttons reach it for ones you do
+        far = next(k for k in range(1, galaxy.N) if k not in g.conquered and worlds.count_of(k))
+        g.toasts.clear()
+        assert not sysview.open_system(app, far) and g.toasts and app.view == "system"
+        app.view, app.sel_sector = "galaxy", t1
+        app.gal_wide = True
+        app.update(0.016)
+        app.fv.focus(t1, snap=True)
+        app.draw(app.scr, fonts)
+        assert sysview.can_open(g, t1)
+        app.view, app.sys_k = "system", None
+        # the Galaxy tab's "Open system" button and every tab of the panel (the new header) draw in the system view
+        app.tab = T_GALAXY
+        app.view = "orbit"
+        for tab in range(len(app.tabs)):
+            app.tab = tab
+            app.update(0.016)
+            app.draw(app.scr, fonts)
+        app.view, app.tab = "orbit", T_GALAXY
+        app.sys_k = 0
+        sysview._to_galaxy(app, t1)
+        assert app.view == "galaxy" and app.sel_sector == t1
+    finally:
+        app.g, app.view, app.tab = g0, view0, tab0
+        app.sel_sector, (app.sys_k, app.sys_sel) = sel0, skey0
+        app.set_resolution_choice("auto")
+        app.rebuild_view()
+
+
+def card_y(app):
+    return sysview.card_rect(app).y
 
 
 def check_worlds_ui(app):
@@ -3849,6 +4118,7 @@ def selftest_step(app, g, frames, shot):
         check_worlds()
         check_fronts()
         check_attack_flow()
+        check_sysview()
         check_generals()
         check_counter_offensives()
         check_new_game_reset()
@@ -4049,6 +4319,7 @@ def selftest_step(app, g, frames, shot):
         check_colonies_ui(app)
     if frames == 81:
         check_attack_ui(app)
+        check_sysview_ui(app)
     if frames == 79:
         shot("ascension")
     if frames == 80:
