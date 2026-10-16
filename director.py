@@ -233,6 +233,11 @@ def strikes_with(g, inc):
     return 1 + sum(1 for o in g.incoming if o["kind"] == "offensive" and o["id"] != inc["id"] and generals.region_of(o["target"]) == r)
 
 
+def away(g):
+    """0..1: how much of the fleet that is free to go out is away on campaign (the defence pool never leaves, so it does not count)."""
+    return min(1.0, g.committed_share() / max(0.05, 1.0 - g.defence))
+
+
 def aggression(g):
     """0..1: how bold the enemy feels."""
     if not g.galaxy_open:
@@ -250,7 +255,7 @@ def aggression(g):
     planets = [p for p in range(NSITE) if g.unlocked[p]]
     weak = sum(1 for p in planets if planet_defense(g, p) < rp)
     a += 0.2 * weak / max(1, len(planets))
-    a += 0.25 * g.committed_share()                 # they strike while your fleets are away
+    a += 0.25 * away(g)                             # they strike while your armies are away
     a += 0.15 * max(0.0, 1.0 - g.defence / 0.3)     # ...and when you leave your borders unguarded
     return max(0.0, min(1.0, a))
 
@@ -529,7 +534,7 @@ def step(g, dt):
         guard += 1
         g.raid_t += interval(g, 420.0, 1200.0)
         schedule_raid(g)
-    g.offensive_t -= dt * (1.0 + g.committed_share())                  # the more of your fleet is away, the sooner they come
+    g.offensive_t -= dt * (1.0 + away(g))                              # the more of your fleet is away, the sooner they come
     if g.offensive_t <= 0:
         g.offensive_t = interval(g, 1800.0, 3600.0)
         if len(g.conquered) - 1 >= 2 and aggression(g) >= 0.35:
