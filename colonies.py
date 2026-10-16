@@ -18,7 +18,8 @@ TIER_CAP = 11                    # the richest tier: the Kuiper Belt
 COST_BASE = 0.4                  # a colony costs this much of a solar planet of its tier...
 COST_GROWTH = 1.06               # ...and every colony you already hold makes the next one this much dearer
 G_BONUS = 0.01                   # every colony adds this to the production multiplier (a solar planet adds 0.05)
-YIELD = 0.2                      # a colony's banks and labs make this share of the credits and science of a solar planet of its tier
+YIELD = 0.05                     # a colony's banks and labs make this share of the credits and science of a solar planet of its tier
+GLOBAL = 0.02                    # and its reactors and silos (they boost ALL production and the crates) count this share: dozens of colonies must not stack them
 NORM = 0.1                       # the share of a colony's ore that counts towards Dark Matter (a Warp) and your cycle's progress
 FLEET = 0.3                      # a colony's ships fight at this share of the strength of a solar planet's
 

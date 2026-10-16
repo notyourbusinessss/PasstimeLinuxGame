@@ -978,9 +978,9 @@ class Game:
                 elif b == 3:
                     disc[p] += 0.006 * L * f
                 elif b == 4:
-                    reactor += 0.025 * L * f
+                    reactor += 0.025 * L * f * (colonies.GLOBAL if p >= NSOL else 1.0)
                 elif b == 5:
-                    crate += 0.04 * L * f
+                    crate += 0.04 * L * f * (colonies.GLOBAL if p >= NSOL else 1.0)
         ach = 1 + self.ach_bonus
         buff = 1.0
         for b in self.buffs:
