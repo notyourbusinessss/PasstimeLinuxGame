@@ -197,6 +197,116 @@ def make_planet(r, kind, base, seed):
     return tex
 
 
+# ------------------------------------------------------------------ worlds of other systems
+WORLD_RES = 56                    # a big picture of a world is painted at this radius and scaled up
+
+
+def _world_pal(kind, rng):
+    """The colours of one world of a kind: a few palettes and a few random knobs, so no two worlds look the same."""
+    if kind == "temperate":
+        land = rng.choice([((40, 118, 52), (156, 144, 84)), ((70, 112, 44), (176, 150, 96)), ((34, 96, 84), (130, 150, 110))])
+        return dict(land=land, sea=((12, 48, 140), (40, 108, 206)), cut=rng.uniform(0.42, 0.58), cloud=rng.uniform(0.55, 0.7))
+    if kind == "ocean":
+        return dict(sea=rng.choice([((8, 40, 128), (30, 120, 214)), ((6, 56, 112), (40, 150, 190)), ((20, 40, 120), (70, 110, 220))]),
+                    cloud=rng.uniform(0.5, 0.65))
+    if kind == "rocky":
+        return dict(cols=rng.choice([((92, 86, 80), (190, 176, 160)), ((84, 78, 90), (176, 170, 186)), ((100, 82, 70), (200, 170, 140))]))
+    if kind == "desert":
+        return dict(cols=rng.choice([((150, 96, 52), (236, 196, 128)), ((170, 110, 60), (240, 210, 150)), ((130, 80, 60), (214, 164, 120))]),
+                    ripple=rng.uniform(10, 26))
+    if kind == "ice":
+        return dict(cols=rng.choice([((176, 200, 226), (250, 252, 255)), ((190, 214, 220), (246, 252, 252)), ((170, 180, 220), (240, 244, 255))]))
+    if kind == "lava":
+        return dict(glow=rng.choice([((255, 110, 30), (255, 220, 120)), ((255, 70, 40), (255, 190, 90))]), width=rng.uniform(9, 16))
+    if kind == "dwarf":
+        return dict(cols=rng.choice([((116, 100, 92), (214, 200, 190)), ((84, 84, 92), (190, 190, 200)), ((140, 110, 96), (232, 214, 200))]))
+    if kind == "mini":
+        return dict(cols=rng.choice([((140, 184, 206), (214, 236, 244)), ((186, 164, 208), (236, 224, 246)), ((196, 196, 150), (246, 244, 214))]),
+                    bands=rng.uniform(3, 7))
+    if kind == "ice_giant":
+        return dict(cols=rng.choice([((104, 190, 208), (196, 244, 248)), ((22, 44, 170), (80, 124, 240)), ((60, 150, 150), (170, 228, 214))]),
+                    bands=rng.uniform(2, 5))
+    return dict(cols=rng.choice([((150, 86, 48), (244, 222, 190)), ((186, 160, 108), (246, 232, 192)), ((120, 90, 60), (230, 200, 160)),
+                                 ((90, 110, 150), (200, 215, 235)), ((160, 70, 60), (240, 190, 170))]),
+                bands=rng.uniform(4, 9), storm=(rng.uniform(0.2, 0.8), rng.uniform(0.35, 0.65)))
+
+
+def _world_color(kind, pal, v, v2, x, y, S):
+    lat = abs(y / S - 0.5) * 2
+    if kind == "temperate" or kind == "ocean":
+        if kind == "temperate" and v > pal["cut"]:
+            c = lerp_c(pal["land"][0], pal["land"][1], min(1.0, max(0.0, (v2 - 0.3) * 1.6)))
+        else:
+            c = lerp_c(pal["sea"][0], pal["sea"][1], v / max(0.2, pal.get("cut", 0.8)))
+        if lat > 0.9:
+            c = lerp_c(c, (245, 250, 255), 0.85)
+        return lerp_c(c, (255, 255, 255), max(0.0, (v2 - pal["cloud"]) * 2.6))
+    if kind in ("rocky", "dwarf"):
+        c = lerp_c(pal["cols"][0], pal["cols"][1], v)
+        return lerp_c(c, (36, 34, 38), max(0.0, (0.3 - v2) * 2.2))
+    if kind == "desert":
+        c = lerp_c(pal["cols"][0], pal["cols"][1], v)
+        return lerp_c(c, pal["cols"][0], 0.5 + 0.5 * math.sin(y / S * pal["ripple"] + v * 6) * 0.5)
+    if kind == "ice":
+        c = lerp_c(pal["cols"][0], pal["cols"][1], v)
+        return lerp_c(c, (90, 120, 170), max(0.0, 1 - abs(v2 - 0.5) * 22) * 0.7)
+    if kind == "lava":
+        crust = lerp_c((26, 22, 24), (74, 52, 46), v)
+        k = max(0.0, 1 - abs(v - 0.5) * pal["width"] * 0.35) ** 2
+        k = max(k, max(0.0, 1 - abs(v2 - 0.45) * pal["width"] * 0.3) ** 3)
+        return lerp_c(crust, lerp_c(pal["glow"][0], pal["glow"][1], k), min(1.0, k * 1.2))
+    band = 0.5 + 0.5 * math.sin(y / S * math.tau * pal["bands"] + v * (3 if kind == "gas" else 1.6))
+    c = lerp_c(pal["cols"][0], pal["cols"][1], band)
+    if kind == "gas":
+        sx, sy = pal["storm"]
+        dx, dy = (x - sx * S) / (0.12 * S), (y - sy * S) / (0.07 * S)
+        if dx * dx + dy * dy < 1:
+            c = lerp_c(c, (204, 80, 56), 0.9 - 0.6 * (dx * dx + dy * dy))
+    return c
+
+
+@lru_cache(maxsize=160)
+def make_world(kind, seed, size, ring=False):
+    """A picture of a world of another system, size x size pixels, lit from the upper left; a ringed giant is drawn smaller, inside
+    its rings. Pictures are cached, so never draw on one."""
+    rng = random.Random(seed)
+    pal = _world_pal(kind, rng)
+    diam = int(size * 0.58) if ring else size
+    tr = max(8, min(diam // 2, WORLD_RES))
+    S = 2 * tr + 2
+    n1 = noise_gray(S, S, 4, seed, 3)
+    n2 = noise_gray(S, S, 3, seed + 99, 3)
+    tex = pygame.Surface((S, S))
+    for x in range(S):
+        for y in range(S):
+            tex.set_at((x, y), _world_color(kind, pal, n1.get_at((x, y))[0] / 255, n2.get_at((x, y))[0] / 255, x, y, S))
+    big = pygame.Surface((S * 4, S * 4), pygame.SRCALPHA)
+    pygame.draw.circle(big, (255, 255, 255, 255), (S * 2, S * 2), tr * 4)
+    mask = pygame.transform.smoothscale(big, (S, S))
+    tex.blit(sphere_shade(S, tr), (0, 0), special_flags=MULT)
+    tex = tex.convert_alpha()
+    tex.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+    if S != diam + 2:
+        tex = pygame.transform.smoothscale(tex, (diam + 2, diam + 2))
+    out = pygame.Surface((size, size), pygame.SRCALPHA)
+    if not ring:
+        out.blit(tex, tex.get_rect(center=(size // 2, size // 2)))
+        return out
+    cx, cy = size // 2, size // 2
+    layer = pygame.Surface((size, size), pygame.SRCALPHA)
+    rx, ry = size * 0.48, size * 0.13
+    for i, (k, a) in enumerate(((1.0, 150), (0.9, 210), (0.8, 120), (0.74, 190), (0.68, 100))):
+        col = lerp_c((236, 214, 170), (160, 140, 110), i / 4)
+        pygame.draw.ellipse(layer, (*col, a), (cx - rx * k, cy - ry * k, 2 * rx * k, 2 * ry * k), max(2, size // 40))
+    back = layer.copy()
+    back.fill((255, 255, 255, 0), (0, cy, size, size - cy), special_flags=pygame.BLEND_RGBA_MULT)
+    layer.fill((255, 255, 255, 0), (0, 0, size, cy), special_flags=pygame.BLEND_RGBA_MULT)
+    out.blit(back, (0, 0))
+    out.blit(tex, tex.get_rect(center=(cx, cy)))
+    out.blit(layer, (0, 0))
+    return out
+
+
 def make_asteroid(size, seed, tint=(255, 255, 255)):
     """Small lit rock sprite (lighting baked in)."""
     S = size

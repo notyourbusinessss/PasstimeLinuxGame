@@ -11,6 +11,7 @@ import galaxy
 import gamelog
 import resources
 import ships
+import worlds
 
 log = gamelog.LOG
 
@@ -533,7 +534,7 @@ def build_achievements():
     return A
 
 
-ACHIEVEMENTS = build_achievements()
+ACHIEVEMENTS = build_achievements() + worlds.achievements()
 ACH_BY_ID = {a["id"]: a for a in ACHIEVEMENTS}
 RENAMED_ACH = {"Interstellar": "Last Frontier"}       # achievements that changed name: old saves keep them
 

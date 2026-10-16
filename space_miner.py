@@ -33,6 +33,8 @@ import frontview
 import gfx
 import sounds
 import touch
+import worlds
+import worldview
 from version import __version__
 from core import (BMAX, BUILDINGS, NB, NSH, NSITE, PERKS, PROJECTS, SC, SHIPS, SITES, TECHS, TECH_BY_ID,
                   UPGRADES, ACHIEVEMENTS, ACH_BY_ID, ACH_CATS, TIER_BONUS, TIER_NAMES, QUEST_TXT, fmt, geo_cost,
@@ -108,6 +110,9 @@ class App:
         self.ascend_confirm = 0.0
         self.ascend_cycle = 1
         self.ach_new = False
+        self.pl_page, self.wf_group, self.wf_sys = 0, "all", None      # the Planets tab: page, the filter of the worlds page
+        self.wsel, self.w_seen, self.w_cache = None, 0, None           # the selected world, how many worlds you have looked at
+        self.w_sig, self.w_known = None, None                          # the systems held when the discovery toasts last looked
         self.awards_cat = "All"
         self.fps = 0.0
         self.can_scale = False               # True when the window is resizable and scales the game to fit
@@ -612,6 +617,7 @@ class App:
         self.dt = dt
         self.t += dt
         g.step(dt)
+        worldview.news_toasts(self)
         if self.view != self.last_view:
             self.last_view, self.view_t = self.view, 0.0
         self.view_t += dt
@@ -1308,7 +1314,7 @@ class App:
         if k == T_COLONY:
             return g.can_buy_project(p)
         if k == T_PLANETS:
-            return any(g.can_unlock(i) for i in range(1, NSITE))
+            return any(g.can_unlock(i) for i in range(1, NSITE)) or (self.pl_page == 0 and worldview.has_news(self))
         if k == T_GALAXY:
             return g.attack_ready()
         if k == T_TECH:
@@ -1472,6 +1478,9 @@ class App:
     def draw_planets(self, scr, fonts, y):
         big, med, sm, tiny = fonts
         g = self.g
+        if self.pl_page == 1:
+            return worldview.draw_page(self, scr, fonts, y)
+        y = worldview.draw_toggle(self, scr, fonts, y)
         nxt = next((i for i in range(1, NSITE) if not g.unlocked[i]), None)
         for i, line in enumerate(["Unlock planets with the ores of the worlds behind you. Every planet has its",
                                   "own ore, fleet, colony and a bonus. Travel by clicking a planet below or at the bottom."]):
@@ -2907,6 +2916,109 @@ def check_kuiper_belt():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def check_worlds():
+    """The planets of the other systems: the same every time, sane numbers, real planets for the real stars, the facts you find."""
+    total = 0
+    kinds = set()
+    for k in range(galaxy.N):
+        ws = worlds.planets_of(k)
+        assert ws is worlds.planets_of(k)
+        total += len(ws)
+        for i, w in enumerate(ws):
+            assert w["sys"] == k and w["idx"] == i and w["kind"] in worlds.KINDS and w["name"] and w["seed"] >= 0, (k, w)
+            assert 0.2 <= w["r"] <= 16.0 and w["m"] > 0 and w["t"] > 0 and w["per"] > 0 and w["a"] > 0, (k, w)
+            assert w["ring"] <= (w["kind"] == "gas")
+            kinds.add(w["kind"])
+        assert [w["a"] for w in ws] == sorted(w["a"] for w in ws)
+    assert not worlds.planets_of(0) and kinds == set(worlds.KINDS) and total > 10000, (total, kinds)
+    first = worlds.planets_of(40)
+    worlds._CACHE.clear()
+    again = worlds.planets_of(40)
+    assert first == again and first is not again, "the worlds of a system must not change"
+    for k in range(galaxy.N):                                                # places that are not a star have no planets
+        if galaxy.STARS[k]["kind"] in ("Nebula", "Star cluster", "Black hole", "Globular cluster", "Supernova remnant"):
+            assert not worlds.planets_of(k), galaxy.STARS[k]
+    t1 = worlds.planets_of(galaxy.BY_NAME["TRAPPIST-1"])
+    assert [w["name"] for w in t1] == [f"TRAPPIST-1 {c}" for c in "bcdefgh"] and all(w["real"] for w in t1)
+    assert t1[3]["kind"] == "temperate" and t1[3]["year"] == 2017 and worlds.origin(t1[3]).startswith("Confirmed exoplanet")
+    prox = [w["name"] for w in worlds.planets_of(galaxy.BY_NAME["Proxima Centauri"])]
+    assert "Proxima Centauri b" in prox and not any("Proxima" in w["name"] for w in worlds.planets_of(galaxy.BY_NAME["Alpha Centauri"]))
+    assert all(not w["real"] and w["name"].split()[-1] in worlds.ROMAN for w in worlds.planets_of(galaxy.BY_NAME["Sirius"]))
+    assert len(worlds.REAL) == 31 and sum(len(v) for v in worlds.REAL.values()) == 89
+    for r, t, roll, kind in ((11.0, 150, 0.5, "gas"), (4.0, 100, 0.5, "ice_giant"), (2.2, 300, 0.5, "mini"), (0.3, 300, 0.5, "dwarf"),
+                             (1.0, 1500, 0.5, "lava"), (0.9, 500, 0.5, "desert"), (1.0, 288, 0.9, "temperate"), (1.0, 288, 0.1, "ocean"),
+                             (1.0, 150, 0.2, "ice"), (0.5, 288, 0.5, "rocky")):
+        assert worlds.classify(r, t, roll) == kind, (r, t, roll, kind)
+    for m in (0.1, 1.0, 5.0, 17.0, 318.0):                                     # mass and radius agree both ways
+        assert abs(worlds.mass_from_radius(worlds.radius_from_mass(m)) / m - 1) < 0.2, m
+    assert worlds.year_text(1.0) == "24 hours" and worlds.year_text(400) == "400 days" and worlds.year_text(600) == "1.6 years" and "K" in worlds.temp_text(288)
+    # what you find follows what you hold
+    g = core.Game(load=False, sim=True)
+    assert worlds.stats(g.conquered)["total"] == 0 and worlds.found(g.conquered) == [] and worlds.news(0) is None
+    k = galaxy.BY_NAME["TRAPPIST-1"]
+    g.conquered.add(k)
+    st = worlds.stats(g.conquered)
+    assert st["total"] == 7 and st["systems"] == 1 and st["real"] == 7 and st["habitable"] == 3 and st["by_kind"]["desert"] == 2
+    assert [w["name"] for w in worlds.found(g.conquered, "habitable")] == ["TRAPPIST-1 d", "TRAPPIST-1 e", "TRAPPIST-1 f"]
+    assert len(worlds.found(g.conquered, "all", k)) == 7 and worlds.found(g.conquered, "all", 5) == []
+    assert "7 worlds" in worlds.news(k) and "3 habitable" in worlds.news(k)
+    new = {a["id"] for a in g.check_achievements()}
+    assert {"First Light", "Goldilocks", "Seven Sisters"} <= new and not ({"Survey Team", "Known Worlds"} & new), new
+    assert len(core.ACHIEVEMENTS) == len({a["id"] for a in core.ACHIEVEMENTS}), "two achievements with the same name"
+    assert worldview.summary(k) == "7 worlds: 3 habitable, 4 rocky" and worldview.summary(0) is None
+    assert len(worlds.found(set(range(galaxy.N)))) == total
+
+
+def check_worlds_ui(app):
+    """The Other systems page draws and answers clicks with nothing found, a few worlds and every world of the galaxy."""
+    fonts = app_fonts()
+    g0, view0, tab0, page0 = app.g, app.view, app.tab, app.pl_page
+    try:
+        g = core.Game(load=False, sim=True)
+        app.g = g
+        app.view, app.tab, app.pl_page = "system", T_PLANETS, 1
+        app.w_known = app.w_sig = app.w_cache = app.wsel = None
+        for held in (None, {0, 1, 2}, set(range(galaxy.N))):
+            g.unlocked[core.GALAXY_UNLOCK_PLANET] = held is not None
+            if held:
+                g.conquered = set(held)
+            for scroll in (0, 700, 10 ** 6):
+                app.scroll[T_PLANETS] = scroll
+                app.update(0.016)
+                app.draw(app.scr, fonts)
+        k = galaxy.BY_NAME["TRAPPIST-1"]
+        g.conquered = {0, k}
+        g.unlocked[core.GALAXY_UNLOCK_PLANET] = True
+        app.scroll[T_PLANETS] = 0
+        app.update(0.016)
+        assert any("7 worlds" in t[0] for t in g.toasts), "liberating a star with real planets should be announced"
+        app.draw(app.scr, fonts)
+        w = worlds.planets_of(k)[3]
+        worldview.select(app, w)
+        assert worldview.selected(app) is w
+        for grp, _ in worlds.GROUPS:
+            worldview.set_filter(app, grp, None)
+            app.draw(app.scr, fonts)
+            assert len(worldview.world_list(app, None)) == len(worlds.found(g.conquered, grp))
+        worldview.set_filter(app, "all", k)
+        app.sel_sector = k
+        app.draw(app.scr, fonts)
+        assert len(worldview.world_list(app, k)) == 7
+        worldview.show_on_map(app, k)
+        assert app.view == "galaxy" and app.sel_sector == k
+        app.pl_page = 0
+        app.draw(app.scr, fonts)
+        worldview.set_page(app, 1)
+        assert app.pl_page == 1 and app.scroll[app.tab] == 0
+        g.conquered = {0}                                                      # a selected world that is no longer yours
+        assert worldview.selected(app) is None
+        app.draw(app.scr, fonts)
+    finally:
+        app.g, app.view, app.tab, app.pl_page = g0, view0, tab0, page0
+        app.w_known = app.w_sig = app.w_cache = app.wsel = None
+        app.scroll[T_PLANETS] = 0
+
+
 def check_galaxy():
     """The Milky Way's data and the reach map agree with a brute-force check."""
     N = galaxy.N
@@ -3252,6 +3364,7 @@ def selftest_step(app, g, frames, shot):
         check_galaxy()
         check_more_ships()
         check_kuiper_belt()
+        check_worlds()
         check_fronts()
         check_generals()
         check_counter_offensives()
@@ -3448,6 +3561,8 @@ def selftest_step(app, g, frames, shot):
         app.tab = T_WARP
         app.warp_view = "ascend"
         assert g.can_ascend()
+    if frames == 78:
+        check_worlds_ui(app)
     if frames == 79:
         shot("ascension")
     if frames == 80:
