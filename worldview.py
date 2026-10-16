@@ -29,8 +29,8 @@ def summary(k):
 
 
 def news_toasts(app):
-    """Toast the worlds worth a message when a system is liberated: a real star's planets or a habitable world. The rest is on the
-    Other systems page. Called every frame; it only does something when the systems you hold have changed."""
+    """Toast the worlds worth a message when a system is liberated: a real star's planets or the first habitable world you find. The
+    rest is on the Other systems page (generals liberate many stars, so not every one is announced). Called every frame; it only does something when the systems you hold have changed."""
     g = app.g
     sig = worlds.sig(g.conquered)
     if sig == app.w_sig:
@@ -41,8 +41,10 @@ def news_toasts(app):
     best = None
     for k in sorted(new):
         ws = worlds.planets_of(k)
-        if ws and (any(w["real"] for w in ws) or any(worlds.GROUP_OF[w["kind"]] == "habitable" for w in ws)):
+        hab = any(worlds.GROUP_OF[w["kind"]] == "habitable" for w in ws)
+        if ws and (any(w["real"] for w in ws) or (hab and not app.w_hab)):
             best = k if best is None or sum(w["real"] for w in ws) > sum(w["real"] for w in worlds.planets_of(best)) else best
+        app.w_hab = app.w_hab or hab
     if best is not None:
         g.toast(worlds.news(best), 5)
 

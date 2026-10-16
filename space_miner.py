@@ -112,7 +112,7 @@ class App:
         self.ach_new = False
         self.pl_page, self.wf_group, self.wf_sys = 0, "all", None      # the Planets tab: page, the filter of the worlds page
         self.wsel, self.w_seen, self.w_cache = None, 0, None           # the selected world, how many worlds you have looked at
-        self.w_sig, self.w_known = None, None                          # the systems held when the discovery toasts last looked
+        self.w_sig, self.w_known, self.w_hab = None, None, False       # the systems held when the discovery toasts last looked; a habitable world found?
         self.awards_cat = "All"
         self.fps = 0.0
         self.can_scale = False               # True when the window is resizable and scales the game to fit
