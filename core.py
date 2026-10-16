@@ -129,7 +129,7 @@ TECH_BY_ID = {t[0]: t for t in TECHS}
 
 # ------------------------------------------------------------------ pacing knobs (tuned with sim.py)
 UNLOCK_LOG = [3.32, 4.17, 7.64, 12.88, 16.74, 17.87, 19.62, 19.91, 22.04, 23.85, 26.94]   # log10 of normalised price, Moon..Kuiper Belt
-TUNE = dict(ushift=0.0, B=50.0, ccoef=0.17, texp=0.5, tpow=0.75, pshift=0.0, pcoef=0.17, sshift=0.0, cpow=1.25, sdbase=5.0, sdcoef=4.0, sdpow=0.16, cdiff=10.0, dmbase=0.40, dm_div=1e9, dm_pow=0.25)
+TUNE = dict(ushift=0.0, B=50.0, ccoef=0.17, texp=0.5, tpow=0.75, pshift=0.0, pcoef=0.17, sshift=0.0, cpow=1.25, sdbase=5.0, sdcoef=4.0, sdpow=0.16, bshift=0.0, cdiff=10.0, dmbase=0.40, dm_div=1e9, dm_pow=0.25)
 
 
 def project_cost(p):
@@ -1318,7 +1318,7 @@ class Game:
         return sum(self.planet_power(p) for p in range(NSITE) if self.unlocked[p])
 
     def sector_power(self, k):
-        return 10 ** (SECTORS[k]["lp"] + TUNE["sshift"]) * TUNE["cpow"] ** (self.cycle - 1)
+        return 10 ** (SECTORS[k]["lp"] + TUNE["sshift"] + (TUNE["bshift"] if k == BOSS else 0.0)) * TUNE["cpow"] ** (self.cycle - 1)
 
     # ---- which systems you can reach
     def jump_range(self):
