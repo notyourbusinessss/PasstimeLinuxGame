@@ -19,6 +19,8 @@ COST_BASE = 0.4                  # a colony costs this much of a solar planet of
 COST_GROWTH = 1.06               # ...and every colony you already hold makes the next one this much dearer
 G_BONUS = 0.01                   # every colony adds this to the production multiplier (a solar planet adds 0.05)
 YIELD = 0.2                      # a colony's banks and labs make this share of the credits and science of a solar planet of its tier
+NORM = 0.1                       # the share of a colony's ore that counts towards Dark Matter (a Warp) and your cycle's progress
+FLEET = 0.3                      # a colony's ships fight at this share of the strength of a solar planet's
 
 # kind of world -> the ore it yields, and its colour
 ORE = dict(temperate="Verdite", ocean="Brinite", rocky="Basalt", desert="Dune Glass", ice="Cryolite", lava="Magmite",
