@@ -155,3 +155,38 @@ def report(g, k):
     lines.append(("Attack from " + (SECTORS[src]["name"] if src is not None else "-") + "   -   borders: " +
                   ", ".join(SECTORS[n]["name"] for n in mine + theirs), (170, 176, 205)))
     return lines, sh
+
+
+BEST_ODDS = 0.9                 # an attack is "worth launching" when the manual pool beats the system with at least this chance
+
+
+def best_target(g):
+    """The attack to launch now, or None: (system, win chance, declares war). Among the systems in reach that nothing is attacking
+    yet and that the free part of your fleet beats with at least BEST_ODDS, the ones of factions at war with you first, then the
+    strongest (the best reward), then the nearest."""
+    if not g.galaxy_open or g.free_fronts() == 0:
+        return None
+    pool = g.free_power()
+    best = None
+    for k in g.targets():
+        if g.attack_block(k) or win_chance(pool, g.sector_power(k)) < BEST_ODDS:
+            continue
+        sec = SECTORS[k]
+        key = (sec["faction"] in g.war, sec["lp"], -sec["d"])
+        if best is None or key > best[0]:
+            best = (key, k)
+    if best is None:
+        return None
+    k = best[1]
+    return k, g.attack_chance(k), SECTORS[k]["faction"] not in g.war
+
+
+def why_no_best(g):
+    """The reason attack_best has nothing to launch, in a few words."""
+    if not g.galaxy_open:
+        return "The galaxy map is not open yet"
+    if g.free_fronts() == 0:
+        return "All your fronts are busy"
+    if g.fleet_power() <= 0 or g.free_share() < 0.001:
+        return "No fleet is free for a campaign"
+    return "No system in reach is one you beat with 90% odds"

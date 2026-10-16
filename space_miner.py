@@ -336,6 +336,9 @@ class App:
         a["hp"] = 0.0
 
     def space_click(self):
+        if self.view == "galaxy" and self.g.galaxy_open:               # on the map Space launches the best attack
+            self.fv.attack_best()
+            return
         alive = [a for a in self.asts if a["hp"] > 0]
         if alive:
             a = random.choice(alive)
@@ -430,7 +433,7 @@ class App:
         """ATTACK / DECLARE WAR on the Galaxy tab: invading a faction at peace needs a second click."""
         g = self.g
         if SECTORS[k]["faction"] not in g.war and not (self.war_confirm > 0 and self.war_confirm_k == k):
-            self.war_confirm, self.war_confirm_k = 4.0, k
+            self.war_confirm, self.war_confirm_k = 8.0, k
             return
         self.war_confirm = 0.0
         g.start_campaign(k)
@@ -3189,6 +3192,107 @@ def check_worlds():
     assert len(worlds.found(set(range(galaxy.N)))) == total
 
 
+def check_attack_ui(app):
+    """Attacking from the map: a drag from a system you hold to a star launches the campaign, Space launches the recommended one,
+    a faction at peace asks first, and the dock, the aim arrow and the best-target ring draw at every size, with the panel and wide."""
+    fonts = app_fonts()
+    VIEW = frontview.VIEW
+    g0, view0, tab0, wide0 = app.g, app.view, app.tab, app.gal_wide
+    try:
+        g = core.Game(load=False, sim=True)
+        g.unlocked[2] = True
+        g.owned = [[200000 >> i for i in range(NSH)] for _ in range(NSOL)]
+        g.armory[core.JUMP] = 8
+        g.armory[core.COMMAND] = 2
+        g.defence = 0.0
+        g.recalc()
+        app.g, app.view, app.tab = g, "galaxy", T_GALAXY
+        fv = app.fv
+        app.war_confirm, app.war_confirm_k = 0.0, None
+        fv.best_t = -9.0
+
+        def show(k):
+            sx, sy = galaxy.STARS[0]["x"], galaxy.STARS[0]["y"]
+            tx, ty = galaxy.STARS[k]["x"], galaxy.STARS[k]["y"]
+            fv.look_at((sx + tx) / 2, (sy + ty) / 2, min(14.0, 360.0 / max(1.0, math.hypot(sx - tx, sy - ty))), snap=True)
+            app.update(0.016)
+            app.draw(app.scr, fonts)
+            return {k: (x, y) for x, y, k in fv.pts}
+        b = fv.best_target()
+        assert b is not None and fv.best == b
+        pos = show(b[0])
+        assert 0 in pos and b[0] in pos
+        # a drag from the home system to the target aims, draws and (the faction being at peace) asks before the war
+        fv.down(pos[0])
+        assert fv.drag["aim"] == 0
+        fv.move(pos[0]); assert fv.aim is None, "a press is not an aim until the pointer moves"
+        mid = ((pos[0][0] + pos[b[0]][0]) // 2, (pos[0][1] + pos[b[0]][1]) // 2)
+        fv.move(mid); assert fv.aim and fv.aim["src"] == 0
+        fv.move(pos[b[0]]); assert fv.aim["hover"] == b[0]
+        app.mouse = pos[b[0]]
+        app.draw(app.scr, fonts)
+        fv.up(pos[b[0]])
+        assert fv.aim is None and fv.drag is None
+        if b[2]:
+            assert not g.campaigns and app.war_confirm > 0 and app.war_confirm_k == b[0], "a peaceful faction asks first"
+            app.update(0.016)
+            app.draw(app.scr, fonts)                                   # the prompt
+            app.attack(b[0])
+        assert len(g.campaigns) == 1 and g.campaigns[0]["k"] == b[0] and SECTORS[b[0]]["faction"] in g.war and app.war_confirm == 0
+        app.draw(app.scr, fonts)                                       # the dock now lists it
+        # a drag from empty space still pans, and a drag from a held star dropped on nothing does nothing
+        c0 = (fv.tcx, fv.tcy)
+        empty = (VIEW.x + 40, VIEW.centery)
+        assert fv.system_at(empty) is None
+        fv.down(empty); fv.move((empty[0] + 60, empty[1] + 30)); fv.up((empty[0] + 60, empty[1] + 30))
+        assert (fv.tcx, fv.tcy) != c0 and fv.aim is None
+        n = len(g.campaigns)
+        fv.down(pos[0]); fv.move((pos[0][0] + 8, pos[0][1] + 8)); fv.up((VIEW.x + 12, VIEW.centery))
+        assert len(g.campaigns) == n
+        # a drop on a system that cannot be attacked says why instead
+        fv.down(pos[0]); fv.move(pos[b[0]]); fv.up(pos[b[0]])
+        assert len(g.campaigns) == n and any("Cannot attack" in t[0] for t in g.toasts), "the system is already under attack"
+        # the campaign arrives, then Space launches the next recommended attack (it asks first about a faction at peace)
+        base = dict(g.campaigns[0])
+        g.campaigns[0]["chance"], g.campaigns[0]["t"] = 1.0, g.campaigns[0]["dur"]
+        g.step(0.01)
+        assert b[0] in g.conquered and not g.campaigns
+        g.toasts.clear()
+        fv.best_t = -9.0
+        nb = fv.best_target()
+        assert nb is not None and nb[0] != b[0] and nb[0] in g.targets()
+        assert fv.key(pygame.K_SPACE)
+        if app.war_confirm > 0:
+            assert nb[2] and app.war_confirm_k == nb[0] and not g.campaigns
+            app.attack(nb[0])
+        assert len(g.campaigns) == 1 and g.campaigns[0]["k"] == nb[0]
+        g.armory[core.COMMAND] = 0                                     # one front only, and it is used
+        g.toasts.clear()
+        fv.best_t = -9.0
+        assert fv.best_target() is None and fv.key(pygame.K_SPACE) and "fronts" in g.toasts[-1][0].lower() and len(g.campaigns) == 1
+        g.armory[core.COMMAND] = 2
+        # every size, with the panel and wide, with no campaigns, three and six rows (one by a general), and with the war prompt up
+        for res in ("1920x1080", "1600x720", "2560x1440", "1280x720"):
+            app.set_resolution_choice(res)
+            for wide in (False, True):
+                app.gal_wide = wide
+                for ncamp in (0, 3, 6):
+                    g.campaigns = [dict(base, k=g.targets()[i], t=1.0 + i, dur=60.0, by="g0" if i == 5 else None) for i in range(ncamp)]
+                    g.incoming = []
+                    app.war_confirm, app.war_confirm_k = (5.0, g.targets()[0]) if ncamp == 3 else (0.0, None)
+                    fv.best_t = -9.0
+                    app.update(0.016)
+                    app.draw(app.scr, fonts)
+                    fv.down((VIEW.x + 200, VIEW.y + 200)); fv.move((VIEW.x + 260, VIEW.y + 240)); fv.up((VIEW.x + 260, VIEW.y + 240))
+        app.set_resolution_choice("auto")
+    finally:
+        app.g, app.view, app.tab, app.gal_wide = g0, view0, tab0, wide0
+        app.war_confirm, app.war_confirm_k = 0.0, None
+        app.fv.best_t = -9.0
+        app.fv.aim = app.fv.drag = None
+        app.set_resolution_choice("auto")
+
+
 def check_worlds_ui(app):
     """The Other systems page draws and answers clicks with nothing found, a few worlds and every world of the galaxy."""
     fonts = app_fonts()
@@ -3481,6 +3585,46 @@ def check_fronts():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def check_attack_flow():
+    """The recommended attack (Space / the dock's button): the strongest system the free fleet beats with 90% odds, at war first."""
+    g = core.Game(load=False, sim=True)
+    assert front.best_target(g) is None and "not open" in front.why_no_best(g)
+    g.unlocked[2] = True
+    g.owned = [[20000000 >> i for i in range(NSH)] for _ in range(NSOL)]
+    g.armory[core.JUMP] = 14
+    g.armory[core.COMMAND] = 2
+    g.defence = 0.0
+    g.recalc()
+    assert g.galaxy_open
+    ok = [k for k in g.targets() if not g.attack_block(k) and win_chance(g.free_power(), g.sector_power(k)) >= front.BEST_ODDS]
+    assert len(ok) >= 5, len(ok)
+    b = front.best_target(g)
+    assert b is not None and b[0] in ok and b[1] >= front.BEST_ODDS - 1e-9 and b[1] == g.attack_chance(b[0])
+    top = max(SECTORS[k]["lp"] for k in ok)
+    assert SECTORS[b[0]]["lp"] == top, "the best attack is the strongest one that is safe"
+    assert b[2] == (SECTORS[b[0]]["faction"] not in g.war), "it says whether it declares war"
+    # a faction you are at war with comes first, even when a stronger system of another one is in reach
+    foes = {SECTORS[k]["faction"] for k in ok}
+    assert len(foes) >= 2, foes
+    weak = min(ok, key=lambda k: SECTORS[k]["lp"])
+    director.declare_war(g, SECTORS[weak]["faction"], "player")
+    b = front.best_target(g)
+    assert SECTORS[b[0]]["faction"] in g.war and not b[2], "systems of factions at war come first"
+    # nothing to launch: no fleet to spare, no front left, and a fleet too weak for anything in reach
+    assert g.start_campaign(b[0])
+    assert front.best_target(g) is None or front.best_target(g)[0] != b[0], "never the system already under attack"
+    g.campaigns = []
+    g.commit = 3
+    assert g.start_campaign(b[0]) and front.best_target(g) is None and "No fleet" in front.why_no_best(g)
+    g.campaigns, g.commit = [], 1
+    g.armory[core.COMMAND] = 0
+    assert g.start_campaign(ok[0]) and front.best_target(g) is None and "fronts" in front.why_no_best(g)
+    g.campaigns = []
+    g.owned = [[1] + [0] * (NSH - 1) for _ in range(NSOL)]
+    g.recalc()
+    assert front.best_target(g) is None and "90%" in front.why_no_best(g)
+
+
 def check_generals():
     """Generals and wardens: earned from command systems, orders (heading / toward / region / anywhere + conditions), their
     own armies, tallies and pauses, the defence pool with postures and wardens, the war while you are away, and saves."""
@@ -3704,6 +3848,7 @@ def selftest_step(app, g, frames, shot):
         check_colonies()
         check_worlds()
         check_fronts()
+        check_attack_flow()
         check_generals()
         check_counter_offensives()
         check_new_game_reset()
@@ -3902,6 +4047,8 @@ def selftest_step(app, g, frames, shot):
     if frames == 78:
         check_worlds_ui(app)
         check_colonies_ui(app)
+    if frames == 81:
+        check_attack_ui(app)
     if frames == 79:
         shot("ascension")
     if frames == 80:

@@ -116,6 +116,8 @@ class FrontView:
         self.dots = None
         self.dots_key = None
         self.dots_hits, self.dots_labels = [], []
+        self.aim = None                 # an attack being aimed by dragging from a system you hold: dict(src, pos, hover)
+        self.best, self.best_t = None, -9.0
         self.relayout()
         self.fit(snap=True)
 
@@ -230,10 +232,27 @@ class FrontView:
     def inside(self, pos):
         return VIEW.collidepoint(pos)
 
+    def aim_source(self, pos):
+        """The system you hold under the pointer when you press on it: a drag from there aims an attack (a drag from empty space pans)."""
+        app, g = self.app, self.app.g
+        if app.pick is not None or not g.galaxy_open:
+            return None
+        k = self.system_at(pos)
+        return k if k is not None and k in g.conquered else None
+
+    def target_at(self, pos):
+        """The system you do not hold nearest to the pointer, within reach, to drop an attack on."""
+        best, bd = None, 28.0 * (1.8 if resources.TOUCH else 1.0)
+        for x, y, k in self.pts:
+            d = math.hypot(pos[0] - x, pos[1] - y)
+            if d < bd and k not in self.app.g.conquered:
+                best, bd = k, d
+        return best
+
     def down(self, pos):
         if not self.inside(pos):
             return False
-        self.drag = dict(start=pos, last=pos, moved=False)
+        self.drag = dict(start=pos, last=pos, moved=False, aim=self.aim_source(pos))
         return True
 
     def move(self, pos):
@@ -242,14 +261,53 @@ class FrontView:
             return
         if not d["moved"] and math.hypot(pos[0] - d["start"][0], pos[1] - d["start"][1]) > 5:
             d["moved"] = True
-        if d["moved"]:
+        if d.get("aim") is not None:                       # aiming an attack: the map stays where it is
+            if d["moved"]:
+                self.aim = dict(src=d["aim"], pos=pos, hover=self.target_at(pos))
+        elif d["moved"]:
             self.pan_px(pos[0] - d["last"][0], pos[1] - d["last"][1])
         d["last"] = pos
 
     def up(self, pos):
         d, self.drag = self.drag, None
-        if d and not d["moved"]:
+        self.aim = None
+        if not d:
+            return
+        if d.get("aim") is not None and d["moved"]:        # dropped on a star: attack it
+            k = self.target_at(pos)
+            if k is not None:
+                self.launch(k)
+        elif not d["moved"]:
             self.click(pos)
+
+    def launch(self, k):
+        """Attack system k now (a faction at peace first asks to be declared war on): from a drag, the best-target key or a button."""
+        app, g = self.app, self.app.g
+        app.sel_sector = k
+        app.tab = self.tab_galaxy
+        why = g.attack_block(k)
+        if why:
+            g.toast(f"Cannot attack {SECTORS[k]['name']}: {why.lower()}", 3)
+            return
+        app.attack(k)
+
+    def best_target(self):
+        """The attack worth launching (see front.best_target), looked at twice a second."""
+        app = self.app
+        if app.t - self.best_t > 0.5 or app.t < self.best_t:
+            self.best_t = app.t
+            self.best = front.best_target(app.g)
+        return self.best
+
+    def attack_best(self):
+        """Space on the map: launch the best attack, or say why there is none."""
+        g = self.app.g
+        self.best_t = -9.0
+        b = self.best_target()
+        if b is None:
+            g.toast(front.why_no_best(g), 3)
+            return
+        self.launch(b[0])
 
     def wheel(self, pos, dy):
         if self.inside(pos) and dy:
@@ -263,6 +321,8 @@ class FrontView:
             self.zoom_at(self.mc, 1 / 1.5)
         elif key == pygame.K_z:
             self.toggle()
+        elif key == pygame.K_SPACE:
+            self.attack_best()
         elif key in (pygame.K_h, pygame.K_HOME):
             self.home()
         elif key in (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN):
@@ -844,10 +904,122 @@ class FrontView:
                 continue
             placed.append(r)
             app.txt(scr, font, name, r.midtop, col, "midtop", True)
+        self.draw_best(scr, fonts, R)
+        self.draw_aim(scr, fonts)
         # distance rings when zoomed far in on the Sun's neighbourhood
         scr.set_clip(None)
         self.hover = hover
         app.hover_sector = hover
+
+    def draw_best(self, scr, fonts, R):
+        """A gold ring that pulses round the best attack to launch now (Space launches it)."""
+        app = self.app
+        b = self.best_target()
+        if b is None or b[0] == app.sel_sector and app.g.attacking(b[0]):
+            return
+        x, y = self.pos(b[0])
+        if not VIEW.collidepoint(x, y):
+            return
+        pulse = 0.5 + 0.5 * math.sin(app.t * 4.0)
+        rad = max(R, 3) + 11 + 4 * pulse
+        scr.blit(glow(int(rad + 8), (120, 90, 20)), (x - rad - 8, y - rad - 8), special_flags=ADD)
+        pygame.draw.circle(scr, (255, 215, 110), (x, y), rad, 2)
+        app.txt(scr, fonts[3], "BEST" + ("  (declares war)" if b[2] else ""), (x, y - rad - 4), (255, 225, 140), "midbottom", True)
+
+    def draw_aim(self, scr, fonts):
+        """The arrow of an attack being aimed: from the system you hold to the pointer, snapping to the star under it with its odds."""
+        app, g = self.app, self.app.g
+        a = self.aim
+        if not a:
+            return
+        big, med, sm, tiny = fonts
+        sx, sy = self.pos(a["src"])
+        tgt = a["hover"]
+        ex, ey = self.pos(tgt) if tgt is not None else a["pos"]
+        why = g.attack_block(tgt) if tgt is not None else None
+        col = (150, 190, 255) if tgt is None else ((255, 110, 100) if why else (255, 215, 110))
+        self.dashed(scr, col, (sx, sy), (ex, ey), 3, offset=-app.t * 40)
+        ang = math.atan2(ey - sy, ex - sx)
+        tip = (ex - math.cos(ang) * 4, ey - math.sin(ang) * 4)
+        pygame.draw.polygon(scr, col, [tip, (tip[0] - math.cos(ang - 0.45) * 16, tip[1] - math.sin(ang - 0.45) * 16),
+                                       (tip[0] - math.cos(ang + 0.45) * 16, tip[1] - math.sin(ang + 0.45) * 16)])
+        pygame.draw.circle(scr, col, (sx, sy), 9, 2)
+        if tgt is None:
+            text, tcol = "Drop on a star to attack it", (190, 215, 255)
+        elif why:
+            text, tcol = f"{SECTORS[tgt]['name']}: {why.lower()}", (255, 140, 130)
+        else:
+            ch = g.attack_chance(tgt)
+            text = f"{SECTORS[tgt]['name']}   {ch * 100:.0f}% to win" + ("   - declares war" if SECTORS[tgt]["faction"] not in g.war else "")
+            tcol = app.chance_color(ch)
+        w = sm.size(text)[0] + 20
+        r = pygame.Rect(0, 0, w, 26)
+        r.midbottom = (ex, ey - 22)
+        r.clamp_ip(VIEW.inflate(-12, -12))
+        bg = pygame.Surface(r.size, pygame.SRCALPHA)
+        pygame.draw.rect(bg, (10, 13, 32, 235), bg.get_rect(), border_radius=8)
+        pygame.draw.rect(bg, (*col, 255), bg.get_rect(), 1, border_radius=8)
+        scr.blit(bg, r)
+        app.txt(scr, sm, text, r.center, tcol, "center")
+
+    def draw_dock(self, scr, fonts):
+        """The campaigns you are running, always in the corner of the map, and the button for the best attack."""
+        app, g = self.app, self.app.g
+        big, med, sm, tiny = fonts
+        if not g.galaxy_open:
+            return VIEW.y + 34
+        camps = sorted(g.campaigns, key=lambda c: c["dur"] - c["t"])
+        rows = camps[:4]
+        r = pygame.Rect(VIEW.x + 10, VIEW.y + 36, 272, 40 + 31 * len(rows) + (16 if len(camps) > 4 else 0))
+        bg = pygame.Surface(r.size, pygame.SRCALPHA)
+        pygame.draw.rect(bg, (10, 13, 32, 210), bg.get_rect(), border_radius=9)
+        pygame.draw.rect(bg, (90, 115, 185, 255), bg.get_rect(), 1, border_radius=9)
+        scr.blit(bg, r)
+        free = g.free_fronts()
+        app.txt(scr, tiny, "CAMPAIGNS", (r.x + 10, r.y + 6), (200, 215, 255))
+        app.txt(scr, tiny, f"{g.manual_count()}/{g.max_fronts()} fronts" + (f"  -  {len(g.campaigns) - g.manual_count()} by generals" if len(g.campaigns) > g.manual_count() else ""),
+                (r.x + 10, r.y + 22), (150, 165, 205))
+        b = self.best_target()
+        label = "ATTACK BEST" if b else "NO TARGET"
+        self.button(scr, pygame.Rect(r.right - 118, r.y + 6, 108, 26 if not resources.TOUCH else 34), label, self.attack_best, tiny, enabled=b is not None,
+                    col=(110, 40, 46), accent=(255, 130, 110))
+        y = r.y + 42
+        for c in rows:
+            k = c["k"]
+            row = pygame.Rect(r.x + 4, y - 2, r.w - 8, 30)
+            self.hits.append((row, lambda k=k: self.focus(k)))
+            if row.collidepoint(app.mouse):
+                pygame.draw.rect(scr, (30, 40, 80), row, border_radius=6)
+            mark = "" if not c.get("by") else "  [general]"
+            app.txt(scr, tiny, f"{SECTORS[k]['name']}{mark}", (r.x + 10, y), (255, 205, 190))
+            app.txt(scr, tiny, f"{c['chance'] * 100:.0f}%  {fmt_eta(max(0, c['dur'] - c['t']))}", (r.right - 10, y), (255, 175, 150), "topright")
+            pygame.draw.rect(scr, (40, 24, 28), (r.x + 10, y + 17, r.w - 20, 5), border_radius=3)
+            pygame.draw.rect(scr, (255, 120, 100), (r.x + 10, y + 17, (r.w - 20) * c["t"] / c["dur"], 5), border_radius=3)
+            y += 31
+        if len(camps) > 4:
+            app.txt(scr, tiny, f"+{len(camps) - 4} more", (r.x + 10, y), (255, 175, 150))
+        return r.bottom + 8
+
+    def draw_war_prompt(self, scr, fonts):
+        """Dropping an attack on a faction at peace asks first, here, in plain words."""
+        app, g = self.app, self.app.g
+        if app.war_confirm <= 0 or app.war_confirm_k is None:
+            return
+        big, med, sm, tiny = fonts
+        k = app.war_confirm_k
+        fac = FACTIONS[SECTORS[k]["faction"]]["name"]
+        l1, l2 = f"Declare war on the {fac}?", f"{SECTORS[k]['name']} is theirs: attacking it starts a war."
+        w = min(VIEW.w - 20, max(sm.size(l1)[0], tiny.size(l2)[0]) + 14 + 24 + 232)
+        r = pygame.Rect(0, 0, w, 64)
+        r.midbottom = (VIEW.centerx, VIEW.bottom - BAR - 16)
+        bg = pygame.Surface(r.size, pygame.SRCALPHA)
+        pygame.draw.rect(bg, (30, 12, 16, 240), bg.get_rect(), border_radius=10)
+        pygame.draw.rect(bg, (255, 120, 100, 255), bg.get_rect(), 2, border_radius=10)
+        scr.blit(bg, r)
+        app.txt(scr, sm, l1, (r.x + 14, r.y + 8), (255, 190, 170))
+        app.txt(scr, tiny, l2, (r.x + 14, r.y + 34), (210, 170, 160))
+        self.button(scr, pygame.Rect(r.right - 232, r.y + 14, 130, 36), "ATTACK", lambda k=k: app.attack(k), sm, col=(130, 40, 46), accent=(255, 130, 110))
+        self.button(scr, pygame.Rect(r.right - 94, r.y + 14, 82, 36), "CANCEL", lambda: setattr(app, "war_confirm", 0.0), sm)
 
     def draw_commanders(self, scr, fonts, labels):
         """The command systems (a ring: gold for a general, blue for a warden) and the orders of your generals: an arrow for a
@@ -895,7 +1067,7 @@ class FrontView:
         stage = pygame.Rect(0, 0, STAGE_W + 12, scr.get_height())
         scr.set_clip(stage)
         self.draw_frame(scr, fonts)
-        if self.hover is not None:
+        if self.hover is not None and not self.aim:
             self.draw_tooltip(scr, fonts, self.hover, app.g.fleet_power())
         if app.pick is not None and app.pick["idx"] in app.g.cmd:
             what = {"heading": "a direction to go", "goal": "a place to go toward", "region": "a region to clear"}[app.pick["field"]]
@@ -932,11 +1104,16 @@ class FrontView:
             x -= w + 6
             self.button(scr, rect, label, fn, med if len(label) == 1 else sm)
         app.txt(scr, tiny, self.scale_text(), (x - 2, y + bh // 2), (170, 185, 225), "midright")
-        hint = ("Pinch: zoom   Drag: pan   Double-tap: close look" if resources.TOUCH else
-                "Wheel: zoom   Drag: pan   Double-click: close look   H: home   Z: front view")
+        hint = ("Drag from your stars to attack   Pinch: zoom   Double-tap: close look" if resources.TOUCH else
+                "Drag from your stars to attack   Space: best attack   Wheel: zoom   Drag: pan   H: home")
         if x - (VIEW.x + 12) > tiny.size(hint)[0] + 30:                  # only when there is room next to the buttons
-            app.txt(scr, tiny, hint, (VIEW.x + 12, VIEW.y + 10), (120, 132, 175))
-        self.draw_alerts(scr, fonts)
+            pill = pygame.Rect(VIEW.x + 8, VIEW.y + 6, tiny.size(hint)[0] + 16, 22)
+            bg = pygame.Surface(pill.size, pygame.SRCALPHA)
+            pygame.draw.rect(bg, (10, 13, 32, 170), bg.get_rect(), border_radius=8)
+            scr.blit(bg, pill)
+            app.txt(scr, tiny, hint, (pill.x + 8, pill.y + 4), (150, 162, 205))
+        self.draw_alerts(scr, fonts, self.draw_dock(scr, fonts))
+        self.draw_war_prompt(scr, fonts)
         if BAR:
             self.draw_command_bar(scr, fonts)
         self.draw_scale_bar(scr, fonts)
@@ -1007,14 +1184,14 @@ class FrontView:
         if enabled:
             self.hits.append((rect, fn))
 
-    def draw_alerts(self, scr, fonts):
+    def draw_alerts(self, scr, fonts, y=None):
         """Incoming enemy attacks (with Intel), with a Fortify button, under the toolbar."""
         app, g = self.app, self.app.g
         big, med, sm, tiny = fonts
         ilv = director.intel(g)
         if ilv < 1 or not g.incoming or app.panel_visible():       # (with the panel open its cards show the same)
             return
-        y = VIEW.y + 34
+        y = VIEW.y + 34 if y is None else y
         for inc in g.incoming[:3]:
             left = max(0, inc["eta"] - inc["t"])
             name = "Counter-offensive" if inc["kind"] == "offensive" else director.TIERS[inc["tier"]]["name"]

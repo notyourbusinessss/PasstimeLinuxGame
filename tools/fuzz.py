@@ -129,6 +129,17 @@ def main():
                             pos = (pos[0] + rng.randrange(-60, 60), pos[1] + rng.randrange(-60, 60))
                             app.fv.move(pos)
                         app.fv.up(pos)
+                    elif r < 0.58:                                                        # an attack aimed from a held system
+                        pts = app.fv.pts
+                        mine = [p for p in pts if p[2] in g.conquered]
+                        if mine and pts:
+                            a, b = rng.choice(mine), rng.choice(pts)
+                            app.fv.down((a[0], a[1]))
+                            app.fv.move(((a[0] + b[0]) // 2, (a[1] + b[1]) // 2))
+                            app.mouse = (b[0], b[1])
+                            app.fv.move((b[0], b[1]))
+                            app.draw(app.scr, fonts)
+                            app.fv.up((b[0], b[1]) if rng.random() < 0.8 else pos)
                     elif r < 0.64:                                                        # wheel
                         if sm.PANEL.collidepoint(pos):
                             app.scroll[app.tab] = max(0, app.scroll[app.tab] - rng.choice((-3, -1, 1, 3, 40)) * 50)
