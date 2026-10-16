@@ -1497,7 +1497,7 @@ class App:
             cost = u["cost"] * self.g.sc[p]
             ok = g.ore[p] >= cost
             kw = dict(icon=self.ship_icon(p, u["arg"][0])) if u["kind"] == "gen" else dict(glyph=glyphs[u["kind"]])
-            uname, udesc = core.upgrade_text(u, p)
+            uname, udesc = core.upgrade_text(u, self.fam(p))
             self.row(scr, fonts, r, uname, udesc, fmt(cost), None, ok, (200, 160, 255),
                      lambda uid=u["id"]: g.buy_upgrade(p, uid), **kw)
         return y
@@ -3329,6 +3329,9 @@ def check_colonies_ui(app):
                 continue
             seen_kinds.add(kind)
             g.cur = p
+            g.owned[p] = [40, 30, 20, 10, 5, 2, 1, 1, 0, 0]                    # ships to list upgrades for and to draw
+            g.ore[p] = 1e90
+            g.recalc()
             app.rebuild_view()
             for tab in range(len(app.tabs)):
                 app.tab = tab
