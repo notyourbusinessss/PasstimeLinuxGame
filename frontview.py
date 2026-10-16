@@ -17,6 +17,7 @@ import generals
 import galaxy
 import gfx
 import resources
+import worldview
 import core
 from core import FACTIONS, NSEC, SECTORS, fmt, win_chance
 from gfx import glow, lerp_c, scale_c
@@ -1054,6 +1055,9 @@ class FrontView:
                     lines.append((f"Garrison {fmt(director.sector_defense(g, k))}  -  {label}: {hold * 100:.0f}% to hold", rc))
                 else:
                     lines.append(("Rear system: nothing can reach it", (130, 230, 150)))
+                w = worldview.summary(k)
+                if w:
+                    lines.append((w, (200, 190, 255)))
             return sec["name"], (140, 205, 255), f"{sec['kind']}  -  yours", where, lines
         fac = sec["faction"]
         fcol = FACTIONS[fac]["col"]

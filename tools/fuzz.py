@@ -148,6 +148,9 @@ def main():
                         app.set_tab(len(app.tabs) - 1)
                     elif r < 0.953:
                         app.gal_page = rng.randrange(len(sm.App.GAL_PAGES))
+                    elif r < 0.954:
+                        app.pl_page = rng.randrange(2)                                  # the Planets tab: Solar system / Other systems
+                        app.tab = sm.T_PLANETS if rng.random() < 0.6 else app.tab
                     elif r < 0.955:
                         rng.choice((app.toggle_gal_wide, app.leave_galaxy, lambda: app.strip_click(-1)))()
                     elif r < 0.97:
