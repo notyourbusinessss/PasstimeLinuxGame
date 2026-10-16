@@ -1170,6 +1170,40 @@ class Game:
         self.recalc()
         return p
 
+    def lose_colonies(self, k):
+        """System k was lost: the worlds you settled there are lost with it, with their ore, ships, upgrades and buildings. The planets after
+        them in the list move up, so everything that holds a planet number moves with them (the planet you are on, a journey, the places
+        you have been, the planets of a quest, the planets an incoming raid is about). Returns the names of the lost planets."""
+        pairs = {c for c in self.colonies if c[0] == k}
+        if not pairs:
+            return []
+        gone = {self.colony_planet[c] for c in pairs}
+        names = [self.sites[p]["name"] for p in sorted(gone)]
+        was_here = self.cur in gone
+        keep = [p for p in range(self.nsite) if p not in gone]
+        remap = {old: new for new, old in enumerate(keep)}
+        for attr in ("ore", "run_ore", "all_ore", "owned", "ups", "unlocked", "bld"):
+            lst = getattr(self, attr)
+            setattr(self, attr, [lst[p] for p in keep])
+        self.set_sites([c for c in self.colonies if c not in pairs])
+        self.cur = remap.get(self.cur, 0)
+        if self.travel is not None:
+            self.travel = dict(self.travel, to=remap[self.travel["to"]]) if self.travel["to"] in remap else None
+        self.visited = {remap[p] for p in self.visited if p in remap} | {0}
+        for q in self.quests:
+            q["site"] = remap.get(q.get("site", 0), 0)
+        for inc in self.incoming:
+            if inc["kind"] == "raid":                       # (an offensive's "fort" holds a system, not a planet)
+                inc["targets"] = [remap[p] for p in inc["targets"] if p in remap]
+                inc["fort"] = [remap[p] for p in inc["fort"] if p in remap]
+        self.incoming[:] = [inc for inc in self.incoming if inc["kind"] != "raid" or inc["targets"]]       # (in place: the director is stepping through them)
+        self.fx_events = [(kind, data) for kind, data in self.fx_events if kind not in ("unlock", "raid", "project", "bomb", "travel")]
+        if was_here and not self.sim:
+            self.toast("The planet you were on is gone: back on Earth.", 6)
+        self._wopt_key = None
+        self.recalc()
+        return names
+
     def world_options(self):
         """Every world of the systems you hold that you have not settled, nearest star first: (star, world) pairs. Cached."""
         key = (worlds.sig(self.conquered), len(self.colonies))

@@ -1334,8 +1334,8 @@ class App:
                 name = "Counter-offensive" if inc["kind"] == "offensive" else director.TIERS[inc["tier"]]["name"]
                 where = ""
                 if director.intel(g) >= 2:
-                    where = f" -> {SECTORS[inc['target']]['name']}" if inc["kind"] == "offensive" else " -> " + ", ".join(
-                        self.g.sites[q]["name"] for q in inc["targets"])
+                    where = f" -> {SECTORS[inc['target']]['name']}{frontview.colony_tag(g, inc['target'])}" if inc["kind"] == "offensive" else " -> " + ", ".join(
+                        self.g.sites[q]["name"] for q in inc["targets"] if q < len(self.g.sites))
                 self.txt(scr, tiny, f"INCOMING: {name}{where}  ({fmt_time(left)})", (22, y + 2), scale_c((255, 120, 110), blink),
                          shadow=True)
                 y += 18
@@ -3680,6 +3680,7 @@ def check_sysview_ui(app):
         assert pressed, "the card's main button is on screen"
         pressed[0]()
         assert g.n_colonies == n0 + 1 and sysview.state_of(g, sysview.body_of(t1, ("w", t1, 3))) == "owned"
+        assert any("settled by you" in t for t, _ in app.fv.system_lines(t1)[4]), "the system's card says that its colonies are lost with it"
         app.update(0.016)
         app.draw(app.scr, fonts)
         label, fn, ok = sysview.primary(app, sysview.body_of(t1, ("w", t1, 3)))
@@ -4337,6 +4338,90 @@ def check_attack_flow():
     assert front.best_target(g) is None and "90%" in front.why_no_best(g)
 
 
+def check_lose_colonies():
+    """Losing a system takes the worlds settled in it: their planets leave every table and the planets after them move up, with every
+    planet number the game holds (the planet you are on, a journey, visited places, quests, raids on their way)."""
+    g = core.Game(load=False, sim=True)
+    A, B = galaxy.BY_NAME["TRAPPIST-1"], galaxy.BY_NAME["Proxima Centauri"]
+    g.conquered |= {A, B}
+    g.credits = 1e80
+    for k in range(1, 7):
+        g.unlocked[k] = True
+    for q in range(NSOL):
+        g.ore[q] = 1e70
+    order = [(A, 0), (B, 0), (A, 1), (B, 1), (A, 2)]                       # the planets of the two stars alternate: 12 A, 13 B, 14 A, 15 B, 16 A
+    for k, i in order:
+        assert g.settle(k, i) is not None
+    assert g.nsite == NSOL + 5 and [g.colony_planet[c] for c in order] == [12, 13, 14, 15, 16]
+    uids = list(core.UPG_BY_ID)
+    for p in range(NSOL, g.nsite):                                         # every planet has its own ore, ships, upgrades and buildings
+        g.ore[p], g.owned[p][0], g.bld[p][0] = 1000.0 + p, p, p
+        g.ups[p] = {uids[p]}
+    g.recalc()
+    fleet = g.total_ships()
+    assert g.lose_colonies(galaxy.BY_NAME["Tau Ceti"]) == [] and g.nsite == NSOL + 5, "a system with none of your worlds loses nothing"
+    g.cur = 15
+    g.visited |= {12, 13, 14, 15, 16}
+    g.quests = [dict(k="clicks", tgt=10, base=0, r="ore", amt=5.0, site=16), dict(k="clicks", tgt=10, base=0, r="ore", amt=5.0, site=13)]
+    g.incoming = [dict(id=1, kind="raid", tier=0, fac="pirates", src=A, targets=[12, 13, 16], t=0.0, eta=60.0, fort=[16, 13], power=1.0),
+                  dict(id=2, kind="raid", tier=0, fac="pirates", src=A, targets=[14], t=0.0, eta=60.0, fort=[], power=1.0),
+                  dict(id=3, kind="offensive", tier=-1, fac="pirates", src=A, target=A, targets=[], t=0.0, eta=60.0, fort=[A], power=1.0)]
+    g.travel = dict(to=13, t=0.0, dur=3.0, swapped=False)
+    names = g.lose_colonies(A)
+    assert len(names) == 3 and all(n.startswith("TRAPPIST-1") for n in names)
+    assert g.nsite == NSOL + 2 and g.colonies == [(B, 0), (B, 1)] and g.colony_set == {(B, 0), (B, 1)}
+    assert [g.colony_planet[c] for c in g.colonies] == [12, 13] and [s["name"] for s in g.sites[NSOL:]] == [worlds.planets_of(B)[i]["name"] for i in (0, 1)]
+    assert len({len(x) for x in (g.ore, g.run_ore, g.all_ore, g.owned, g.ups, g.unlocked, g.bld, g.sites, g.tier, g.sc, g.csc, g.s_ops)}) == 1
+    assert g.ore[12] == 1013.0 and g.ore[13] == 1015.0 and g.owned[12][0] == 13 and g.owned[13][0] == 15 and g.bld[13][0] == 15
+    assert g.ups[12] == {uids[13]} and g.ups[13] == {uids[15]}, "a planet keeps its own upgrades"
+    assert g.total_ships() == fleet - (12 + 14 + 16), "the ships of the lost planets are gone"
+    assert g.cur == 13 and g.travel["to"] == 12, (g.cur, g.travel)
+    assert {0, 12, 13} <= g.visited and not g.visited & {14, 15, 16}, g.visited
+    assert [q["site"] for q in g.quests] == [0, 12], "a quest on a lost planet pays on Earth"
+    assert [(i["id"], i["targets"], i["fort"]) for i in g.incoming] == [(1, [12], [12]), (3, [], [A])], "a raid on lost planets is dropped, the others follow their planets"
+    assert all(g.kind_first[w] in g.colony_set for w in g.kind_first), "the planet bonuses come from worlds you still hold"
+    assert g.fleet_power() > 0 and g.G > 0
+    # on a lost planet: back to Earth, and a journey there is cancelled
+    g2 = core.Game(load=False, sim=True)
+    g2.conquered.add(A)
+    g2.credits = 1e80
+    for k in range(1, 7):
+        g2.unlocked[k] = True
+    for q in range(NSOL):
+        g2.ore[q] = 1e70
+    assert g2.settle(A, 0) == 12 and g2.settle(A, 1) == 13
+    g2.cur = 13
+    g2.travel = dict(to=12, t=0.0, dur=3.0, swapped=False)
+    assert len(g2.lose_colonies(A)) == 2 and g2.cur == 0 and g2.travel is None and g2.nsite == NSOL
+    assert g2.colonies == [] and g2.kind_first == {}
+    # the director's counter-offensive does it when it takes the system, and it is saved and loaded as it is
+    g3 = core.Game(load=False, sim=True)
+    g3.conquered.add(A)
+    g3.credits = 1e80
+    for k in range(1, 7):
+        g3.unlocked[k] = True
+    for q in range(NSOL):
+        g3.ore[q] = 1e70
+    for i in range(3):
+        assert g3.settle(A, i) is not None
+    inc = dict(id=9, kind="offensive", tier=-1, fac="pirates", src=A, target=A, targets=[], t=0.0, eta=0.0, fort=[], power=1e300)
+    g3.toasts.clear()
+    director.resolve_offensive(g3, inc)
+    assert A not in g3.conquered and A in g3.lost_sectors and g3.nsite == NSOL and not g3.colonies
+    assert any("lost with it" in t[0] for t in g3.toasts) and any("3 colonies" in e[1] for e in g3.director_log)
+    old_save = core.SAVE
+    d = tempfile.mkdtemp(prefix="space_miner_lose_")
+    try:
+        core.SAVE = os.path.join(d, "save.json")
+        g.save()
+        h = core.Game(load=True, sim=True)
+        assert h.colonies == [(B, 0), (B, 1)] and h.nsite == NSOL + 2 and h.cur == 13, (h.colonies, h.nsite, h.cur)
+        assert h.owned[12][0] == 13 and h.owned[13][0] == 15 and h.ups[13] == {uids[15]}, "the planets come back with what they had"
+    finally:
+        core.SAVE = old_save
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def check_generals():
     """Generals and wardens: earned from command systems, orders (heading / toward / region / anywhere + conditions), their
     own armies, tallies and pauses, the defence pool with postures and wardens, the war while you are away, and saves."""
@@ -4565,6 +4650,7 @@ def selftest_step(app, g, frames, shot):
         check_blackhole()
         check_generals()
         check_counter_offensives()
+        check_lose_colonies()
         check_new_game_reset()
     if frames == 3:
         for _ in range(25):

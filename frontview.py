@@ -36,6 +36,12 @@ LASER_MINE = (150, 225, 255)
 SPAN, IMG = gfx.MW_SPAN, 1300        # the painted galaxy: SPAN light-years across, IMG pixels wide
 
 
+def colony_tag(g, k):
+    """" (3 colonies)" for the system k when you have settled worlds there, which are lost with it, else nothing."""
+    n = sum(1 for c in g.colonies if c[0] == k)
+    return f" ({n} colon{'ies' if n > 1 else 'y'})" if n else ""
+
+
 def milky_way_picture():
     """The painted Milky Way. It ships as assets/milky_way.png (made by tools/make_milky_way.py): painting it takes half a second on a
     computer but ten seconds or more on a phone, where it stalled the game right after Mars was unlocked. It is painted here only when
@@ -1219,7 +1225,7 @@ class FrontView:
             name = "Counter-offensive" if inc["kind"] == "offensive" else director.TIERS[inc["tier"]]["name"]
             where = ""
             if ilv >= 2:
-                where = (" -> " + SECTORS[inc["target"]]["name"]) if inc["kind"] == "offensive" else " -> " + ", ".join(
+                where = (" -> " + SECTORS[inc["target"]]["name"] + colony_tag(g, inc["target"])) if inc["kind"] == "offensive" else " -> " + ", ".join(
                     g.sites[q]["name"] for q in inc["targets"] if q < g.nsite)
             text = f"INCOMING: {name}{where}  ({fmt_eta(left)})"
             pill = pygame.Rect(VIEW.x + 10, y, min(VIEW.w - 20, tiny.size(text)[0] + 150), 28)
@@ -1255,7 +1261,10 @@ class FrontView:
                 else:
                     lines.append(("Rear system: nothing can reach it", (130, 230, 150)))
                 w = worldview.summary(k)
-                if w:
+                n = sum(1 for c in g.colonies if c[0] == k)
+                if w and n:
+                    lines.append((f"{w}  -  {n} settled by you, lost if it falls", (255, 200, 150)))
+                elif w:
                     lines.append((w, (200, 190, 255)))
             return sec["name"], (140, 205, 255), f"{sec['kind']}  -  yours", where, lines
         fac = sec["faction"]
