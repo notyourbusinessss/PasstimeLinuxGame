@@ -20,13 +20,14 @@ import pygame
 
 import core
 import gamelog
+import generals
 import sim
 import space_miner as sm
 
 ARGS = dict(a.split("=") for a in sys.argv[1:] if "=" in a)
 FRAMES = int(ARGS.get("frames", 2500))
 SEED = int(ARGS.get("seed", 1))
-STATES = ARGS.get("states", "fresh,mid,late,ascended,dev").split(",")
+STATES = ARGS.get("states", "fresh,mid,late,ascended,dev,command").split(",")
 TOUCH = ARGS.get("touch", "0") == "1"          # touch=1: use the touch screen interface (taps, drags, pinches) as well
 
 
@@ -58,6 +59,12 @@ def make_state(name):
         return g, False
     if name == "dev":
         return play(7), True
+    if name == "command":                                   # every general and warden earned, orders set, on the Galaxy tab
+        g = play(7)
+        g.conquered |= set(generals.SYSTEM_OF)
+        generals.ensure(g)
+        g.recalc()
+        return g, False
     raise SystemExit(f"unknown state {name}")
 
 
@@ -139,6 +146,8 @@ def main():
                             app.galaxy_key(k)
                     elif r < 0.95 and dev:
                         app.set_tab(len(app.tabs) - 1)
+                    elif r < 0.953:
+                        app.gal_page = rng.randrange(len(sm.App.GAL_PAGES))
                     elif r < 0.955:
                         rng.choice((app.toggle_gal_wide, app.leave_galaxy, lambda: app.strip_click(-1)))()
                     elif r < 0.97:
