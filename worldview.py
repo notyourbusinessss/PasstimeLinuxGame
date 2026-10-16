@@ -153,7 +153,7 @@ def draw_page(app, scr, fonts, y):
 
 
 CL_FILTERS = [("ready", "Ready"), ("settled", "Settled"), ("waiting", "Waiting"), ("star", "This star")]
-CL_ROW = 82
+CL_ROW = 88
 
 
 def colony_ready(app):
