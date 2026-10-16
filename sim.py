@@ -7,6 +7,7 @@ import sys
 
 import core
 import director
+import generals
 from core import (BUILDINGS, NB, NSH, NSITE, SC, SHIPS, SITES, TECHS, PERKS, GROWTH, geo_max, fmt)
 
 
@@ -72,6 +73,7 @@ def reserves(g):
 
 WARP_FRAC = 1.0
 BOT_CHANCE = 0.85
+GENERALS = True                       # gens=0: the bot gives its generals no orders (they stay off)
 
 
 class Bot:
@@ -85,6 +87,38 @@ class Bot:
         self.log = []
         self.seen_conq = 1
         self.conq_logged = {0}
+        self.all_in = False
+
+    def command(self):
+        """Orders like a player's: every new general goes for the strongest enemy it can beat, anywhere in reach; and when the
+        whole fleet can take the Void Throne, the defence and the armies stand down so that all of it goes."""
+        g = self.g
+        for idx, st in g.cmd.items():
+            if generals.COMMANDERS[idx][1] == generals.GENERAL and not st.get("bot"):
+                if not GENERALS:
+                    st["on"] = False
+                    st["bot"] = True
+                    continue
+                generals.set_orders(st, mode="any", prefer="strongest", odds=BOT_CHANCE, war="any")
+                generals.set_army(g, idx, 0.07)
+                st["bot"] = True
+        boss = core.BOSS
+        ready = boss in g.targets_set() and core.win_chance(g.fleet_power(), g.sector_power(boss)) >= BOT_CHANCE
+        if ready and not self.all_in:
+            self.all_in = True
+            g.defence = 0.0
+            for idx, st in g.cmd.items():
+                if generals.COMMANDERS[idx][1] == generals.GENERAL:
+                    st["army"] = 0.0
+
+    def stand_down(self):
+        """After an Ascension the commanders go back to work."""
+        g = self.g
+        self.all_in = False
+        g.defence = core.DEFENCE_DEFAULT
+        for idx, st in g.cmd.items():
+            if generals.COMMANDERS[idx][1] == generals.GENERAL:
+                generals.set_army(g, idx, 0.07)
 
     def galaxy(self):
         g = self.g
@@ -110,8 +144,9 @@ class Bot:
                 for p in inc["targets"]:
                     if director.incoming_chance(g, inc, p) < 0.6 and g.credits > 3 * cost:
                         director.fortify(g, inc["id"], p)
+        self.command()
         if g.free_fronts() > 0:               # fill the free fronts, the strongest enemy first, each with the force it needs
-            fp = g.fleet_power()
+            fp = g.fleet_power() * g.manual_cap()               # what the manual pool can send at most
             winnable = [k for k in g.targets() if g.attacking(k) is None and core.win_chance(fp, g.sector_power(k)) >= BOT_CHANCE]
             winnable.sort(key=lambda k: (k == core.BOSS, core.SECTORS[k]["lp"], -core.SECTORS[k]["d"]), reverse=True)   # the Throne first
             for k in winnable:
@@ -134,6 +169,7 @@ class Bot:
         if g.can_ascend():
             gain, old = g.sd_gain(), g.cycle
             g.ascend()
+            self.stand_down()
             self.log.append((g.t, f"ASCEND to cycle {g.cycle} (+{gain} Stardust, {g.sd_total} total)"))
             self.last_warp = g.t
             self.click_until = g.t + self.active_after
@@ -229,8 +265,9 @@ def main():
     interval = float(kw.pop("interval", 60))
     quiet = kw.pop("quiet", "0") == "1"
     warp_frac = float(kw.pop("warp_frac", 1.0))
-    global BOT_CHANCE
+    global BOT_CHANCE, GENERALS
     BOT_CHANCE = float(kw.pop("bot_chance", 0.85))
+    GENERALS = kw.pop("gens", "1") != "0"
     core.apply_tune(**{k: float(v) for k, v in kw.items()})
     global WARP_FRAC
     WARP_FRAC = warp_frac

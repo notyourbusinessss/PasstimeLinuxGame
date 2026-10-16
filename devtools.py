@@ -8,6 +8,7 @@ Using any cheat marks the save as having cheated (which unlocks a secret achieve
 """
 import core
 import director
+import generals
 from core import BMAX, NB, NSH, NSITE, NSEC, ARMORY, STARDUST_PERKS, PERKS, PROJECTS, SC, SITES, TECHS, UPGRADES, ACHIEVEMENTS, fmt
 
 EVENT_NAMES = [("Meteor shower", "meteor"), ("Pirate raid", "pirates"), ("Solar flare", "flare"),
@@ -182,6 +183,20 @@ def sections(app):
     def max_command():
         g.armory[core.COMMAND] = ARMORY[core.COMMAND][3]
 
+    def earn_commanders():
+        g.conquered.update(generals.SYSTEM_OF)
+        generals.ensure(g)
+
+    def promote_generals():
+        for idx, st in g.cmd.items():
+            if generals.COMMANDERS[idx][1] == generals.GENERAL:
+                st["took"] = max(st["took"], generals.RANKS[-1])
+
+    def resume_generals():
+        for st in g.cmd.values():
+            if "paused" in st:
+                generals.resume(st)
+
     def reset_galaxy():
         g.conquered = {0}
         g.campaigns = []
@@ -355,7 +370,10 @@ def sections(app):
             ("Liberate ALL systems", cheat(conquer_all), False),
             ("Liberate The Void Throne (can Ascend)", cheat(conquer_boss), False),
             ("Max Jump Drive", cheat(max_jump), False),
-            ("Max Command (8 fronts at once)", cheat(max_command), False),
+            ("Max Command (8 manual campaigns)", cheat(max_command), False),
+            ("Earn every general and warden", cheat(earn_commanders), False),
+            ("Promote every general to Warlord", cheat(promote_generals), False),
+            ("Resume paused generals", cheat(resume_generals), False),
             ("Reset galaxy to Sol only", cheat(reset_galaxy), False),
             ("Finish all running campaigns now", cheat(finish_campaign), False),
             ("Running campaigns: guaranteed win", cheat(sure_win), False),

@@ -23,6 +23,7 @@ import core
 import galaxy
 import gamelog
 import resources
+import generals
 import shipart
 import ships
 import devtools
@@ -97,6 +98,8 @@ class App:
         self.view = "system"
         self.sel_sector = 1
         self.gal_mode = 0                    # which list the Galaxy tab's target browser shows
+        self.gal_page = 0                    # the Galaxy tab's page: war room / generals / defence
+        self.pick = None                     # picking a system on the map for a general's orders: dict(idx, field)
         self._gal_cache = {}
         self.raiders = []
         self.hover_sector = None
@@ -1029,7 +1032,7 @@ class App:
                  (22, 40), (170, 180, 215), shadow=True)
         if g.campaigns and not self.panel_visible():        # (with the panel open its Fronts card shows the same)
             right = frontview.VIEW.right
-            self.txt(scr, tiny, f"Fronts {len(g.campaigns)}/{g.max_fronts()}  -  {g.free_share() * 100:.0f}% of the fleet at home",
+            self.txt(scr, tiny, f"Campaigns {len(g.campaigns)}  -  defence {g.defence * 100:.0f}%  armies {generals.army_total(g) * 100:.0f}%",
                      (right, 8), (255, 175, 150), "topright", True)
             shown = sorted(g.campaigns, key=lambda c: c["dur"] - c["t"])[:3]
             bw = 142
@@ -1641,6 +1644,221 @@ class App:
         if any(not r["win"] for r in self.raiders):
             scr.blit(glow(80, (90, 20, 10)), (CX - 80, CY - 80), special_flags=ADD)
 
+    GAL_PAGES = ["War room", "Generals", "Defence"]
+
+    # ---------------- generals, wardens and the defence: the war's standing orders -----------------
+    def begin_pick(self, idx, field):
+        self.pick = dict(idx=idx, field=field)
+        self.view = "galaxy"
+        what = {"heading": "the direction to go", "goal": "the place to go toward", "region": "the region to clear"}[field]
+        self.g.toast(f"Click a system on the map: {what} for {generals.COMMANDERS[idx][2]}  (Esc cancels)", 6)
+
+    def apply_pick(self, k):
+        """A system was clicked while picking orders for a general. Returns True if the click was used."""
+        g, pk = self.g, self.pick
+        if not pk or pk["idx"] not in g.cmd:
+            self.pick = None
+            return False
+        st, f = g.cmd[pk["idx"]], pk["field"]
+        name = generals.COMMANDERS[pk["idx"]][2]
+        if f == "goal":
+            if k in g.conquered:
+                g.toast("Pick a system you do not hold yet.", 3)
+                return True
+            generals.set_orders(st, mode="toward", goal=k)
+            g.toast(f"{name}: toward {SECTORS[k]['name']}", 4)
+        elif f == "region":
+            generals.set_orders(st, mode="region", region=generals.region_of(k))
+            g.toast(f"{name}: clear the {generals.region_of(k)}", 4)
+        else:
+            generals.set_orders(st, mode="heading", angle=generals.heading_from(g, k) % math.tau)
+            g.toast(f"{name}: heading {generals.compass(st['angle'])}", 4)
+        self.pick = None
+        return True
+
+    def set_general_mode(self, idx, st, m):
+        generals.set_orders(st, mode=m)
+        if m == "heading" and st.get("angle") is None:
+            st["angle"] = 0.0
+        if m == "toward" and st["goal"] is None:
+            self.begin_pick(idx, "goal")
+        elif m == "region" and st["region"] is None:
+            self.begin_pick(idx, "region")
+
+    def toggle_commander(self, st):
+        st["on"] = not st["on"]
+        if st["on"] and "army" in st:
+            generals.set_army(self.g, next(i for i, v in self.g.cmd.items() if v is st), st["army"])
+
+    def commander_frame(self, scr, r, col, on=True):
+        pygame.draw.rect(scr, (36, 44, 62) if on else (28, 31, 48), r, border_radius=9)
+        pygame.draw.rect(scr, scale_c((36, 44, 62), 1.35), (r.x + 3, r.y + 1, r.w - 6, 2), border_radius=1)
+        pygame.draw.rect(scr, col if on else (62, 66, 92), r, 1, border_radius=9)
+        pygame.draw.rect(scr, col if on else (62, 66, 92), (r.x, r.y + 8, 4, r.h - 16), border_radius=2)
+
+    def draw_locked_commanders(self, scr, fonts, y, ids, label):
+        big, med, sm, tiny = fonts
+        g = self.g
+        locked = [i for i in ids if i not in g.cmd]
+        if not locked:
+            return y
+        self.txt(scr, med, label, (PANEL.x + 4, y), (255, 225, 140))
+        y += 28
+        for i in locked:
+            sysname, role, name, tr, blurb = generals.COMMANDERS[i]
+            k = generals.SYSTEM_OF[i]
+            rr = pygame.Rect(PANEL.x, y, PANEL.w, 50)
+            near = k in g.targets_set()
+            self.row(scr, fonts, rr, f"{name}  -  {generals.TRAITS[tr][0]}",
+                     f"Liberate {sysname} ({galaxy.fmt_ly(SECTORS[k]['d'])} from the Sun)" + ("  -  in range" if near else ""), None, None,
+                     near, (255, 190, 150) if role == generals.GENERAL else (120, 190, 255), (lambda k=k: self.select_sector(k)), glyph="G" if role == generals.GENERAL else "W")
+            y += 56
+        return y
+
+    def draw_generals_page(self, scr, fonts, y):
+        big, med, sm, tiny = fonts
+        g = self.g
+        gens = generals.commanders(g, generals.GENERAL)
+        self.txt(scr, med, f"Generals  {len(gens)}/{len(generals.GENERAL_IDS)}", (PANEL.x + 4, y), (255, 190, 150))
+        self.txt(scr, tiny, f"armies {generals.army_total(g) * 100:.0f}%  -  defence {g.defence * 100:.0f}%  -  manual {g.manual_cap() * 100:.0f}% of the fleet",
+                 (PANEL.right - 4, y + 7), (150, 158, 190), "topright")
+        y += 26
+        self.txt(scr, tiny, "Give a general orders once: it picks its targets and runs its own campaigns, offline too.", (PANEL.x + 4, y),
+                 (140, 148, 180))
+        y += 22
+        if self.pick:
+            rr = pygame.Rect(PANEL.x, y, PANEL.w, 34)
+            pygame.draw.rect(scr, (70, 56, 24), rr, border_radius=7)
+            pygame.draw.rect(scr, (255, 215, 110), rr, 1, border_radius=7)
+            self.txt(scr, sm, "Click a system on the map...", (rr.x + 12, rr.centery), (255, 235, 170), "midleft")
+            self.button(scr, pygame.Rect(rr.right - 92, rr.y + 4, 84, 26), "Cancel", tiny, lambda: setattr(self, "pick", None), panel=True)
+            y += 42
+        if not gens:
+            self.txt(scr, sm, "No general yet. Liberate Alpha Centauri (4.4 light years away) to earn the first.", (PANEL.x + 4, y),
+                     (200, 205, 225))
+            y += 30
+        for idx, st in gens:
+            y = self.general_card(scr, fonts, y, idx, st)
+        return self.draw_locked_commanders(scr, fonts, y, generals.GENERAL_IDS, "Still to earn") + 8
+
+    def general_card(self, scr, fonts, y, idx, st):
+        big, med, sm, tiny = fonts
+        g = self.g
+        sysname, _, name, tr, blurb = generals.COMMANDERS[idx]
+        r = pygame.Rect(PANEL.x, y, PANEL.w, 190)
+        if r.colliderect(PANEL):
+            self.commander_frame(scr, r, (255, 190, 150), st["on"])
+            rk = generals.rank(st)
+            self.txt(scr, med, name, (r.x + 14, r.y + 6), (245, 245, 250) if st["on"] else (125, 130, 156))
+            self.txt(scr, tiny, f"{generals.TRAITS[tr][0]}: {generals.TRAITS[tr][1]}  -  {generals.RANK_NAMES[rk]}  -  from {sysname}",
+                     (r.x + 14, r.y + 30), (156, 166, 196))
+            self.button(scr, pygame.Rect(r.right - 78, r.y + 8, 66, 26), "ON" if st["on"] else "OFF", sm,
+                        lambda st=st: self.toggle_commander(st), panel=True, col=(40, 110, 70) if st["on"] else (70, 50, 56))
+            n_c = sum(1 for c in g.campaigns if c.get("by") == generals.key(idx))
+            status = "Paused after defeats" if st["paused"] else (st["status"] or "Waiting for orders to take effect")
+            self.txt(scr, tiny, f"{status}   ({n_c}/{generals.slots(idx, st)} campaigns)", (r.x + 14, r.y + 48),
+                     (255, 190, 130) if st["paused"] else (130, 220, 160))
+            # --- where to go
+            bw = (r.w - 28 - 3 * 6) // 4
+            for j, m in enumerate(generals.MODES):
+                self.button(scr, pygame.Rect(r.x + 14 + j * (bw + 6), r.y + 70, bw, 26), generals.MODE_NAMES[m], tiny,
+                            (lambda m=m, idx=idx, st=st: self.set_general_mode(idx, st, m)), panel=True, selected=st["mode"] == m,
+                            col=(70, 100, 170) if st["mode"] == m else (36, 44, 76))
+            self.txt(scr, sm, generals.describe_orders(st), (r.x + 14, r.y + 106), (235, 238, 250))
+            field = {"heading": "heading", "toward": "goal", "region": "region"}.get(st["mode"])
+            if field:
+                self.button(scr, pygame.Rect(r.right - 142, r.y + 100, 128, 26), "Pick on map", tiny,
+                            (lambda idx=idx, f=field: self.begin_pick(idx, f)), panel=True, col=(90, 80, 40))
+            # --- under what circumstances
+            cw = (r.w - 28 - 3 * 6) // 4
+            conds = [(f"Odds {st['odds'] * 100:.0f}%+", lambda st=st: generals.cycle_odds(st)),
+                     (generals.WAR_NAMES[st["war"]], lambda st=st: generals.cycle_war(st)),
+                     (generals.PREFER_NAMES[st["prefer"]], lambda st=st: generals.cycle_prefer(st)),
+                     ("Stop: " + (f"after {st['limit']}" if st["limit"] else "never"), lambda st=st: generals.cycle_limit(st))]
+            for j, (label, fn) in enumerate(conds):
+                self.button(scr, pygame.Rect(r.x + 14 + j * (cw + 6), r.y + 134, cw, 26), label, tiny, fn, panel=True, col=(54, 62, 96))
+            # --- the army and the record
+            self.txt(scr, tiny, f"Army {st['army'] * 100:.0f}% of the fleet", (r.x + 14, r.y + 170), (200, 205, 225), "midleft")
+            self.button(scr, pygame.Rect(r.x + 160, r.y + 162, 28, 22), "-", tiny, (lambda idx=idx: generals.set_army(g, idx, g.cmd[idx]["army"] - 0.02)),
+                        panel=True)
+            self.button(scr, pygame.Rect(r.x + 192, r.y + 162, 28, 22), "+", tiny, (lambda idx=idx: generals.set_army(g, idx, g.cmd[idx]["army"] + 0.02)),
+                        panel=True)
+            self.txt(scr, tiny, f"took {st['took']}  -  lost {st['lost']}", (r.right - 14 - (96 if st["paused"] else 0), r.y + 170), (170, 176, 205), "midright")
+            if st["paused"]:
+                self.button(scr, pygame.Rect(r.right - 92, r.y + 160, 80, 24), "Resume", tiny, lambda st=st: generals.resume(st), panel=True,
+                            col=(40, 110, 70))
+        return y + 198
+
+    def draw_defence_page(self, scr, fonts, y):
+        big, med, sm, tiny = fonts
+        g = self.g
+        self.txt(scr, med, f"Defence  {g.defence * 100:.0f}% of the fleet", (PANEL.x + 4, y), (140, 200, 255))
+        self.button(scr, pygame.Rect(PANEL.right - 132, y - 2, 60, 26), "-5%", tiny, lambda: generals.set_defence(g, g.defence - 0.05), panel=True)
+        self.button(scr, pygame.Rect(PANEL.right - 66, y - 2, 60, 26), "+5%", tiny, lambda: generals.set_defence(g, g.defence + 0.05), panel=True)
+        y += 32
+        bar = pygame.Rect(PANEL.x + 4, y, PANEL.w - 8, 16)
+        pygame.draw.rect(scr, (16, 18, 32), bar, border_radius=4)
+        x = bar.x
+        for share, col in ((g.defence, (90, 160, 255)), (generals.army_total(g), (255, 160, 110)), (g.manual_cap(), (120, 210, 150))):
+            w = int(bar.w * share)
+            if w > 0:
+                pygame.draw.rect(scr, col, (x, bar.y, w, bar.h), border_radius=3)
+                x += w
+        y += 22
+        self.txt(scr, tiny, f"defence {g.defence * 100:.0f}%   armies {generals.army_total(g) * 100:.0f}%   manual {g.manual_cap() * 100:.0f}%", (PANEL.x + 4, y), (170, 176, 205))
+        y += 20
+        self.txt(scr, tiny, "Armies on campaign defend nothing. The defence never leaves home.",
+                 (PANEL.x + 4, y), (140, 148, 180))
+        y += 26
+        # --- the regions: a posture for each
+        self.txt(scr, med, "Regions", (PANEL.x + 4, y), (255, 225, 140))
+        y += 28
+        counts, held, dmap = generals.exposed_counts(g), generals.held_regions(g), generals.defence_map(g)
+        regions = sorted(held, key=lambda r: (-counts.get(r, 0), r))
+        if not regions:
+            self.txt(scr, sm, "You hold no system yet.", (PANEL.x + 4, y), (200, 205, 225))
+            y += 28
+        for reg in regions:
+            rr = pygame.Rect(PANEL.x, y, PANEL.w, 54)
+            exp = counts.get(reg, 0)
+            self.commander_frame(scr, rr, (140, 200, 255) if exp else (90, 96, 130))
+            self.txt(scr, sm, reg, (rr.x + 14, rr.y + 6), (245, 245, 250))
+            sub = (f"{held[reg]:,} held  -  {exp} on the front  -  defended by {fmt(dmap.get(reg, 0.0))}" if exp
+                   else f"{held[reg]:,} held  -  no enemy at war reaches it")
+            self.txt(scr, tiny, sub, (rr.x + 14, rr.y + 30), (156, 166, 196))
+            pst = g.posture.get(reg, "balanced")
+            bw = 76
+            for j, ps in enumerate(generals.POSTURES):
+                self.button(scr, pygame.Rect(rr.right - 12 - (3 - j) * (bw + 4) + 4, rr.y + 12, bw, 28), generals.POSTURE_NAMES[ps], tiny,
+                            (lambda reg=reg, ps=ps: g.posture.__setitem__(reg, ps)), panel=True, selected=pst == ps,
+                            col=(70, 100, 170) if pst == ps else (36, 44, 76))
+            y += 60
+        y += 6
+        # --- the wardens
+        wards = generals.commanders(g, generals.WARDEN)
+        self.txt(scr, med, f"Wardens  {len(wards)}/{len(generals.WARDEN_IDS)}", (PANEL.x + 4, y), (255, 225, 140))
+        y += 28
+        if not wards:
+            self.txt(scr, sm, "No warden yet. Liberate Barnard's Star (6 light years away) to earn the first.", (PANEL.x + 4, y), (200, 205, 225))
+            y += 28
+        for idx, st in wards:
+            sysname, _, name, tr, blurb = generals.COMMANDERS[idx]
+            rr = pygame.Rect(PANEL.x, y, PANEL.w, 100)
+            if rr.colliderect(PANEL):
+                self.commander_frame(scr, rr, (140, 200, 255), st["on"])
+                self.txt(scr, med, name, (rr.x + 14, rr.y + 6), (245, 245, 250) if st["on"] else (125, 130, 156))
+                self.txt(scr, tiny, f"{generals.TRAITS[tr][0]}: {generals.TRAITS[tr][1]}  -  from {sysname}", (rr.x + 14, rr.y + 30), (156, 166, 196))
+                self.button(scr, pygame.Rect(rr.right - 78, rr.y + 8, 66, 26), "ON" if st["on"] else "OFF", sm,
+                            lambda st=st: st.__setitem__("on", not st["on"]), panel=True, col=(40, 110, 70) if st["on"] else (70, 50, 56))
+                self.button(scr, pygame.Rect(rr.x + 14, rr.y + 64, 250, 26), f"Region: {st['region'] or '-'}", tiny,
+                            lambda st=st: generals.cycle_region(g, st), panel=True, col=(54, 62, 96))
+                self.button(scr, pygame.Rect(rr.x + 272, rr.y + 64, 150, 26), "Retake: " + ("on" if st["retake"] else "off"), tiny,
+                            lambda st=st: st.__setitem__("retake", not st["retake"]), panel=True, col=(54, 62, 96))
+                self.txt(scr, tiny, st["status"] or "Holding its region", (rr.x + 14, rr.y + 48), (130, 220, 160))
+                self.txt(scr, tiny, f"retaken {st.get('retaken', 0)}", (rr.right - 14, rr.y + 90), (170, 176, 205), "midright")
+            y += 108
+        return self.draw_locked_commanders(scr, fonts, y, generals.WARDEN_IDS, "Still to earn") + 8
+
     GAL_MODES = ["Strongest you can beat", "Easiest", "Famous places"]
 
     def gal_list(self, mode):
@@ -1689,6 +1907,15 @@ class App:
         self.button(scr, pygame.Rect(PANEL.x + 2 * (third + 8), y, third, 30), "Whole galaxy", sm, self.zoom_out, panel=True,
                     col=(50, 70, 110))
         y += 40
+        pw = (PANEL.w - 16) // 3
+        for i, label in enumerate(self.GAL_PAGES):
+            self.button(scr, pygame.Rect(PANEL.x + i * (pw + 8), y, pw, 30), label, sm, (lambda i=i: setattr(self, "gal_page", i)),
+                        panel=True, selected=self.gal_page == i, col=(70, 100, 170) if self.gal_page == i else (36, 44, 76))
+        y += 38
+        if self.gal_page == 1:
+            return self.draw_generals_page(scr, fonts, y)
+        if self.gal_page == 2:
+            return self.draw_defence_page(scr, fonts, y)
         # ---- the jump drive: how far you can reach
         L, mx = g.armory[core.JUMP], ARMORY[core.JUMP][3]
         rr = pygame.Rect(PANEL.x, y, PANEL.w, 62)
@@ -1703,10 +1930,10 @@ class App:
                      f"Lv {L}/{mx}", f"{fmt(cr)} cr + {fmt(sci)} sci", ok, (120, 190, 255),
                      (lambda: g.buy_armory(core.JUMP)) if ok else None, glyph="J")
         y += 70
-        # ---- the fronts: how many fleets are out, how much of the fleet each attack sends
-        n_f, mx_f = len(g.campaigns), g.max_fronts()
-        self.txt(scr, med, f"Fronts  {n_f}/{mx_f}", (PANEL.x + 4, y), (255, 190, 150))
-        self.txt(scr, tiny, f"{g.free_share() * 100:.0f}% of the fleet at home", (PANEL.right - 4, y + 7), (150, 158, 190), "topright")
+        # ---- the campaigns: everything in the field, and how much of the fleet a manual attack sends
+        self.txt(scr, med, f"Campaigns  {len(g.campaigns)}", (PANEL.x + 4, y), (255, 190, 150))
+        self.txt(scr, tiny, f"defence {g.defence * 100:.0f}%  -  armies {generals.army_total(g) * 100:.0f}%  -  manual {g.manual_cap() * 100:.0f}%"
+                 " of the fleet", (PANEL.right - 4, y + 7), (150, 158, 190), "topright")
         y += 28
         bw = (PANEL.w - 52 - 6 * len(COMMIT_MODES)) // len(COMMIT_MODES)
         self.txt(scr, tiny, "Send:", (PANEL.x + 4, y + 9), (170, 176, 205))
@@ -1714,15 +1941,15 @@ class App:
             self.button(scr, pygame.Rect(PANEL.x + 52 + i * (bw + 6), y, bw, 28), label, sm, (lambda i=i: setattr(g, "commit", i)),
                         panel=True, selected=g.commit == i, col=(60, 74, 120))
         y += 34
-        if not g.campaigns:
-            self.txt(scr, tiny, "No fleet in the field." + (" Upgrade Command in the armory to attack several systems at once." if mx_f == 1 else ""),
-                     (PANEL.x + 4, y), (140, 148, 180))
-            y += 20
+        self.txt(scr, tiny, f"Manual strikes {g.manual_count()}/{g.max_fronts()} (Command track).  Generals launch their own: see the Generals page.",
+                 (PANEL.x + 4, y), (140, 148, 180))
+        y += 20
         for c in sorted(g.campaigns, key=lambda c: c["dur"] - c["t"]):
             sec = SECTORS[c["k"]]
+            who = generals.COMMANDERS[generals.index_of(c["by"])][2] if c.get("by") else "Manual"
             rr = pygame.Rect(PANEL.x, y, PANEL.w, 58)
-            self.row(scr, fonts, rr, f"{sec['name']}", f"{fmt_time(max(0, c['dur'] - c['t']))} left   -   "
-                     f"{c['chance'] * 100:.0f}% to win   -   {c['share'] * 100:.0f}% of the fleet ({fmt(c['fp'])})", None, None, True,
+            self.row(scr, fonts, rr, f"{sec['name']}", f"{who}  -  {fmt_time(max(0, c['dur'] - c['t']))} left   -   "
+                     f"{c['chance'] * 100:.0f}% to win   -   {c['share'] * 100:.0f}% of the fleet", None, None, True,
                      FACTIONS[sec["faction"]]["col"], (lambda k=c["k"]: self.select_sector(k)), frac=c["t"] / c["dur"],
                      icon=self.enemy_small[sec["faction"]])
             y += 64
@@ -2489,7 +2716,9 @@ def main():
                         if e.key == getattr(pygame, "K_AC_BACK", -1):
                             app.back_pressed()
                         elif e.key == pygame.K_ESCAPE:
-                            if app.fullscreen and not resources.ANDROID:
+                            if app.pick:
+                                app.pick = None                        # (cancels picking a system for a general's orders)
+                            elif app.fullscreen and not resources.ANDROID:
                                 app.toggle_fullscreen()
                             else:
                                 running = False
@@ -2719,6 +2948,7 @@ def check_fronts():
     g.unlocked[2] = True
     g.owned = [[200000 >> i for i in range(NSH)] for _ in range(NSITE)]
     g.armory[core.JUMP] = 4
+    g.defence = 0.0                                                      # (the whole fleet is free for manual campaigns here)
     g.recalc()
     fp = g.fleet_power()
     tg = sorted(g.targets(), key=lambda k: SECTORS[k]["lp"])
@@ -2802,9 +3032,157 @@ def check_fronts():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def check_generals():
+    """Generals and wardens: earned from command systems, orders (heading / toward / region / anywhere + conditions), their
+    own armies, tallies and pauses, the defence pool with postures and wardens, the war while you are away, and saves."""
+    assert len(generals.GENERAL_IDS) == 8 and len(generals.WARDEN_IDS) == 4 and len(set(generals.SYSTEM_OF)) == 12
+    assert all(c[3] in generals.TRAITS and c[0] in galaxy.BY_NAME for c in generals.COMMANDERS)
+
+    def fresh():
+        g = core.Game(load=False, sim=True)
+        g.unlocked[2] = True
+        g.owned = [[200000 >> i for i in range(NSH)] for _ in range(NSITE)]
+        g.armory[core.JUMP] = 6
+        g.recalc()
+        g.grace = 0.0
+        return g
+    g = fresh()
+    ac, bs = galaxy.BY_NAME["Alpha Centauri"], galaxy.BY_NAME["Barnard's Star"]
+    assert not g.cmd
+    g.conquered.add(ac)
+    assert generals.ensure(g) == [0] and g.cmd[0]["army"] == generals.ARMY_DEFAULT and generals.ensure(g) == [], "earned once"
+    g.conquered.add(bs)
+    assert generals.ensure(g) == [1] and g.cmd[1]["region"] == SECTORS[bs]["region"] and "retake" in g.cmd[1]
+    # ---- the pools: defence, armies and manual campaigns are separate shares of the fleet
+    assert abs(g.manual_cap() - (1 - g.defence - 0.1)) < 1e-9 and abs(g.free_share("g0") - 0.1) < 1e-9
+    generals.set_defence(g, 0.8)
+    assert generals.army_total(g) <= 0.2 + 1e-9, "the army must shrink to fit beside the defence"
+    generals.set_defence(g, 0.35)
+    generals.set_army(g, 0, 5.0)
+    assert abs(g.cmd[0]["army"] - 0.65) < 1e-9
+    generals.set_army(g, 0, 0.1)
+    # ---- orders
+    st = g.cmd[0]
+    generals.set_orders(st, mode="heading", angle=0.0, war="any", odds=0.9, prefer="nearest")
+    k = generals.choose(g, 0, st)
+    assert k is not None and galaxy.XS[k] >= galaxy.XS[g.source_of(k)[0]] - 1e-9, "heading east must go east"
+    generals.set_orders(st, angle=math.pi)
+    k = generals.choose(g, 0, st)
+    assert k is not None and galaxy.XS[k] <= galaxy.XS[g.source_of(k)[0]] + 1e-9, "heading west must go west"
+    generals.set_orders(st, mode="any", war="declared")
+    assert generals.choose(g, 0, st) is None, "a general that may only fight factions at war does not start a war"
+    goal = max(g.targets(), key=lambda q: galaxy.dist(0, q))
+    generals.set_orders(st, mode="toward", goal=goal, war="any")
+    k = generals.choose(g, 0, st)
+    assert k is not None and galaxy.dist(k, goal) < galaxy.dist(g.source_of(k)[0], goal), "toward a place must close in on it"
+    generals.set_orders(st, mode="region", region="Perseus Arm")
+    assert generals.choose(g, 0, st) is None and st["status"], "no target in a region that is out of reach"
+    generals.set_orders(st, mode="any", war="any", odds=0.9, prefer="strongest")
+    strongest = generals.choose(g, 0, st)
+    generals.set_orders(st, prefer="weakest")
+    weakest = generals.choose(g, 0, st)
+    assert SECTORS[weakest]["lp"] <= SECTORS[strongest]["lp"]
+    generals.set_orders(st, prefer="nearest", odds=0.99)
+    assert generals.choose(g, 0, st) is not None and generals.slots(0, st) == 1
+    # ---- an army launches its own campaigns, from its own share, and the manual pool stays free
+    generals.step(g, 3.0)
+    assert len(g.campaigns) == 1 and g.campaigns[0]["by"] == "g0" and g.campaigns[0]["share"] <= st["army"] + 1e-9
+    assert abs(g.free_share() - g.manual_cap()) < 1e-9 and g.free_fronts() == g.max_fronts()
+    generals.step(g, 3.0)
+    assert len(g.campaigns) == 1, "one slot: it does not launch a second campaign"
+    c = g.campaigns[0]
+    c["chance"], c["t"] = 1.0, c["dur"]
+    g.war_step(0.01)
+    assert st["took"] == 1 and st["run"] == 1 and c["k"] in g.conquered and c not in g.campaigns   # (it may have sent the next at once)
+    g.campaigns = []
+    # ---- defeats pause a general until you resume it; the stop-after limit counts the run
+    for _ in range(generals.STOP_DEFEATS):
+        st["idle"] = 0.0
+        generals.step(g, 3.0)
+        assert g.campaigns, "the general should have launched"
+        g.campaigns[0]["chance"], g.campaigns[0]["t"] = 0.0, g.campaigns[0]["dur"]
+        g.war_step(0.01)
+    assert st["paused"] and st["lost"] == generals.STOP_DEFEATS
+    generals.step(g, 30.0)
+    assert not g.campaigns, "a paused general stays put"
+    generals.resume(st)
+    assert not st["paused"] and st["streak"] == generals.STOP_DEFEATS
+    generals.set_orders(st, limit=3, odds=0.99)
+    st["run"] = 3
+    assert generals.choose(g, 0, st) is None and st["status"] == "Limit reached"
+    generals.set_orders(st, limit=0)
+    # ---- the defence: postures share the pool between regions, wardens strengthen one
+    pool = generals.defence_pool(g)
+    assert pool == g.fleet_power() * g.defence
+    reg = SECTORS[ac]["region"]
+    other = next(r for r in generals.REGIONS if r != reg)
+    both = generals.defence_map(g, (other,))
+    assert abs(sum(both.values()) - pool * generals.warden_mult(g, reg) - 0.0) < pool * 0.5 + 1, "(the warden adds to its region)"
+    g.cmd[1]["on"] = False
+    both = generals.defence_map(g, (other,))
+    assert abs(both[reg] + both[other] - pool) < 1e-6 * pool, "the regions share the whole pool"
+    g.posture[reg], g.posture[other] = "fortress", "skeleton"
+    both = generals.defence_map(g, (other,))
+    assert abs(both[reg] / both[other] - generals.POSTURE_W["fortress"] / generals.POSTURE_W["skeleton"]) < 1e-9
+    g.posture.clear()
+    g.cmd[1]["on"], g.cmd[1]["region"] = True, reg
+    assert generals.warden_mult(g, reg) == generals.WARDEN_BONUS["bastion"] and generals.warden_mult(g, other) == 1.0
+    # a warden retakes a system lost in its region (and only one at war with you)
+    t = next(q for q in g.targets() if SECTORS[q]["region"] == reg)
+    director.declare_war(g, SECTORS[t]["faction"], "enemy")
+    g.incoming = []
+    g.lost_sectors.add(t)
+    g.campaigns = []
+    g.cmd[0]["on"] = False                                                 # (so the general does not take it first)
+    g.cmd[1]["idle"] = 0.0
+    generals.step(g, 3.0)
+    assert any(c.get("by") == "w1" and c["k"] == t for c in g.campaigns), "the warden should retake the lost system"
+    assert generals.defence_pool(g) < pool, "the retaking force is not defending meanwhile"
+    # ---- the war goes on while you are away, by the same rules, and a reload cannot reroll it
+    old_save = core.SAVE
+    d = tempfile.mkdtemp(prefix="space_miner_generals_")
+    try:
+        core.SAVE = os.path.join(d, "save.json")
+        g = fresh()
+        g.conquered.add(ac)
+        generals.ensure(g)
+        generals.set_orders(g.cmd[0], mode="any", war="any", prefer="nearest", odds=0.7)
+        g.defence = 0.3
+        g.posture["Orion Spur"] = "fortress"
+        k0 = g.targets()[0]
+        assert g.start_campaign(k0, by="g0", pmult=1.0)
+        g.campaigns[0]["chance"] = 0.5
+        g.save()
+        with open(core.SAVE) as f:
+            data = json.load(f)
+        assert data["cmd"]["0"]["army"] == g.cmd[0]["army"] and data["posture"] == {"Orion Spur": "fortress"} and data["defence"] == 0.3
+        data["time"] = time.time() - 3 * 3600
+        with open(core.SAVE, "w") as f:
+            json.dump(data, f)
+        a, b = core.Game(load=True), core.Game(load=True)
+        assert a.conquered == b.conquered and a.battles_won == b.battles_won and a.battles_lost == b.battles_lost, "reloading rerolled the war"
+        assert len(a.conquered) > 2 or a.battles_lost > 0, "three hours away: the campaign must have been fought"
+        assert a.cmd[0]["army"] == g.cmd[0]["army"] and a.defence == 0.3 and a.posture == {"Orion Spur": "fortress"}
+        assert 0 in a.cmd and a.cmd[0]["took"] + a.cmd[0]["lost"] >= 1, "the general should have fought while you were away"
+        # a save from before commanders: no defence, no commanders, campaigns without a tag, no dice
+        for key in ("cmd", "defence", "posture", "rng"):
+            data.pop(key)
+        data["time"] = time.time()
+        for c in data["campaigns"]:
+            c.pop("by", None)
+        with open(core.SAVE, "w") as f:
+            json.dump(data, f)
+        h = core.Game(load=True)
+        assert h.defence == core.DEFENCE_DEFAULT and h.posture == {} and 0 in h.cmd, "(Alpha Centauri is held: its general is earned)"
+        assert all(c.get("by") is None for c in h.campaigns)
+    finally:
+        core.SAVE = old_save
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def check_counter_offensives():
-    """Enemies take systems back: a fleet at home defends them, fleets in the field do not, and several enemy fronts strike
-    at once and share your fleet at home."""
+    """Enemies take systems back: the defence pool of the region defends them, armies on campaign do not, and several enemy
+    fronts strike at once and share the pool."""
     def setup():
         g = core.Game(load=False, sim=True)
         g.unlocked[2] = True
@@ -2829,14 +3207,18 @@ def check_counter_offensives():
         p = director.offensive_power(g, k, n, SECTORS[n]["faction"])
         assert director.OFFENSIVE_MIN * tp - 1e-9 <= p <= director.OFFENSIVE_MAX * tp * director.hostility_mult(g, SECTORS[n]["faction"]) + 1e-9
     g.garrison[k] = 0.5 * tp                                               # a thin garrison
-    full = director.home_guard(g)
-    assert full == director.HOME_GUARD * g.fleet_power() and director.home_guard(g, 2) == full / 2
+    pool = generals.defence_pool(g)
+    assert pool == g.fleet_power() * g.defence and director.sector_defense(g, k, strikes=2) <= director.sector_defense(g, k) + 1e-9
+    assert generals.defence_power(g, k) == pool * generals.warden_mult(g, generals.region_of(k))   # (one exposed region: all of it)
     inc = director.schedule_offensive(g, target=k, lead=0)                 # lead 0: it hits at once
-    assert inc and k in g.conquered and g.offensives_repelled == 1, "the fleet at home should hold the system"
-    g.commit = 3                                                           # ...but with the whole fleet away on a campaign
+    assert inc and k in g.conquered and g.offensives_repelled == 1, "the defence pool should hold the system"
+    g.commit = 3                                                           # armies and campaigns away defend nothing...
     far = next(q for q in sorted(g.targets(), key=lambda q: SECTORS[q]["lp"]) if q != k and q not in g.conquered)
-    assert g.start_campaign(far) and g.free_share() == 0.0 and director.home_guard(g) == 0.0
-    assert director.aggression(g) >= 0.25
+    a0 = director.aggression(g)
+    assert g.start_campaign(far) and generals.defence_pool(g) == pool, "a campaign must not weaken the defence"
+    assert director.aggression(g) > a0, "the enemy grows bolder while the armies are away"
+    generals.set_defence(g, 0.0)                                           # ...and with nothing set aside a thin garrison falls
+    assert generals.defence_pool(g) == 0.0
     inc = director.schedule_offensive(g, target=k, lead=0)
     assert inc and k not in g.conquered and k in g.lost_sectors and g.sectors_lost == 1, "an undefended system should fall"
     assert k in g.targets_set() or g.attack_block(k) in ("FRONTS FULL", "NO FLEET FREE"), "a lost system can be attacked again"
@@ -2871,6 +3253,7 @@ def selftest_step(app, g, frames, shot):
         check_more_ships()
         check_kuiper_belt()
         check_fronts()
+        check_generals()
         check_counter_offensives()
         check_new_game_reset()
     if frames == 3:
@@ -3017,6 +3400,29 @@ def selftest_step(app, g, frames, shot):
         assert app.galaxy_key(pygame.K_z) and app.fv.zt > 1.3
         app.view = "system"
         g.raid(g.cur, force=True)
+    if frames == 70:                                 # the generals and defence pages draw, and picking orders on the map works
+        g.conquered.update(generals.SYSTEM_OF)
+        generals.ensure(g)
+        app.view, app.tab = "galaxy", T_GALAXY
+        for page in (1, 2, 0):
+            app.gal_page = page
+            for _ in range(2):
+                app.update(0.016)
+                app.draw(app_scr(), app_fonts())
+        st0 = g.cmd[0]
+        far = next(k for k in sorted(range(1, NSEC), key=lambda q: -SECTORS[q]["d"]) if k not in g.conquered)
+        for field, mode in (("goal", "toward"), ("heading", "heading"), ("region", "region")):
+            app.begin_pick(0, field)
+            assert app.pick and app.apply_pick(far) and app.pick is None and st0["mode"] == mode, field
+        near = g.targets()[0]
+        app.begin_pick(0, "goal")
+        app.fv.focus(near, snap=True)
+        app.draw(app_scr(), app_fonts())
+        app.fv.click(app.fv.pos(near))               # a click on the map while picking is used up by the pick
+        assert app.pick is None and st0["mode"] == "toward" and st0["goal"] == near
+        app.gal_page = 1
+        app.draw(app_scr(), app_fonts())
+        app.gal_page = 0
     if frames == 72:
         shot("raid")
     if frames == 74:

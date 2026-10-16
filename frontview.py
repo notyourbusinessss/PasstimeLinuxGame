@@ -13,6 +13,7 @@ import pygame
 
 import director
 import front
+import generals
 import galaxy
 import gfx
 import resources
@@ -297,6 +298,8 @@ class FrontView:
                     k = enemy
                     break
         if k is None:
+            return
+        if app.pick is not None and app.apply_pick(k):                 # picking a system for a general's orders
             return
         again = self.last_click[1] == k and app.t - self.last_click[0] < 0.45
         self.last_click = (app.t, k)
@@ -822,6 +825,7 @@ class FrontView:
                 scr.blit(spr, spr.get_rect(center=(fx_, fy_)))
                 if len(camps) > 1 or g.max_fronts() > 1:                  # how much of the fleet this front is
                     app.txt(scr, tiny, f"{camp['share'] * 100:.0f}%", (fx_, fy_ - 14), (170, 215, 255), "midbottom", True)
+        self.draw_commanders(scr, fonts, labels)
         # name labels, the most important first, none on top of another
         labels.sort(key=lambda t: -t[0])
         placed = []
@@ -844,6 +848,46 @@ class FrontView:
         self.hover = hover
         app.hover_sector = hover
 
+    def draw_commanders(self, scr, fonts, labels):
+        """The command systems (a ring: gold for a general, blue for a warden) and the orders of your generals: an arrow for a
+        heading, a dashed line toward a place."""
+        app, g = self.app, self.app.g
+        big, med, sm, tiny = fonts
+        now = app.t
+        for idx, k in enumerate(generals.SYSTEM_OF):
+            x, y = self.pos(k)
+            if not (VIEW.x - 20 < x < VIEW.right + 20 and VIEW.y - 20 < y < VIEW.bottom - BAR + 20):
+                continue
+            have = idx in g.cmd
+            col = generals.colour(idx)
+            r = max(self.star_radius(), 3) + 7
+            pygame.draw.circle(scr, col if have else scale_c(col, 0.55), (x, y), r, 2 if have else 1)
+            if generals.COMMANDERS[idx][1] == generals.WARDEN:
+                pygame.draw.polygon(scr, col if have else scale_c(col, 0.55), [(x, y - r - 5), (x + 4, y - r - 1), (x - 4, y - r - 1)])
+            else:
+                pygame.draw.circle(scr, col if have else scale_c(col, 0.55), (x, y - r - 3), 2)
+            if self.s >= 0.04 or have:
+                labels.append((88 if have else 74, x, y, SNAME[k], lerp_c(col, (255, 255, 255), 0.4)))
+        for idx, st in g.cmd.items():
+            if generals.COMMANDERS[idx][1] != generals.GENERAL or not st["on"]:
+                continue
+            col = generals.colour(idx)
+            name = generals.COMMANDERS[idx][2].split()[-1]
+            if st["mode"] == "heading":
+                tx, ty = self.pos(generals.tip(g, st["angle"]))
+                ang = st["angle"]
+                ex, ey = tx + math.cos(ang) * 110, ty + math.sin(ang) * 110
+                self.dashed(scr, col, (tx, ty), (ex, ey), 2, offset=-now * 30)
+                for da in (-2.5, 2.5):
+                    pygame.draw.line(scr, col, (ex, ey), (ex + math.cos(ang + da) * 10, ey + math.sin(ang + da) * 10), 2)
+                app.txt(scr, tiny, name, (ex, ey), col, "center", True)
+            elif st["mode"] == "toward" and st["goal"] is not None and st["goal"] not in g.conquered:
+                sx, sy = self.pos(g.source_of(st["goal"])[0])
+                gx, gy = self.pos(st["goal"])
+                self.dashed(scr, col, (sx, sy), (gx, gy), 2, offset=-now * 30)
+                pygame.draw.circle(scr, col, (gx, gy), max(self.star_radius(), 3) + 10, 1)
+                app.txt(scr, tiny, name, (gx, gy - 16), col, "midbottom", True)
+
     def draw_overlay(self, scr, fonts):
         """The frame, toolbar, command bar, alerts, mini-map and tooltip: drawn after the vignette so they are not dimmed."""
         app = self.app
@@ -852,6 +896,15 @@ class FrontView:
         self.draw_frame(scr, fonts)
         if self.hover is not None:
             self.draw_tooltip(scr, fonts, self.hover, app.g.fleet_power())
+        if app.pick is not None and app.pick["idx"] in app.g.cmd:
+            what = {"heading": "a direction to go", "goal": "a place to go toward", "region": "a region to clear"}[app.pick["field"]]
+            txt = f"Click a system: {what}  -  {generals.COMMANDERS[app.pick['idx']][2]}  (Esc cancels)"
+            w = fonts[2].size(txt)[0] + 28
+            r = pygame.Rect(0, 0, w, 32)
+            r.midtop = (VIEW.centerx, VIEW.y + 8)
+            pygame.draw.rect(scr, (60, 48, 20), r, border_radius=8)
+            pygame.draw.rect(scr, (255, 215, 110), r, 2, border_radius=8)
+            app.txt(scr, fonts[2], txt, r.center, (255, 238, 180), "center")
         scr.set_clip(None)
 
     # ------------------------------------------------------------------ frame, toolbar, mini-map, tooltip
