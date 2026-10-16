@@ -10,6 +10,7 @@ import gfx
 import worlds
 from gfx import scale_c
 
+PANEL = pygame.Rect(660, 104, 600, 608)       # the side panel: space_miner shares its own rectangle here (and resizes it in place)
 ROW_H = 54
 KIND_COL = dict(temperate=(120, 230, 140), ocean=(110, 170, 255), rocky=(190, 180, 170), desert=(235, 190, 120), ice=(190, 220, 255),
                 lava=(255, 140, 80), dwarf=(190, 175, 165), mini=(190, 215, 230), ice_giant=(120, 215, 230), gas=(235, 180, 130))
@@ -56,12 +57,11 @@ def has_news(app):
 
 def draw_toggle(app, scr, fonts, y):
     """The two pages of the Planets tab. Returns the y under them."""
-    import space_miner as sm
     big, med, sm_f, tiny = fonts
     n = worlds.stats(app.g.conquered)["total"]
-    w = (sm.PANEL.w - 8) // 2
+    w = (PANEL.w - 8) // 2
     for i, label in enumerate(["Solar system", f"Other systems ({n:,})"]):
-        r = pygame.Rect(sm.PANEL.x + i * (w + 8), y, w, 28)
+        r = pygame.Rect(PANEL.x + i * (w + 8), y, w, 28)
         app.button(scr, r, label, sm_f, (lambda i=i: set_page(app, i)), col=(78, 100, 176) if app.pl_page == i else (34, 42, 74),
                    panel=True, selected=app.pl_page == i, dot=i == 1 and app.pl_page == 0 and has_news(app))
     return y + 38
@@ -96,10 +96,9 @@ def show_on_map(app, k):
 
 def draw_page(app, scr, fonts, y):
     """The Other systems page: a summary, the filters, the card of the selected world and the list of every world you found."""
-    import space_miner as sm
     big, med, sm_f, tiny = fonts
     g = app.g
-    P = sm.PANEL
+    P = PANEL
     st = worlds.stats(g.conquered)
     app.w_seen = st["total"]
     y = draw_toggle(app, scr, fonts, y)
@@ -174,9 +173,8 @@ def draw_row(app, scr, fonts, r, w, current):
 
 def draw_card(app, scr, fonts, y, w):
     """The card of the selected world: its picture, its numbers and what kind of place it is."""
-    import space_miner as sm
     big, med, sm_f, tiny = fonts
-    P = sm.PANEL
+    P = PANEL
     r = pygame.Rect(P.x, y, P.w, 196)
     if r.colliderect(P):
         col = KIND_COL[w["kind"]]
