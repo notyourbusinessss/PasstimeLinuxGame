@@ -95,6 +95,8 @@ Missing Python or pip? Debian/Ubuntu: `sudo apt install python3 python3-pip pyth
 | **G** | Open / close the galaxy map |
 | Mouse wheel over the galaxy map | Zoom in and out (towards the cursor) |
 | Drag on the galaxy map | Pan the map |
+| Drag from a system you hold to a star | Attack it (see [Attacking from the map](#attacking-from-the-map)) |
+| **SPACE** on the galaxy map | Launch the recommended attack |
 | **+** / **-**, arrow keys | Zoom / pan the galaxy map from the keyboard |
 | **Z**, or double-click a system | Close look at the selected system and its front (press **Z** again to zoom back out) |
 | **H** | Frame all your territory on the galaxy map |
@@ -333,6 +335,22 @@ Power grows with the distance from the Sun, from a few thousand near home to the
 ![The Galaxy tab: the Jump Drive, the Campaigns card and the Fleet Admiral](screenshots/64-jump-drive.png)
 
 **Fleet power.** Your fleet's strength comes from the ships you own on all your planets (bigger ships count for far more), boosted by your Weapons upgrades, your Defense Grids, your overall production bonus and the systems you have liberated. It is shown on the Galaxy tab.
+
+#### Attacking from the map
+
+You do not have to open any panel to wage war. On the galaxy map:
+
+- **Drag from a system you hold to a star you want** and let go. An arrow follows the pointer, snaps to the star under it and shows its name and your **win chance** before you drop (a red arrow says why the attack is not possible); dropping launches the campaign from the nearest of your systems. A faction at peace with you asks first, on the map, in a bar with **ATTACK** and **CANCEL**. A drag that starts on empty space still pans the map, and a drag dropped on nothing does nothing.
+- A **pulsing gold ring marked BEST** shows the attack worth launching now: among the systems in reach that no fleet is attacking yet and that your free fleet beats with at least **90%** odds, the ones of factions you are at war with first, then the strongest (the best reward), then the nearest. Press **SPACE** on the map, or the **ATTACK BEST** button, to launch it. With nothing to launch it says why (all fronts busy, no fleet free, nothing within your odds).
+- The **campaigns dock** in the top-left corner of the map is always there: how many fronts are in use (and how many are run by generals), the four campaigns closest to arriving with their win chance, ETA and a progress bar (click one to look at it), and the **ATTACK BEST** button. The incoming-attack chips sit under it.
+
+![The recommended attack is ringed and marked BEST; the campaigns dock is in the corner](screenshots/84-best-target.png)
+
+![Dragging from a system you hold to a star: the arrow shows the odds before you drop](screenshots/85-drag-to-attack.png)
+
+![Attacking a faction at peace asks first, on the map](screenshots/86-war-prompt.png)
+
+![The campaign is on its way: the dock lists it with its ETA](screenshots/87-campaign-dock.png)
 
 **Campaigns.** Pick a system you can reach on the map or in the *Galaxy* tab and press **ATTACK** (or **DECLARE WAR**, if you are at peace with that faction - see [War and peace](#war-and-peace)). The part of your fleet that is sent is committed (see [Generals and wardens](#generals-and-wardens-the-war-on-standing-orders)) and a campaign timer runs while you keep playing: longer against stronger systems, plus the flight from your nearest system. When it ends the game rolls the dice using the win chance shown beforehand (it depends on the power sent against the system's).
 
