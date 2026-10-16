@@ -22,7 +22,7 @@ import random
 
 import core
 import generals
-from core import FACTIONS, NSEC, NSITE, SECTORS, SITES, fmt, win_chance
+from core import FACTIONS, NSEC, SECTORS, fmt, win_chance
 
 INTEL = 4                       # index of the Intel track in core.ARMORY
 TIERS = [  # name, power multiplier, ore lost on failure, planets hit, credit loot multiplier, sectors you must hold, raiders drawn
@@ -252,7 +252,7 @@ def aggression(g):
     if hostile:
         a += 0.1 * min(1.0, (sum(hostile) / len(hostile)) / 3.0)
     rp = 0.12 * ep
-    planets = [p for p in range(NSITE) if g.unlocked[p]]
+    planets = [p for p in range(g.nsite) if g.unlocked[p]]
     weak = sum(1 for p in planets if planet_defense(g, p) < rp)
     a += 0.2 * weak / max(1, len(planets))
     a += 0.25 * away(g)                             # they strike while your armies are away
@@ -295,7 +295,7 @@ def interval(g, base_low, base_high):
 
 
 def pick_targets(g, n):
-    planets = [p for p in range(NSITE) if g.unlocked[p]]
+    planets = [p for p in range(g.nsite) if g.unlocked[p]]
     if not planets:
         return []
     rp = 0.12 * g.sector_power(weakest_front(g) or 1)
@@ -383,7 +383,7 @@ def describe(g, inc, level_=None):
     t = TIERS[inc["tier"]]
     if lv <= 1:
         return "Unknown ships detected near the system"
-    names = ", ".join(SITES[p]["name"] for p in inc["targets"])
+    names = ", ".join(g.sites[p]["name"] for p in inc["targets"])
     if lv == 2:
         return f"{fname} fleet heading for {names}"
     if lv == 3:
@@ -420,7 +420,7 @@ def fortify(g, iid, key=None):
         inc["fort"].append(p)
     g.credits -= cost
     g.flags.add("fortified")
-    log(g, f"Fortified {SECTORS[inc['target']]['name'] if inc['kind'] == 'offensive' else SITES[p]['name']}")
+    log(g, f"Fortified {SECTORS[inc['target']]['name'] if inc['kind'] == 'offensive' else g.sites[p]['name']}")
     g.recalc()
     return True
 
@@ -441,7 +441,7 @@ def resolve_raid(g, inc):
             continue
         chance = win_chance(planet_defense(g, p, p in inc["fort"]), inc["power"])
         win = (chance >= 0.5) if g.sim else (random.random() < chance)
-        nm = SITES[p]["name"]
+        nm = g.sites[p]["name"]
         lost = 0.0
         if win:
             wins += 1
@@ -453,8 +453,8 @@ def resolve_raid(g, inc):
             g.raids_lost += 1
             lost = g.ore[p] * t["loss"] * max(0.05, 1 - 0.08 * g.armory[3])
             g.ore[p] -= lost
-            g.toast(f"{t['name']} by the {FACTIONS[fac]['name']} hit {nm}!  Lost {fmt(lost)} {SITES[p]['ore']}.", 7)
-        log(g, f"{t['name']} on {nm}: {'repelled' if win else 'lost ' + fmt(lost) + ' ' + SITES[p]['ore']}")
+            g.toast(f"{t['name']} by the {FACTIONS[fac]['name']} hit {nm}!  Lost {fmt(lost)} {g.sites[p]['ore']}.", 7)
+        log(g, f"{t['name']} on {nm}: {'repelled' if win else 'lost ' + fmt(lost) + ' ' + g.sites[p]['ore']}")
         g.fx("raid", dict(p=p, win=win, faction=fac, lost=lost, tier=inc["tier"]))
     if wins and wins == len([p for p in inc["targets"] if g.unlocked[p]]):
         g.tier_wins[inc["tier"]] += 1
@@ -489,7 +489,7 @@ def instant_raid(g, p=None, force=None):
     src = weakest_front(g) or (min(g.border(), key=g.sector_power) if g.border() else None)
     if src is None:
         return False
-    p = p if p is not None else random.choice([q for q in range(NSITE) if g.unlocked[q]])
+    p = p if p is not None else random.choice([q for q in range(g.nsite) if g.unlocked[q]])
     fac = SECTORS[src]["faction"]
     power = 0.12 * g.sector_power(src)
     if force is not None:                       # make the outcome certain

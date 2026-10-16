@@ -1021,7 +1021,7 @@ class FrontView:
             where = ""
             if ilv >= 2:
                 where = (" -> " + SECTORS[inc["target"]]["name"]) if inc["kind"] == "offensive" else " -> " + ", ".join(
-                    core.SITES[q]["name"] for q in inc["targets"])
+                    g.sites[q]["name"] for q in inc["targets"] if q < g.nsite)
             text = f"INCOMING: {name}{where}  ({fmt_eta(left)})"
             pill = pygame.Rect(VIEW.x + 10, y, min(VIEW.w - 20, tiny.size(text)[0] + 150), 28)
             bg = pygame.Surface(pill.size, pygame.SRCALPHA)

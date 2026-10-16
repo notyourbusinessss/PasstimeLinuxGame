@@ -10,7 +10,8 @@ import math
 
 CLASSES = ["Drone", "Rig", "Barge", "Refinery", "Foundry", "Swarm", "Tap", "Engine", "Citadel", "Ark"]
 
-# per planet (same order as core.SITES): the ten ship names (a plural is made by adding "s") and a one-line description
+# per ship family (a solar planet's own, in the order of core.SITES; a colony world flies the family of its kind, colonies.FAMILY):
+# the ten ship names (a plural is made by adding "s") and a one-line description
 # for each
 ROSTERS = [
     dict(  # Earth
