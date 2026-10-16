@@ -8,7 +8,7 @@ import sys
 import core
 import director
 import generals
-from core import (BUILDINGS, NB, NSH, NSITE, NSOL, SC, SHIPS, SITES, TECHS, PERKS, GROWTH, geo_max, fmt)
+from core import (BUILDINGS, NB, NSH, NSOL, SHIPS, SITES, TECHS, PERKS, GROWTH, geo_max, fmt)
 
 
 def site_mult(g, p):
@@ -26,14 +26,14 @@ def options(g, p):
     mine = 1 + g.s_mine[p] * g.E["minebonus"]
     k = mine * g.G * site_mult(g, p)
     for i in range(NSH):
-        d = SHIPS[i][2] * SC[p] * g.s_gm[p][i] * k
+        d = SHIPS[i][2] * g.sc[p] * g.s_gm[p][i] * k
         c = g.ship_cost1(p, i)
         out.append((c / d, c, "ship", i))
     for u in g.avail_upgrades(p):
-        c = u["cost"] * SC[p]
+        c = u["cost"] * g.sc[p]
         if u["kind"] == "gen":
             i, m = u["arg"]
-            d = g.owned[p][i] * SHIPS[i][2] * SC[p] * g.s_gm[p][i] * (m - 1) * k
+            d = g.owned[p][i] * SHIPS[i][2] * g.sc[p] * g.s_gm[p][i] * (m - 1) * k
         elif u["kind"] == "global":
             d = g.s_ops[p] * (u["arg"] - 1) / u["arg"] * 1.0
         else:
@@ -43,7 +43,7 @@ def options(g, p):
     # mining complex
     L = g.bld[p][0]
     if L < core.BMAX:
-        bonus = SITES[p]["bonus"]
+        bonus = g.sites[p]["bonus"]
         f = 2.0 if bonus == 0 else (1.5 if bonus == -1 else 1.0)
         c = g.bld_cost1(p, 0, L)
         d = 0.03 * f * g.E["minebonus"] * g.s_base[p] * g.G * site_mult(g, p)
@@ -57,18 +57,21 @@ def next_locked(g):
 
 
 def colony_to_settle(g, res, cres):
-    """The cheapest colony world the bot can pay for out of what the next solar planet does not need."""
-    for c in range(NSOL, NSITE):
-        if g.unlocked[c] or not g.can_unlock(c):
+    """The nearest world of a star you hold that the bot can pay for out of what the next solar planet does not need (it looks at the
+    nearest 60: those are the cheap ones), or None; the bot stops at COLONY_MAX colonies."""
+    if len(g.colonies) >= COLONY_MAX:
+        return None
+    for k, i in g.world_options()[:60]:
+        if not g.can_settle(k, i):
             continue
-        ores, cr = g.unlock_cost(c)
-        if all(g.ore[p] - res[p] >= amt for p, amt in ores) and g.credits - cres >= cr:
-            return c
+        pays, cr = g.settle_cost(k, i)
+        if all(g.ore[p] - res[p] >= amt for p, amt in pays) and g.credits - cres >= cr:
+            return k, i
     return None
 
 
 def reserves(g):
-    res = [0.0] * NSITE
+    res = [0.0] * g.nsite
     cres = 0.0
     k = next_locked(g)
     if k is None:
@@ -85,6 +88,7 @@ def reserves(g):
 WARP_FRAC = 1.0
 BOT_CHANCE = 0.85
 COLONIES = True                       # col=0: the bot never settles a colony world
+COLONY_MAX = 60                       # colmax=N: the most colonies the bot settles
 GENERALS = True                       # gens=0: the bot gives its generals no orders (they stay off)
 
 
@@ -214,17 +218,18 @@ class Bot:
             for p in sorted(PERKS, key=lambda p: p[2]):
                 if g.buy_perk(p[0]):
                     changed = True
-            for p in range(NSITE):
+            for p in range(NSOL):
                 if g.unlocked[p] and g.can_buy_project(p) and g.buy_project(p):
                     self.log.append((g.t, f"project {core.PROJECTS[p][0]}"))
                     changed = True
             res, cres = reserves(g)
             c = colony_to_settle(g, res, cres) if COLONIES else None
             if c is not None:
-                g.unlock_planet(c)
-                self.log.append((g.t, f"unlock {SITES[c]['name']}"))
+                p = g.settle(*c)
+                self.log.append((g.t, f"settle {g.sites[p]['name']}"))
                 changed = True
-            for p in range(NSITE):
+                res, cres = reserves(g)
+            for p in range(g.nsite):
                 if not g.unlocked[p]:
                     continue
                 spare = g.ore[p] - res[p]
@@ -285,8 +290,9 @@ def main():
     global BOT_CHANCE, GENERALS
     BOT_CHANCE = float(kw.pop("bot_chance", 0.85))
     GENERALS = kw.pop("gens", "1") != "0"
-    global COLONIES
+    global COLONIES, COLONY_MAX
     COLONIES = kw.pop("col", "1") != "0"
+    COLONY_MAX = int(kw.pop("colmax", 60))
     core.apply_tune(**{k: float(v) for k, v in kw.items()})
     global WARP_FRAC
     WARP_FRAC = warp_frac
@@ -305,7 +311,7 @@ def main():
             t, msg = bot.log[seen]
             if not quiet:
                 print(f"  [{fmt_t(t)}] {msg}")
-            elif msg.startswith(("unlock", "project", "conquer", "ASCEND", "LOST")):
+            elif msg.startswith(("unlock", "settle", "project", "conquer", "ASCEND", "LOST")):
                 print(f"  [{fmt_t(t)}] {msg}")
             seen += 1
         if g.t >= next_report and not quiet:

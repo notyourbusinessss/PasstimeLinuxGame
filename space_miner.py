@@ -19,6 +19,7 @@ import time
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")       # no pygame banner in the terminal
 import pygame
 
+import colonies
 import core
 import galaxy
 import gamelog
@@ -36,7 +37,7 @@ import touch
 import worlds
 import worldview
 from version import __version__
-from core import (BMAX, BUILDINGS, NB, NSH, NSITE, NSOL, PERKS, PROJECTS, SC, SHIPS, SITES, TECHS, TECH_BY_ID,
+from core import (BMAX, BUILDINGS, NB, NSH, NSOL, PERKS, PROJECTS, SHIPS, SITES, TECHS, TECH_BY_ID,
                   UPGRADES, ACHIEVEMENTS, ACH_BY_ID, ACH_CATS, TIER_BONUS, TIER_NAMES, QUEST_TXT, fmt, geo_cost,
                   SECTORS, NSEC, FACTIONS, ARMORY, COMMIT_MODES, armory_cost, win_chance,
                   STARDUST_PERKS, sd_bonus)
@@ -69,33 +70,6 @@ T_SHIPS, T_UPG, T_COLONY, T_PLANETS, T_GALAXY, T_TECH, T_QUESTS, T_WARP, T_AWARD
 
 MEDAL = {"bronze": (205, 127, 50), "silver": (205, 210, 222), "gold": (255, 208, 70), "platinum": (140, 230, 255)}
 AWARD_CHIPS = ["All"] + ACH_CATS + ["Stats"]
-
-
-def site_sprite(k):
-    """The picture of planet k as the view shows it: a solar planet is painted by gfx.make_planet, a colony world by gfx.make_world."""
-    s = SITES[k]
-    if s.get("colony"):
-        size = 2 * PLANET_R + 2
-        return gfx.make_world(s["wkind"], s["seed"], round(size / 0.58) if s["ring"] else size, s["ring"])
-    return gfx.make_planet(PLANET_R, s["kind"], s["col"], 100 + k * 13)
-
-
-class SiteArt:
-    """A list of per-planet pictures made on demand: the solar planets are painted at start-up, the colony worlds (89 more) the
-    first time they are drawn."""
-
-    def __init__(self, make, eager):
-        self.make = make
-        self.items = {k: make(k) for k in range(eager)}
-
-    def __getitem__(self, k):
-        got = self.items.get(k)
-        if got is None:
-            got = self.items[k] = self.make(k)
-        return got
-
-    def __iter__(self):
-        return (self[k] for k in range(NSITE))
 
 
 def fmt_time(sec):
@@ -138,7 +112,7 @@ class App:
         self.ascend_confirm = 0.0
         self.ascend_cycle = 1
         self.ach_new = False
-        self.cl_filter = "open"                                              # the Colonies page of the Planets tab
+        self.cl_filter, self.cl_cache, self.cl_ready, self.cl_ready_t = "ready", None, False, -1      # the Colonies page of the Planets tab
         self.strip_off, self.strip_pos, self.strip_cur = 0, {}, None     # the planet strip: first planet shown, x of each, the planet last scrolled to
         self.pl_page, self.wf_group, self.wf_sys = 0, "all", None      # the Planets tab: page, the filter of the worlds page
         self.wsel, self.w_seen, self.w_cache = None, 0, None           # the selected world, how many worlds you have looked at
@@ -181,22 +155,10 @@ class App:
 
     # ---------------- assets -----------------
     def load_assets(self):
-        def dark(ic):
-            d = ic.copy()
-            d.fill((24, 28, 46, 255), special_flags=pygame.BLEND_RGBA_MULT)
-            return d
-        self.site_sprites = SiteArt(site_sprite, NSOL)                    # the pictures of every planet; a colony world's is made when first needed
-        def icon(size):
-            def make(k):
-                s = SITES[k]
-                if s.get("colony"):                                   # painted small, not scaled down from the big picture
-                    return gfx.make_world(s["wkind"], s["seed"], size, s["ring"])
-                return pygame.transform.smoothscale(self.site_sprites[k], (size, size))
-            return make
-        self.strip_icons = SiteArt(icon(32), NSOL)
-        self.strip_dark = SiteArt(lambda k: dark(self.strip_icons[k]), NSOL)
-        self.planet_icons = SiteArt(icon(50), NSOL)
-        self.planet_dark = SiteArt(lambda k: dark(self.planet_icons[k]), NSOL)
+        self.art = {}                        # (what, site id, size) -> picture of a planet, made on first use (see site_sprite)
+        for k in range(NSOL):                # the solar planets are painted at start-up, a colony world's picture when it is first drawn
+            self.site_sprite(k)
+            self.site_icon(k, 32), self.site_icon(k, 50)
         self.ship_cache = {}                 # (planet, class, size) -> sprite, made on first use
         self.ship_rot = {}
         self.ast_sprites = {}
@@ -249,33 +211,76 @@ class App:
         self.raiders = []
         self.floats, self.parts, self.rings, self.shooting = [], [], [], []
 
+    def fam(self, p):
+        """The ship family of planet p (a solar planet's own, a colony's that of its kind of world)."""
+        return self.g.sites[p]["family"]
+
+    def site_sprite(self, p):
+        """The picture of planet p as the planet view shows it: a solar planet is painted by gfx.make_planet, a colony world by
+        gfx.make_world."""
+        s = self.g.sites[p]
+        key = ("big", s["id"])
+        pic = self.art.get(key)
+        if pic is None:
+            if s.get("colony"):
+                size = 2 * PLANET_R + 2
+                pic = gfx.make_world(s["wkind"], s["seed"], round(size / 0.58) if s["ring"] else size, s["ring"])
+            else:
+                pic = gfx.make_planet(PLANET_R, s["kind"], s["col"], 100 + p * 13)
+            self.art[key] = pic
+        return pic
+
+    def site_icon(self, p, size):
+        """A small picture of planet p (the strip uses 32 pixels, the lists 50)."""
+        s = self.g.sites[p]
+        key = ("icon", s["id"], size)
+        pic = self.art.get(key)
+        if pic is None:
+            if s.get("colony"):                                       # painted small, not scaled down from the big picture
+                pic = gfx.make_world(s["wkind"], s["seed"], size, s["ring"])
+            else:
+                pic = pygame.transform.smoothscale(self.site_sprite(p), (size, size))
+            self.art[key] = pic
+        return pic
+
+    def site_dark(self, p, size):
+        """The picture of a planet you cannot go to: dark."""
+        key = ("dark", self.g.sites[p]["id"], size)
+        pic = self.art.get(key)
+        if pic is None:
+            pic = self.site_icon(p, size).copy()
+            pic.fill((24, 28, 46, 255), special_flags=pygame.BLEND_RGBA_MULT)
+            self.art[key] = pic
+        return pic
+
     def ship_color(self, p, i):
         """The class colour (the accent every hull carries, and the colour of its engine glow and laser). On the planets
         with their own palette it is pulled towards that palette's glow."""
-        pal = ships.palette(p)
+        pal = ships.palette(self.fam(p))
         col = SHIPS[i][3] if pal is None else lerp_c(SHIPS[i][3], pal[3], 0.4)
-        return col if p < NSOL else lerp_c(col, SITES[p]["col"], 0.3)         # a colony's fleet takes a hint of its world's colour
+        return col if p < NSOL else lerp_c(col, self.g.sites[p]["col"], 0.3)         # a colony's fleet takes a hint of its world's colour
 
     def ship_sprite(self, p, i, icon=False):
         """The sprite of ship class i on planet p (every planet's fleet looks different)."""
-        size = 46 if icon else round((26 + i * 2) * (1.3 if i >= gfx.FLEET_TIER else 1.0) * ships.scale(p))
-        key = (p, i, size)
+        size = 46 if icon else round((26 + i * 2) * (1.3 if i >= gfx.FLEET_TIER else 1.0) * ships.scale(self.fam(p)))
+        key = (self.g.sites[p]["id"], i, size)
         spr = self.ship_cache.get(key)
         if spr is None:
-            col = SHIPS[i][3] if p < NSOL else lerp_c(SHIPS[i][3], SITES[p]["col"], 0.35)
-            spr = self.ship_cache[key] = gfx.make_ship(i, col, size, ships.style(p), ships.palette(p))
+            col = SHIPS[i][3] if p < NSOL else lerp_c(SHIPS[i][3], self.g.sites[p]["col"], 0.35)
+            spr = self.ship_cache[key] = gfx.make_ship(i, col, size, ships.style(self.fam(p)), ships.palette(self.fam(p)))
         return spr
 
     def ship_icon(self, p, i):
         return self.ship_sprite(p, i, True)
 
     def get_ast_sprites(self, p):
-        if p not in self.ast_sprites:
-            oc = SITES[p]["ocol"]
+        sid = self.g.sites[p]["id"]
+        if sid not in self.ast_sprites:
+            oc = self.g.sites[p]["ocol"]
             tint = lerp_c((255, 255, 255), oc, 0.45)
-            self.ast_sprites[p] = [gfx.make_asteroid(sz, p * 31 + v * 7 + sz, tint)
-                                   for sz in (34, 44, 56) for v in range(3)]
-        return self.ast_sprites[p]
+            seed = p if p < NSOL else self.g.sites[p]["seed"] % 997
+            self.ast_sprites[sid] = [gfx.make_asteroid(sz, seed * 31 + v * 7 + sz, tint) for sz in (34, 44, 56) for v in range(3)]
+        return self.ast_sprites[sid]
 
     def rebuild_view(self):
         p = self.g.cur
@@ -312,7 +317,7 @@ class App:
             return
         x = g.click(pos)
         self.snd.play("click")
-        oc = SITES[g.cur]["ocol"]
+        oc = self.g.sites[g.cur]["ocol"]
         self.pulse = 1.0
         self.shake = 0.25
         self.floats.append([pos[0] + random.uniform(-14, 14), pos[1] - 12, f"+{fmt(x)}", 1.0, lerp_c(oc, (255, 255, 255), 0.4)])
@@ -326,7 +331,7 @@ class App:
 
     def break_asteroid(self, a):
         x, y, _ = self.ast_pos(a)
-        self.burst(x, y, SITES[self.g.cur]["ocol"], 22)
+        self.burst(x, y, self.g.sites[self.g.cur]["ocol"], 22)
         a["dead"] = 3.5
         a["hp"] = 0.0
 
@@ -382,7 +387,7 @@ class App:
     def strip_entries(self):
         """The planets the strip shows: the solar system, then the colony worlds you have settled."""
         g = self.g
-        return list(range(NSOL)) + [k for k in range(NSOL, NSITE) if g.unlocked[k]]
+        return list(range(g.nsite))
 
     def strip_cap(self):
         """How many planets fit in the strip."""
@@ -477,7 +482,7 @@ class App:
         except pygame.error:
             win = "?"
         return "\n".join([
-            f"view={self.view} tab={self.tabs[self.tab] if 0 <= self.tab < len(self.tabs) else self.tab} planet={SITES[g.cur]['name']} "
+            f"view={self.view} tab={self.tabs[self.tab] if 0 <= self.tab < len(self.tabs) else self.tab} planet={self.g.sites[g.cur]['name']} "
             f"fps={self.fps:.0f} window={win} fullscreen={self.fullscreen} dev={self.dev}",
             f"play_time={g.play_time:.0f}s cycle={g.cycle} warps={g.warps} unlocked={g.n_unlocked} sectors={len(g.conquered) - 1} "
             f"fronts={len(g.campaigns)}/{g.max_fronts()} incoming={len(g.incoming)} event={'yes' if g.event else 'no'} "
@@ -687,8 +692,8 @@ class App:
                 self.warp_fx = 1.8
                 self.snd.play("warp")
             elif kind == "unlock":
-                self.rings.append([CX, CY, 0.0, SITES[data]["col"]])
-                self.burst(CX, CY, SITES[data]["col"], 40)
+                self.rings.append([CX, CY, 0.0, self.g.sites[data]["col"]])
+                self.burst(CX, CY, self.g.sites[data]["col"], 40)
                 self.snd.play("unlock")
             elif kind == "project":
                 self.rings.append([CX, CY, 0.0, (255, 220, 120)])
@@ -838,7 +843,7 @@ class App:
         else:
             scr.blit(self.bg, (0, 0))
             self.draw_stars(scr)
-        site = SITES[g.cur]
+        site = self.g.sites[g.cur]
         if self.view == "system":
             scr.blit(glow(280, scale_c(site["col"], 0.22)), (CX - 280, CY - 280), special_flags=ADD)
         if g.buff_mult > 1.5 and self.view == "system":
@@ -899,7 +904,7 @@ class App:
     def draw_scene(self, scr):
         g = self.g
         p = g.cur
-        site = SITES[p]
+        site = self.g.sites[p]
         behind, front = [], []
         for a in self.asts:
             if a["hp"] <= 0:
@@ -907,15 +912,15 @@ class App:
             x, y, ang = self.ast_pos(a)
             (behind if math.sin(ang) < 0 else front).append(("a", a, x, y))
         for i in range(NSH):
-            n = ships.shown(p, g.owned[p][i])
+            n = ships.shown(self.fam(p), g.owned[p][i])
             d = 1 if i % 2 == 0 else -1
             for j in range(n):
-                dx, dy, depth = ships.orbit(p, i, j, n, self.t, d)
-                hd = ships.heading(p, i, j, n, self.t, d)
+                dx, dy, depth = ships.orbit(self.fam(p), i, j, n, self.t, d)
+                hd = ships.heading(self.fam(p), i, j, n, self.t, d)
                 (behind if depth < 0 else front).append(("s", (i, j, hd, d), CX + dx, CY + dy))
         for item in behind:
             self.draw_item(scr, item)
-        spr = self.site_sprites[p]
+        spr = self.site_sprite(p)
         ox = random.uniform(-2, 2) * self.shake
         scr.blit(glow(int(PLANET_R * 2.3), scale_c(site["col"], 0.35)), (CX - PLANET_R * 2.3, CY - PLANET_R * 2.3),
                  special_flags=ADD)
@@ -928,7 +933,7 @@ class App:
             self.draw_rings(scr, CX, CY, PLANET_R, True)
         for item in front:
             self.draw_item(scr, item)
-        style = ships.style(p)
+        style = ships.style(self.fam(p))
         for item in behind + front:
             if item[0] == "s":
                 i, j, hd, d = item[1]
@@ -956,7 +961,7 @@ class App:
             sc = 0.55 + 0.45 * a["hp"]
             img = pygame.transform.rotozoom(spr, a["rot"], sc)
             scr.blit(img, img.get_rect(center=(x, y)))
-            oc = SITES[g.cur]["ocol"]
+            oc = self.g.sites[g.cur]["ocol"]
             for off in (0.0, 2.4):
                 ga = math.radians(a["rot"]) + off
                 gx = x + math.cos(ga) * spr.get_width() * 0.2 * sc
@@ -971,7 +976,7 @@ class App:
             by = y - math.sin(ta) * tc * 7
             scr.blit(glow(7 - tc, scale_c(col, 0.55 / tc)), (bx - (7 - tc), by - (7 - tc)), special_flags=ADD)
         q = int(round(-math.degrees(ta) / 10)) % 36
-        key = (g.cur, i, q)
+        key = (g.sites[g.cur]["id"], i, q)
         spr = self.ship_rot.get(key)
         if spr is None:
             spr = self.ship_rot[key] = pygame.transform.rotate(self.ship_sprite(g.cur, i), q * 10)
@@ -1022,7 +1027,7 @@ class App:
         tr = self.g.travel
         prog = tr["t"] / tr["dur"]
         k = math.sin(math.pi * min(1, prog))
-        to = SITES[tr["to"]]
+        to = self.g.sites[tr["to"]]
         scr.set_clip(pygame.Rect(0, 0, PANEL.x - 14, H))
         for a, sp in self.streaks:
             d0 = 40 + k * sp * 380
@@ -1070,12 +1075,9 @@ class App:
                 fr.append(min(1.0, g.credits / cr))
             return min(fr) if fr else 1.0
         k = next((i for i in range(1, NSOL) if not g.unlocked[i]), None)
-        if k is None:
-            cands = [c for c in range(NSOL, NSITE) if not g.unlocked[c] and g.can_settle(c)]
-            if not cands:
-                return None
-            k = max(cands, key=progress)
-        return k, progress(k)
+        if k is not None:
+            return k, progress(k)
+        return None
 
     def draw_hud_galaxy(self, scr, fonts):
         """The galaxy screen keeps only a slim bar of numbers, so the map can use the rest of the window."""
@@ -1111,7 +1113,7 @@ class App:
         big, med, sm, tiny = fonts
         g = self.g
         p = g.cur
-        site = SITES[p]
+        site = self.g.sites[p]
         oc = site["ocol"]
         if g.cycle > 1:
             self.txt(scr, tiny, f"CYCLE {g.cycle}", (22, 2), (255, 215, 120), shadow=True)
@@ -1137,9 +1139,9 @@ class App:
         goal = self.next_goal()
         if goal:
             k, fr = goal
-            self.txt(scr, tiny, f"Next {'planet' if k < NSOL else 'colony'}: {SITES[k]['name']}", (22, y + 2), (190, 196, 220), shadow=True)
+            self.txt(scr, tiny, f"Next {'planet' if k < NSOL else 'colony'}: {self.g.sites[k]['name']}", (22, y + 2), (190, 196, 220), shadow=True)
             pygame.draw.rect(scr, (24, 28, 56), (22, y + 20, 150, 6), border_radius=3)
-            pygame.draw.rect(scr, SITES[k]["col"], (22, y + 20, 150 * fr, 6), border_radius=3)
+            pygame.draw.rect(scr, self.g.sites[k]["col"], (22, y + 20, 150 * fr, 6), border_radius=3)
             y += 34
         for c in sorted(g.campaigns, key=lambda c: c["dur"] - c["t"])[:2]:
             self.txt(scr, tiny, f"Campaign: {SECTORS[c['k']]['name']}  {c['chance'] * 100:.0f}%  "
@@ -1158,7 +1160,7 @@ class App:
                 where = ""
                 if director.intel(g) >= 2:
                     where = f" -> {SECTORS[inc['target']]['name']}" if inc["kind"] == "offensive" else " -> " + ", ".join(
-                        SITES[q]["name"] for q in inc["targets"])
+                        self.g.sites[q]["name"] for q in inc["targets"])
                 self.txt(scr, tiny, f"INCOMING: {name}{where}  ({fmt_time(left)})", (22, y + 2), scale_c((255, 120, 110), blink),
                          shadow=True)
                 y += 18
@@ -1242,17 +1244,17 @@ class App:
             self.strip_pos[k] = x
             rect = pygame.Rect(x - 19, STRIP_Y - 19, 38, 38)
             self.strip_hits.append((rect, k))
-            site = SITES[k]
+            site = self.g.sites[k]
             if g.unlocked[k]:
                 if k == g.cur and self.view == "system":
                     scr.blit(glow(30, scale_c(site["col"], 0.8)), (x - 30, STRIP_Y - 30), special_flags=ADD)
                     pygame.draw.circle(scr, (255, 215, 110), (x, STRIP_Y), 20, 2)
-                ic = self.strip_icons[k]
+                ic = self.site_icon(k, 32)
                 scr.blit(ic, ic.get_rect(center=(x, STRIP_Y)))
                 if site["kind"] == "saturn":
                     pygame.draw.ellipse(scr, (214, 194, 150), (x - 22, STRIP_Y - 6, 44, 12), 1)
             else:
-                ic = self.strip_dark[k]
+                ic = self.site_dark(k, 32)
                 scr.blit(ic, ic.get_rect(center=(x, STRIP_Y)))
                 if k == nxt:
                     can = g.can_unlock(k)
@@ -1280,7 +1282,7 @@ class App:
             else:
                 lines.append(("Galaxy map  (locked)", (120, 128, 170)))
                 lines.append(("Unlock Mars to open it", (170, 175, 205)))
-        site = SITES[k] if k >= 0 else SITES[0]
+        site = self.g.sites[k] if k >= 0 else self.g.sites[0]
         if k < 0:
             pass
         elif g.unlocked[k]:
@@ -1294,7 +1296,7 @@ class App:
             for p, amt in ores:
                 if amt > 0:
                     ok = g.ore[p] >= amt
-                    lines.append((f"{fmt(amt)} {SITES[p]['ore']}  (have {fmt(g.ore[p])})", (130, 255, 150) if ok else (230, 130, 130)))
+                    lines.append((f"{fmt(amt)} {self.g.sites[p]['ore']}  (have {fmt(g.ore[p])})", (130, 255, 150) if ok else (230, 130, 130)))
             if cr > 0:
                 lines.append((f"{fmt(cr)} credits  (have {fmt(g.credits)})", (130, 255, 150) if g.credits >= cr else (230, 130, 130)))
             lines.append((site["perk"], (170, 175, 205)))
@@ -1389,11 +1391,12 @@ class App:
         g = self.g
         p = g.cur
         if k == T_UPG:
-            return any(g.ore[p] >= u["cost"] * SC[p] for u in g.avail_upgrades(p))
+            return any(g.ore[p] >= u["cost"] * self.g.sc[p] for u in g.avail_upgrades(p))
         if k == T_COLONY:
             return g.can_buy_project(p)
         if k == T_PLANETS:
-            return any(g.can_unlock(i) for i in range(1, NSITE)) or (self.pl_page != 2 and worldview.has_news(self))
+            return (any(g.can_unlock(i) for i in range(1, NSOL)) or worldview.colony_ready(self)
+                    or (self.pl_page != 2 and worldview.has_news(self)))
         if k == T_GALAXY:
             return g.attack_ready()
         if k == T_TECH:
@@ -1423,7 +1426,7 @@ class App:
                 r = pygame.Rect(PANEL.x + 40 + k * 62, 58, 56, 26)
                 self.button(scr, r, lab, sm, (lambda m=m: setattr(g, "buy_mode", m)),
                             col=(66, 128, 92) if g.buy_mode == m else (34, 42, 74))
-        site = SITES[g.cur]
+        site = self.g.sites[g.cur]
         if self.tab in (T_SHIPS, T_UPG, T_COLONY):
             self.txt(scr, tiny, f"{site['name']}  -  paid in {site['ore']}", (PANEL.right, 70), site["col"], "topright")
         pygame.draw.line(scr, (50, 58, 100), (PANEL.x, PANEL.y - 7), (PANEL.right, PANEL.y - 7))
@@ -1461,8 +1464,8 @@ class App:
             n = g.ship_count(p, i)
             cost = g.ship_cost(p, i, n)
             ok = g.ore[p] >= cost
-            per = rate * SC[p] * g.s_gm[p][i] * g.G
-            self.row(scr, fonts, r, ships.name(p, i), f"{fmt(per, 2)} {SITES[p]['ore']}/s each  -  {ships.blurb(p, i)}", None, None, ok,
+            per = rate * self.g.sc[p] * g.s_gm[p][i] * g.G
+            self.row(scr, fonts, r, ships.name(self.fam(p), i), f"{fmt(per, 2)} {self.g.sites[p]['ore']}/s each  -  {ships.blurb(self.fam(p), i)}", None, None, ok,
                      col, lambda i=i: g.buy_ship(p, i), icon=self.ship_icon(p, i))
             if r.colliderect(PANEL):
                 self.txt(scr, big, str(g.owned[p][i]), (r.right - 12, r.y + 0), (255, 255, 255), "topright")
@@ -1476,7 +1479,7 @@ class App:
         p = g.cur
         ups = g.avail_upgrades(p)
         r = pygame.Rect(PANEL.x, y, PANEL.w, 34)
-        affordable = sum(1 for u in ups if g.ore[p] >= u["cost"] * SC[p])
+        affordable = sum(1 for u in ups if g.ore[p] >= u["cost"] * self.g.sc[p])
         if r.colliderect(PANEL):
             self.button(scr, r, f"Buy everything affordable  ({affordable})", sm,
                         (lambda: g.buy_all_upgrades(p)), enabled=affordable > 0, panel=True, col=(70, 110, 90))
@@ -1484,14 +1487,14 @@ class App:
         if not ups:
             self.txt(scr, sm, "No upgrades yet - buy more ships!", (PANEL.x + 10, y + 6), (150, 155, 180))
             return y + 40
-        self.txt(scr, tiny, f"{len(g.ups[p])}/{len(UPGRADES)} bought on {SITES[p]['name']} this run", (PANEL.x + 4, y),
+        self.txt(scr, tiny, f"{len(g.ups[p])}/{len(UPGRADES)} bought on {self.g.sites[p]['name']} this run", (PANEL.x + 4, y),
                  (150, 155, 180))
         y += 20
         glyphs = {"click": "C", "clickops": "R", "global": "*"}
         for u in ups:
             r = pygame.Rect(PANEL.x, y, PANEL.w, 62)
             y += 68
-            cost = u["cost"] * SC[p]
+            cost = u["cost"] * self.g.sc[p]
             ok = g.ore[p] >= cost
             kw = dict(icon=self.ship_icon(p, u["arg"][0])) if u["kind"] == "gen" else dict(glyph=glyphs[u["kind"]])
             uname, udesc = core.upgrade_text(u, p)
@@ -1503,9 +1506,9 @@ class App:
         big, med, sm, tiny = fonts
         g = self.g
         p = g.cur
-        bonus = SITES[p]["bonus"]
+        bonus = self.g.sites[p]["bonus"]
         bn = "all buildings x1.5" if bonus == -1 else f"{BUILDINGS[bonus][0]} x2"
-        self.txt(scr, tiny, f"{SITES[p]['name']} colony  -  planet bonus: {bn}", (PANEL.x + 4, y), SITES[p]["col"])
+        self.txt(scr, tiny, f"{self.g.sites[p]['name']} colony  -  planet bonus: {bn}", (PANEL.x + 4, y), self.g.sites[p]["col"])
         y += 22
         for b, (name, res, base, desc, bcol) in enumerate(BUILDINGS):
             r = pygame.Rect(PANEL.x, y, PANEL.w, 58)
@@ -1518,7 +1521,7 @@ class App:
             n = g.bld_count(p, b)
             cost = g.bld_total_cost(p, b, n)
             ok = g.have_for(p, b) >= cost
-            unit = SITES[p]["ore"] if res == "ore" else res
+            unit = self.g.sites[p]["ore"] if res == "ore" else res
             self.row(scr, fonts, r, f"{name}  Lv {L}", f"{desc}  {self.bld_output(p, b, L, f)}",
                      f"x{n}: {fmt(cost)} {unit}", None, ok, bcol, (lambda b=b: g.buy_building(p, b)), glyph=name[0])
         y += 10
@@ -1536,7 +1539,7 @@ class App:
             ore, cr, sci = g.project_cost(p)
             ok_o, ok_c, ok_s = g.ore[p] >= ore, g.credits >= cr, g.science >= sci
             good, bad = (130, 255, 150), (230, 130, 130)
-            lines = [(f"{fmt(ore)} {SITES[p]['ore']}  (have {fmt(g.ore[p])})", good if ok_o else bad),
+            lines = [(f"{fmt(ore)} {self.g.sites[p]['ore']}  (have {fmt(g.ore[p])})", good if ok_o else bad),
                      (f"{fmt(cr)} credits  (have {fmt(g.credits)})", good if ok_c else bad),
                      (f"{fmt(sci)} science  (have {fmt(g.science)})", good if ok_s else bad)]
             self.row(scr, fonts, r, name, desc, "BUILD", None, ok_o and ok_c and ok_s, (255, 215, 90),
@@ -1548,9 +1551,9 @@ class App:
         if b == 0:
             return f"(now +{L * 3 * f * E['minebonus']:.0f}%)"
         if b == 1:
-            return f"(now {fmt(0.5 * L * f * core.CSC[p] * (core.colonies.YIELD if p >= NSOL else 1.0) * E['cred'])}/s)"
+            return f"(now {fmt(0.5 * L * f * self.g.csc[p] * (core.colonies.YIELD if p >= NSOL else 1.0) * E['cred'])}/s)"
         if b == 2:
-            return f"(now {fmt(0.15 * L * f * core.CSC[p] * (core.colonies.YIELD if p >= NSOL else 1.0) * E['sci'])}/s)"
+            return f"(now {fmt(0.15 * L * f * self.g.csc[p] * (core.colonies.YIELD if p >= NSOL else 1.0) * E['sci'])}/s)"
         if b == 3:
             return f"(now -{0.6 * L * f:.1f}%)"
         if b == 4:
@@ -1582,25 +1585,25 @@ class App:
                 self.row(scr, fonts, r, f"{site['name']}  -  {site['ore']}", site["perk"],
                          "YOU ARE HERE" if here else "TRAVEL", None, True, site["col"],
                          None if here else (lambda k=k: g.start_travel(k)), tcol=site["col"],
-                         icon=self.planet_icons[k], lines=lines)
+                         icon=self.site_icon(k, 50), lines=lines)
             elif k == nxt:
                 ores, cr = g.unlock_cost(k)
                 lines = []
                 for pp, amt in ores:
                     if amt > 0:
-                        lines.append((f"{fmt(amt)} {SITES[pp]['ore']}   (have {fmt(g.ore[pp])})", good if g.ore[pp] >= amt else bad))
+                        lines.append((f"{fmt(amt)} {self.g.sites[pp]['ore']}   (have {fmt(g.ore[pp])})", good if g.ore[pp] >= amt else bad))
                 if cr > 0:
                     lines.append((f"{fmt(cr)} credits   (have {fmt(g.credits)})", good if g.credits >= cr else bad))
                 r = pygame.Rect(PANEL.x, y, PANEL.w, 62 + 15 * len(lines))
                 y += r.h + 6
                 self.row(scr, fonts, r, f"{site['name']}  -  {site['ore']}", site["perk"], "UNLOCK", None,
-                         g.can_unlock(k), site["col"], (lambda k=k: g.unlock_planet(k)), icon=self.planet_icons[k],
+                         g.can_unlock(k), site["col"], (lambda k=k: g.unlock_planet(k)), icon=self.site_icon(k, 50),
                          lines=lines)
             else:
                 r = pygame.Rect(PANEL.x, y, PANEL.w, 62)
                 y += 68
                 self.row(scr, fonts, r, "???", "Unlock the planets before it first", None, None, False, (62, 66, 92),
-                         None, dim=True, icon=self.planet_dark[k])
+                         None, dim=True, icon=self.site_dark(k, 50))
         return y
 
     def draw_tech(self, scr, fonts, y):
@@ -1639,7 +1642,7 @@ class App:
             prog = g.quest_prog(q)
             done = prog >= q["tgt"]
             title = QUEST_TXT[q["k"]].format(fmt(q["tgt"]))
-            site = SITES[q.get("site", 0)]
+            site = self.g.sites[q.get("site", 0) if q.get("site", 0) < self.g.nsite else 0]
             if q["r"] == "ore":
                 rew = f"{fmt(q['amt'])} {site['ore']}"
             elif q["r"] == "frenzy":
@@ -2419,8 +2422,8 @@ class App:
             ("Ships bought", f"{g.bought:,}"),
             ("Upgrades bought", f"{g.ups_bought:,}"),
             ("Planets unlocked", f"{g.n_sol}/{NSOL}"),
-            ("Colony worlds settled", f"{g.n_colonies}/{NSITE - NSOL}"),
-            ("Planets visited", f"{len(g.visited)}/{NSITE}"),
+            ("Colony worlds settled", f"{g.n_colonies:,} of {len(worlds.found(g.conquered)):,} found"),
+            ("Planets visited", f"{len(g.visited)}/{g.nsite}"),
             ("Trips between planets", f"{g.travels:,}"),
             ("Systems held", f"{len(g.conquered) - 1:,} of {NSEC - 1:,}"),
             ("Jump range", galaxy.fmt_ly(g.jump_range())),
@@ -2919,7 +2922,7 @@ def app_fonts():
 def check_ship_art(app):
     """Every planet's ships draw, are not all alike, and fly sensible paths."""
     seen = {}
-    for p in range(NSITE):
+    for p in range(NSOL):
         for i in range(NSH):
             spr = app.ship_sprite(p, i)
             assert spr.get_width() > 8 and pygame.mask.from_surface(spr).count() > 20, (p, i)
@@ -2936,10 +2939,8 @@ def check_ship_art(app):
     for i in range(NSH):                           # the same class must look different on different planets
         assert len({seen[(p, i)] for p in range(NSOL)}) == NSOL, f"class {i} has identical sprites on two solar planets"
 
-    for c in (NSOL, NSITE - 1):                    # a colony's fleet differs from its family's: a hint of its world's colour
-        assert any(seen[(c, i)] != seen[(SITES[c]["family"], i)] for i in range(NSH)), c
     canvas = pygame.Surface((300, 300))
-    for style in {ships.style(p) for p in range(NSITE)}:   # every laser style draws
+    for style in {ships.style(p) for p in range(NSOL)}:   # every laser style draws
         shipart.beam(canvas, style, (100, 100), (180, 150), (255, 200, 120), 1.5, 3)
 
 
@@ -2955,7 +2956,7 @@ def check_more_ships():
     assert all(f"g{i}_{k}" in UPG_BY_ID for i in range(NSH) for k in range(5)), "every class has its upgrades"
     names = {r["names"][i] for r in ships.ROSTERS[:NSOL] for i in (8, 9)}
     assert len(names) == 2 * NSOL, "the big classes need a name of their own on every solar planet"
-    assert len(ships.ROSTERS) == NSITE and all(ships.ROSTERS[c]["names"] == ships.ROSTERS[SITES[c]["family"]]["names"] for c in range(NSOL, NSITE))
+    assert len(ships.ROSTERS) == NSOL and set(colonies.FAMILY.values()) | {7} <= set(range(NSOL))
     old_save = core.SAVE
     d = tempfile.mkdtemp(prefix="space_miner_ships_")
     try:
@@ -3006,51 +3007,85 @@ def check_kuiper_belt():
 
 
 def check_colonies():
-    """The colony worlds: 89 real planets as planets of their own, settled when their star is liberated and their tier reached."""
-    import colonies
-    assert NSITE == NSOL + colonies.NCOL == 12 + 89 and len({c["name"] for c in SITES[NSOL:]}) == colonies.NCOL
-    for k in range(NSOL, NSITE):
-        c = SITES[k]
-        assert c["colony"] and 1 <= c["tier"] <= colonies.TIER_CAP and 0 <= c["family"] < NSOL and c["fx"] and c["perk"], c["name"]
-        assert core.SC[k] == 10.0 ** c["tier"] and core.CSC[k] == 5.0 ** c["tier"] and core.TIER[k] == c["tier"]
-        assert worlds.planets_of(c["sys"])[c["widx"]]["name"] == c["name"]
-    assert [c["tier"] for c in SITES[NSOL:]] == sorted(c["tier"] for c in SITES[NSOL:]), "colonies are ordered by tier"
-    byname = {c["name"]: k for k, c in enumerate(SITES) if k >= NSOL}
-    te, tb = byname["TRAPPIST-1 e"], byname["Proxima Centauri b"]
-    assert SITES[te]["tier"] == 5 and SITES[tb]["tier"] == 2 and SITES[te]["wkind"] == "temperate"
+    """Every world of every star you hold can be settled and played: tiers from the strength of the star, prices in the ore of the tiers
+    before, a bonus per kind of world, saves, Warp and Ascension."""
+    t1, pr, boss = galaxy.BY_NAME["TRAPPIST-1"], galaxy.BY_NAME["Proxima Centauri"], galaxy.BOSS
+    assert colonies.tier_of(t1) == 5 and colonies.tier_of(pr) == 3 and colonies.tier_of(boss) == 10
+    tiers = [colonies.tier_of(k) for k in range(1, galaxy.N)]
+    assert 1 <= min(tiers) and max(tiers) == colonies.TIER_CAP and len(set(tiers)) >= 9
+    for k in range(1, galaxy.N, 7):                                            # a world is a site like the planets of the solar system
+        for i in range(worlds.count_of(k)):
+            c = colonies.site_of(k, i)
+            assert c is colonies.site_of(k, i) and c["colony"] and 1 <= c["tier"] <= colonies.TIER_CAP and c["fx"] and c["perk"], c["name"]
+            assert 0 <= c["family"] < NSOL and c["id"] == ("c", k, i) and c["name"] == worlds.planets_of(k)[i]["name"]
+    assert set(colonies.FAMILY) == set(worlds.KINDS) == set(colonies.PERK) == set(colonies.ORE) == set(colonies.BONUS)
     g = core.Game(load=False, sim=True)
-    g.credits = 1e30
-    for p in range(NSITE):
-        g.ore[p] = 1e40
-    assert not g.can_settle(te) and not g.can_unlock(te), "the star must be liberated first"
-    g.conquered.add(SITES[te]["sys"])
-    assert not g.can_settle(te) and not g.can_unlock(te), "and the planet of its tier reached"
-    for k in range(1, 6):
+    assert g.nsite == NSOL and g.n_colonies == 0 and g.sites[:NSOL] == SITES and g.tier == list(range(NSOL)) and g.sc[11] == 1e11
+    te = (t1, 3)                                                              # TRAPPIST-1 e, a temperate world of tier 5
+    assert not g.can_settle(*te), "the star must be liberated first"
+    g.conquered.add(t1)
+    assert g.settle_state(*te) == "waiting" and not g.can_settle(*te), "and a planet of the tier before its own reached"
+    for k in range(1, 5):
         g.unlocked[k] = True
-    assert g.can_settle(te) and g.can_unlock(te) and not g.can_settle(5), "a solar planet is not a colony"
-    (o1, a1), (o2, a2) = g.unlock_cost(te)[0]
-    cost0 = g.unlock_cost(te)
-    a, b, cr = SITES[5]["unlock"]
-    assert o1 == 4 and o2 == 3 and abs(a1 - a * 0.5 * core.SC[4]) < 1e-6 * a1 and abs(cost0[1] - cr * 0.5 ** 0.6) < 1e-6 * cr
-    n0, G0, e0 = g.n_colonies, g.G, g.E["cred"]
-    g.ore[4], g.ore[3] = 5 * a1, 5 * a2
-    cred_before = g.credits
-    assert g.unlock_planet(te) and g.unlocked[te] and g.n_colonies == n0 + 1 == 1
-    assert abs(g.ore[4] - 4 * a1) < 1e-6 * a1 and g.credits <= cred_before, "the settlement is paid in the ore of the two planets before its tier"
-    assert g.E["cred"] > e0 and g.G > G0, "a colony brings its bonus and adds to the production multiplier"
-    assert "Settler" in {x["id"] for x in g.check_achievements()}
-    g.conquered.add(SITES[tb]["sys"])
-    assert g.can_unlock(tb)
-    (p1, amt1), _ = g.unlock_cost(tb)[0]
-    assert p1 == 1 and abs(amt1 - SITES[2]["unlock"][0] * 0.5 * 1.35 * core.SC[1]) < 1e-6 * amt1, "dearer for every colony you hold"
-    assert g.owned[te][0] == 0 and g.buy_ship(te, 0) is not None
-    g.owned[te][0] = 5
+    assert g.settle_state(*te) == "ready" and not g.can_settle(*te), "ready, but you have nothing to pay with yet"
+    g.credits = 1e60
+    for q in range(5):
+        g.ore[q] = 1e60
+    assert g.can_settle(*te)
+    pays, cr = g.settle_cost(*te)
+    a, b, cr0 = SITES[5]["unlock"]
+    assert [p for p, _ in pays] == [4, 3] and abs(pays[0][1] - a * 0.4 * core.SCALE ** 4) < 1e-6 * pays[0][1], pays
+    assert abs(cr - cr0 * 0.4 ** 0.6) < 1e-6 * cr0
     g.recalc()
-    assert g.s_ops[te] > 0 and g.planet_power(te) > 0 and g.fleet_power() >= g.planet_power(te)
-    assert not g.can_buy_project(te) and te not in g.projects, "colonies have no megaproject"
-    g.cur = 0
-    assert g.start_travel(te) and g.cur == te and te in g.visited, "you can travel to a colony"
-    # saves: colonies are kept, an old save with twelve planets loads, and projects never point at a colony
+    e0, G0 = g.E["cred"], g.G
+    g.ore[4], g.ore[3] = 5 * pays[0][1], 5 * pays[1][1]
+    g.credits = 5 * cr
+    p = g.settle(*te)
+    assert p == NSOL and g.nsite == NSOL + 1 and g.n_colonies == 1 and g.sites[p]["name"] == "TRAPPIST-1 e" and g.unlocked[p]
+    assert len(g.ore) == len(g.owned) == len(g.ups) == len(g.bld) == len(g.unlocked) == len(g.sc) == g.nsite
+    assert abs(g.ore[4] - 4 * pays[0][1]) < 1e-6 * pays[0][1] and abs(g.credits - 4 * cr) < 1e-6 * cr, "paid in the ore of the planets before its tier"
+    g.credits = 1e60
+    assert g.sc[p] == 1e5 and g.csc[p] == 5.0 ** 5 and g.colony_planet[te] == p and g.settle_state(*te) == "settled"
+    assert g.can_settle(*te) is False and g.settle(*te) is None
+    assert abs(g.E["cred"] / e0 - 1.1) < 1e-9 and g.G > G0, "the first temperate world brings the bonus of its kind, and every colony some production"
+    assert "Settler" in {x["id"] for x in g.check_achievements()}
+    pays2 = g.settle_cost(t1, 2)[0]
+    assert abs(pays2[0][1] / pays[0][1] - 1.06) < 1e-9, "dearer for every colony you hold"
+    g.ore[3] = 1e61
+    assert g.settle(t1, 2) is not None and abs(g.E["cred"] / e0 - 1.1) < 1e-9, "a second world of a kind brings no second bonus"
+    assert g.kind_first == {"temperate": te}
+    assert g.settle(t1, 1) is not None and g.n_colonies == 3                    # a desert world: its own bonus
+    # the richest planet of a tier pays
+    g.ore[4] = 1e9
+    rich = g.settle_cost(t1, 4)[0][0][0]
+    assert rich == 4
+    # a colony is a planet: it mines, fights, has buildings and no megaproject
+    g.owned[p][0] = 5
+    g.recalc()
+    assert g.s_ops[p] > 0 and g.planet_power(p) > 0 and g.fleet_power() >= g.planet_power(p)
+    assert not g.can_buy_project(p) and p not in g.projects
+    assert g.start_travel(p) and g.cur == p and p in g.visited
+    g.step(1.0)
+    # the worlds you hold, and the ones you could settle
+    assert len(g.world_options()) == sum(worlds.count_of(k) for k in g.conquered if k) - 3
+    assert all(g.can_settle(*w) for w in g.colony_options(3)) and len(g.colony_options(2)) <= 2
+    assert worlds.sig(g.conquered) and not g.valid_world((0, 0)) and not g.valid_world((t1, 99)) and g.valid_world((t1, 6))
+    # the Colonial Office tech settles worlds by itself, one every few seconds, when you switch it on
+    for q in range(g.nsite):
+        g.ore[q] = 1e70
+    g.credits = 1e70
+    g.techs.add("t32")
+    g.recalc()
+    n = g.n_colonies
+    g.step(6.0)
+    assert g.n_colonies == n, "it is off until you switch it on"
+    g.auto_settle = True
+    g.step(6.0)
+    assert g.n_colonies == n + 1, "it settles the nearest world you can pay for"
+    g.auto_settle = False
+    g.techs.discard("t32")
+    g.recalc()
+    # saves: colonies are kept in order with their ships, bad entries are dropped, and a save with twelve planets loads
     old_save = core.SAVE
     d = tempfile.mkdtemp(prefix="space_miner_colonies_")
     try:
@@ -3058,9 +3093,23 @@ def check_colonies():
         g.projects = {0, 1}
         g.save()
         h = core.Game(load=True, sim=True)
-        assert h.unlocked[te] and h.owned[te][0] == 5 and h.n_colonies == 1 and h.cur == te and len(h.ore) == NSITE
+        assert h.colonies == g.colonies and h.nsite == g.nsite and h.owned[p][0] == 5 and h.cur == p and h.n_colonies == len(g.colonies) == 4
+        assert [s["name"] for s in h.sites[NSOL:]] == [s["name"] for s in g.sites[NSOL:]] and h.kind_first == g.kind_first
         with open(core.SAVE) as f:
             data = json.load(f)
+        data["colonies"] = data["colonies"][:2] + [[0, 0], [t1, 99], "x", [5.5, 1]]
+        for key in ("ore", "run_ore", "all_ore", "owned", "ups", "unlocked", "bld"):
+            data[key] = data[key][:NSOL + 2]
+        data["visited"] = [0, 12, 13, 99]
+        with open(core.SAVE, "w") as f:
+            json.dump(data, f)
+        h = core.Game(load=True, sim=True)
+        assert h.colonies == g.colonies[:2] + [(5, 1)] if galaxy.STARS[5] and worlds.count_of(5) > 1 else h.colonies == g.colonies[:2]
+        assert len(h.ore) == len(h.unlocked) == h.nsite and h.visited <= set(range(h.nsite))
+        h.step(1.0)
+        with open(core.SAVE) as f:
+            data = json.load(f)
+        del data["colonies"]
         for key in ("ore", "run_ore", "all_ore", "owned", "ups", "unlocked", "bld"):
             data[key] = data[key][:NSOL]                                       # what a 1.x save holds
         data["projects"] = [0, 1, 40]
@@ -3068,20 +3117,23 @@ def check_colonies():
         with open(core.SAVE, "w") as f:
             json.dump(data, f)
         h = core.Game(load=True, sim=True)
-        assert len(h.unlocked) == NSITE and h.n_colonies == 0 and h.n_sol == g.n_sol and h.projects == {0, 1}
+        assert h.nsite == NSOL and h.n_colonies == 0 and h.n_sol == g.n_sol and h.projects == {0, 1}
         h.step(1.0)
     finally:
         core.SAVE = old_save
         shutil.rmtree(d, ignore_errors=True)
     # a Warp keeps your colonies, an Ascension takes them (like the planets)
+    n = g.nsite
     g.dm = 1e12
     g.do_warp(force=True)
-    assert g.unlocked[te] and g.owned[te][0] == 0
-    g.conquered |= {core.BOSS}
+    assert g.nsite == n and g.unlocked[p] and g.owned[p][0] == 0 and len(g.owned) == n
+    g.conquered |= {boss}
     g.ascend(force=True)
-    assert not g.unlocked[te] and g.n_colonies == 0 and g.unlocked[0]
-    # the dev cheats and the strip
-    assert all(c["family"] in range(NSOL) for c in SITES[NSOL:]) and ships.style(NSITE - 1) in shipart.FAMILIES
+    assert g.nsite == NSOL and g.n_colonies == 0 and g.colonies == [] and len(g.ore) == NSOL and g.unlocked[0] and not g.unlocked[1]
+    assert g.kind_first == {} and g.colony_planet == {}
+    g.step(1.0)
+    # more achievements, and colonies of every tier and kind draw their sprites
+    assert {"Settler", "Colonist", "Colonial Empire", "Worlds Without End", "A Home on Every Star"} <= set(core.ACH_BY_ID)
 
 
 def check_worlds():
@@ -3201,27 +3253,29 @@ def check_worlds_ui(app):
 
 
 def check_colonies_ui(app):
-    """The Colonies page, the strip and every tab draw for colony worlds, at every canvas size, and a click settles a colony."""
-    import colonies
+    """The Colonies page, the strip and every tab draw for colony worlds, at every canvas size, and a click settles a world."""
     fonts = app_fonts()
-    g0, view0, tab0, page0, cur0 = app.g, app.view, app.tab, app.pl_page, app.g.cur
+    g0, view0, tab0, page0 = app.g, app.view, app.tab, app.pl_page
+    sel0 = app.sel_sector
     try:
         g = core.Game(load=False, sim=True)
         app.g = g
-        byname = {c["name"]: k for k, c in enumerate(SITES) if k >= NSOL}
-        te, tb = byname["TRAPPIST-1 e"], byname["Proxima Centauri b"]
-        g.credits = 1e40
-        g.conquered |= {SITES[te]["sys"], SITES[tb]["sys"]}
+        app.rebuild_view()
+        t1, pr = galaxy.BY_NAME["TRAPPIST-1"], galaxy.BY_NAME["Proxima Centauri"]
+        g.credits = 1e80
+        g.conquered |= {t1, pr, galaxy.BY_NAME["Tau Ceti"], galaxy.BY_NAME["Kepler-186"]}
         for k in range(1, 7):
             g.unlocked[k] = True
-        for p in range(NSITE):
-            g.ore[p] = 1e45
+        for q in range(NSOL):
+            g.ore[q] = 1e70
         app.view, app.tab, app.pl_page = "system", T_PLANETS, 1
-        assert worldview.colony_state(g, te) == "ready" and worldview.colony_state(g, byname["Kepler-452 b"]) == "locked"
-        assert worldview.colony_state(g, byname["Kepler-62 e"]) == "locked" and worldview.colony_state(g, tb) == "ready"
+        app.sel_sector = t1
+        app.cl_cache, app.cl_ready_t = None, -1
+        lists = worldview.colony_lists(app)
+        assert (t1, 3) in lists["ready"] and not lists["settled"] and worldview.colony_ready(app)
         for res in ("1920x1080", "1280x720", "1600x720"):
             app.set_resolution_choice(res)
-            for flt in ("open", "ready", "settled", "locked", "all"):
+            for flt in ("ready", "settled", "waiting", "star"):
                 worldview.set_cl_filter(app, flt)
                 for scroll in (0, 900, 10 ** 6):
                     app.scroll[T_PLANETS] = scroll
@@ -3230,49 +3284,72 @@ def check_colonies_ui(app):
                     app.draw(app.scr, fonts)
         app.set_resolution_choice("1280x720")
         worldview.set_cl_filter(app, "ready")
+        app.scroll[T_PLANETS] = 0
         app.buttons.clear()
         app.draw(app.scr, fonts)
         n0 = g.n_colonies
-        before = [fn for r, fn in app.buttons if r.y > PANEL.y + 120 and PANEL.contains(r)]
-        assert before, "the ready colonies have SETTLE buttons"
-        before[0]()
-        assert g.n_colonies == n0 + 1, "clicking a colony row settles it"
-        worldview.set_cl_filter(app, "settled")
+        rows = [fn for r, fn in app.buttons if r.y > PANEL.y + 120 and PANEL.contains(r)]
+        assert rows, "the ready worlds have SETTLE buttons"
+        rows[0]()
+        assert g.n_colonies == n0 + 1, "clicking a world settles it"
         app.draw(app.scr, fonts)
-        # the strip shows settled colonies after the solar planets, and scrolls
-        for k in range(NSOL, NSOL + 30):
-            g.unlocked[k] = True
+        assert worldview.colony_lists(app)["settled"] == [g.colonies[-1]]
+        worldview.settle_all(app)
+        assert g.n_colonies > n0 + 1, "settle all settles every world you can pay for"
+        # a lot of colonies: the strip shows them after the solar planets and scrolls
+        g.conquered |= set(range(1, 150))
+        g.credits = 1e300
+        for q in range(NSOL):
+            g.ore[q] = 1e90
+        for k, i in g.world_options()[:60]:
+            g.settle(k, i)
+        assert g.nsite >= NSOL + 30
+        for q in range(g.nsite):
+            g.ore[q] = 1e90
         ents = app.strip_entries()
-        assert ents[:NSOL] == list(range(NSOL)) and len(ents) == NSOL + 30 and app.strip_cap() < len(ents)
+        assert ents == list(range(g.nsite)) and app.strip_cap() < len(ents)
         app.view = "system"
         app.draw(app.scr, fonts)
-        assert -3 in [k for _, k in app.strip_hits] and -2 in [k for _, k in app.strip_hits]
+        hits = [k for _, k in app.strip_hits]
+        assert -3 in hits and -2 in hits
         off = app.strip_off
         app.strip_click(-3)
         assert app.strip_off == off + 4
-        for _ in range(20):
+        for _ in range(g.nsite):
             app.strip_click(-2)
         assert app.strip_off == 0
-        g.cur = NSOL + 29                                                      # travelling to a far colony scrolls the strip to it
+        last = g.nsite - 1
+        g.cur = last                                                           # travelling to a far colony scrolls the strip to it
         app.draw(app.scr, fonts)
-        assert app.strip_off > 0 and (NSOL + 29) in app.strip_pos
-        for k in (te, NSITE - 1):                                              # every tab draws for a colony world
-            g.cur = k
-            g.unlocked[k] = True
+        assert app.strip_off > 0 and last in app.strip_pos
+        seen_kinds = set()
+        for p in range(NSOL, g.nsite):                                         # every tab draws for every kind of world
+            kind = g.sites[p]["wkind"]
+            if kind in seen_kinds and p != last:
+                continue
+            seen_kinds.add(kind)
+            g.cur = p
             app.rebuild_view()
             for tab in range(len(app.tabs)):
                 app.tab = tab
                 app.update(0.016)
                 app.draw(app.scr, fonts)
-            app.mouse = (app.strip_pos.get(k, STRIP_X0), STRIP_Y)
+            app.mouse = (app.strip_pos.get(p, STRIP_X0), STRIP_Y)
             app.draw(app.scr, fonts)
+            for i in range(NSH):
+                assert app.ship_sprite(p, i).get_width() > 8
+        app.tab = T_AWARDS
+        app.awards_cat = "Stats"
+        app.draw(app.scr, fonts)
+        app.awards_cat = "All"
     finally:
         app.g, app.view, app.tab, app.pl_page = g0, view0, tab0, page0
-        g0.cur = cur0
+        app.sel_sector = sel0
         app.rebuild_view()
         app.set_resolution_choice("1280x720")
         app.strip_off, app.strip_cur = 0, None
         app.scroll[T_PLANETS] = 0
+        app.cl_cache, app.cl_ready_t = None, -1
         app.mouse = (20, 20)
 
 
@@ -3315,7 +3392,7 @@ def check_fronts():
         assert abs(win_chance(core.power_for(1000.0, c), 1000.0) - c) < 1e-6, "power_for is not the inverse of win_chance"
     g = core.Game(load=False, sim=True)
     g.unlocked[2] = True
-    g.owned = [[200000 >> i for i in range(NSH)] for _ in range(NSITE)]
+    g.owned = [[200000 >> i for i in range(NSH)] for _ in range(NSOL)]
     g.armory[core.JUMP] = 4
     g.defence = 0.0                                                      # (the whole fleet is free for manual campaigns here)
     g.recalc()
@@ -3410,7 +3487,7 @@ def check_generals():
     def fresh():
         g = core.Game(load=False, sim=True)
         g.unlocked[2] = True
-        g.owned = [[200000 >> i for i in range(NSH)] for _ in range(NSITE)]
+        g.owned = [[200000 >> i for i in range(NSH)] for _ in range(NSOL)]
         g.armory[core.JUMP] = 6
         g.recalc()
         g.grace = 0.0
@@ -3555,7 +3632,7 @@ def check_counter_offensives():
     def setup():
         g = core.Game(load=False, sim=True)
         g.unlocked[2] = True
-        g.owned = [[200000 >> i for i in range(NSH)] for _ in range(NSITE)]
+        g.owned = [[200000 >> i for i in range(NSH)] for _ in range(NSOL)]
         g.armory[core.JUMP] = 4
         g.armory[core.COMMAND] = 2
         g.recalc()
@@ -3667,10 +3744,10 @@ def selftest_step(app, g, frames, shot):
         app.set_resolution_choice("auto")
         assert (W, H) == choose_resolution("auto", False)
     if frames == 40:
-        g.ore = [1e15 * SC[i] for i in range(NSITE)]
+        g.ore = [1e15 * g.sc[i] for i in range(NSOL)]
         g.run_ore = list(g.ore); g.all_norm = g.run_norm = 1e20
         g.credits = 1e15; g.science = 1e12
-        for k in range(NSITE):
+        for k in range(NSOL):
             g.unlocked[k] = True
             g.owned[k] = [12 + k, 11, 10, 9, 8, 7, 6, 5, 4, 3]
             g.bld[k] = [5 + k, 6, 7, 3, 4, 2]
@@ -3711,10 +3788,10 @@ def selftest_step(app, g, frames, shot):
             g.event = g.pick_event()
             for _, fn in g.event["opts"]:
                 g.resolve_event(fn)
-        for p in range(NSITE):
+        for p in range(NSOL):
             g.buy_project(p)
         g.buy_mode = 0
-        for p in range(NSITE):
+        for p in range(NSOL):
             for b in range(NB):
                 g.buy_building(p, b)
             g.buy_ship(p, 3)
@@ -3726,7 +3803,7 @@ def selftest_step(app, g, frames, shot):
         shot("warpfx")
     if frames == 62:
         # galaxy: campaign, map view, raid
-        g.owned = [[40 + k, 30, 20, 10, 5, 2, 1, 0, 0, 0] for k in range(NSITE)]
+        g.owned = [[40 + k, 30, 20, 10, 5, 2, 1, 0, 0, 0] for k in range(NSOL)]
         g.conquered = {0, 1, 2}
         g.recalc()
         app.tab = T_GALAXY

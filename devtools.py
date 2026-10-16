@@ -9,7 +9,7 @@ Using any cheat marks the save as having cheated (which unlocks a secret achieve
 import core
 import director
 import generals
-from core import BMAX, NB, NSH, NSITE, NSOL, NSEC, ARMORY, STARDUST_PERKS, PERKS, PROJECTS, SC, SITES, TECHS, UPGRADES, ACHIEVEMENTS, fmt
+from core import BMAX, NB, NSH, NSOL, NSEC, ARMORY, STARDUST_PERKS, PERKS, PROJECTS, SITES, TECHS, UPGRADES, ACHIEVEMENTS, fmt
 
 EVENT_NAMES = [("Meteor shower", "meteor"), ("Pirate raid", "pirates"), ("Solar flare", "flare"),
                ("Cosmic lottery", "lottery"), ("Derelict ship", "derelict"), ("Alien trader", "trader"),
@@ -31,7 +31,7 @@ def tick(app, dt):
     if d.infinite:
         g.credits = max(g.credits, 1e80)
         g.science = max(g.science, 1e80)
-        for p in range(NSITE):
+        for p in range(g.nsite):
             if g.unlocked[p]:
                 g.ore[p] = max(g.ore[p], 1e80)
         g.flags.add("cheated")
@@ -56,11 +56,11 @@ def sections(app):
     def unlock(k):
         if not g.unlocked[k]:
             g.unlocked[k] = True
-            g.add_ore(k, core.SUPPLY * SC[k])
+            g.add_ore(k, core.SUPPLY * g.sc[k])
             g.fx("unlock", k)
 
     def unlock_next():
-        k = next((i for i in range(1, NSITE) if not g.unlocked[i]), None)      # the solar system first, then the colony worlds
+        k = next((i for i in range(1, NSOL) if not g.unlocked[i]), None)
         if k is not None:
             unlock(k)
             g.toast(f"{SITES[k]['name']} unlocked (cheat)", 3)
@@ -70,17 +70,22 @@ def sections(app):
             unlock(k)
 
     def settle_all():
-        for k in range(NSOL, NSITE):
-            unlock(k)
+        """Settle the worlds of the nearest stars you hold (200 of them), for free."""
+        for k, i in g.world_options()[:200]:
+            g.credits += 1e300
+            g.settle(k, i)
 
     def relock_all():
-        for k in range(1, NSITE):
-            g.unlocked[k] = False
+        g.set_sites([])
+        n = NSOL
+        g.ore, g.run_ore, g.all_ore = g.ore[:n], g.run_ore[:n], g.all_ore[:n]
+        g.owned, g.ups, g.bld = g.owned[:n], g.ups[:n], g.bld[:n]
+        g.unlocked = [True] + [False] * (n - 1)
         g.cur = 0
         g.travel = None
 
     def give_ships(n, all_planets=False):
-        for p in (range(NSITE) if all_planets else [here()]):
+        for p in (range(g.nsite) if all_planets else [here()]):
             if g.unlocked[p]:
                 for i in range(NSH):
                     g.owned[p][i] += n
@@ -89,14 +94,14 @@ def sections(app):
         g.owned[here()] = [0] * NSH
 
     def all_upgrades(all_planets=False):
-        for p in (range(NSITE) if all_planets else [here()]):
+        for p in (range(g.nsite) if all_planets else [here()]):
             if g.unlocked[p]:
                 added = len(UPGRADES) - len(g.ups[p])
                 g.ups[p] = {u["id"] for u in UPGRADES}
                 g.ups_bought += max(0, added)
 
     def max_buildings(all_planets=False):
-        for p in (range(NSITE) if all_planets else [here()]):
+        for p in (range(g.nsite) if all_planets else [here()]):
             if g.unlocked[p]:
                 for b in range(NB):
                     g.bldg += max(0, BMAX - g.bld[p][b])
@@ -132,19 +137,19 @@ def sections(app):
         g.update_ach_bonus()
 
     def clear_resources():
-        n = NSITE
+        n = g.nsite
         g.ore = [0.0] * n
         g.credits = 0.0
         g.science = 0.0
 
     def fill_all(norm):
-        for p in range(NSITE):
+        for p in range(g.nsite):
             if g.unlocked[p]:
-                g.add_ore(p, norm * SC[p])
+                g.add_ore(p, norm * g.sc[p])
 
     def ore_times(k):
         p = here()
-        g.ore[p] = max(g.ore[p], SC[p] * 100) * k
+        g.ore[p] = max(g.ore[p], g.sc[p] * 100) * k
 
     def spawn_crate():
         g.crate = dict(x=-20, y=300, vx=110, ph=0.0, life=0.0)
@@ -307,8 +312,8 @@ def sections(app):
         g.hard_reset()
 
     p = here()
-    nm = SITES[p]["name"]
-    ore = SITES[p]["ore"]
+    nm = g.sites[p]["name"]
+    ore = g.sites[p]["ore"]
     S = [
         ("Time", [
             ("+1 hour of production", cheat(lambda: g.fast_forward(3600), "+1 hour"), False),
@@ -321,8 +326,8 @@ def sections(app):
         ]),
         ("Resources", [
             (f"{nm}: ore x10", cheat(lambda: ore_times(10)), False),
-            (f"{nm}: +1M {ore} (Earth-equiv.)", cheat(lambda: g.add_ore(p, 1e6 * SC[p])), False),
-            (f"{nm}: +1T {ore} (Earth-equiv.)", cheat(lambda: g.add_ore(p, 1e12 * SC[p])), False),
+            (f"{nm}: +1M {ore} (Earth-equiv.)", cheat(lambda: g.add_ore(p, 1e6 * g.sc[p])), False),
+            (f"{nm}: +1T {ore} (Earth-equiv.)", cheat(lambda: g.add_ore(p, 1e12 * g.sc[p])), False),
             ("ALL planets: +1T ore each", cheat(lambda: fill_all(1e12)), False),
             ("+1 billion credits", cheat(lambda: g.add_credits(1e9)), False),
             ("Credits x1000", cheat(lambda: g.add_credits(max(g.credits, 1e3) * 999)), False),
@@ -338,7 +343,7 @@ def sections(app):
         ("Planets", [
             ("Unlock next planet (free)", cheat(unlock_next), False),
             ("Unlock ALL solar planets", cheat(unlock_all, "All solar planets unlocked"), False),
-            ("Settle ALL colony worlds", cheat(settle_all, "All colony worlds settled"), False),
+            ("Settle the worlds of every star you hold (free)", cheat(settle_all, "Worlds settled"), False),
             ("Relock everything but Earth", cheat(relock_all), False),
         ]),
         ("Fleet & upgrades", [
