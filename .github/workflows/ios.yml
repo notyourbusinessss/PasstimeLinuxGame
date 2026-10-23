@@ -95,9 +95,9 @@ jobs:
       - name: Build the unsigned .ipa for a phone
         shell: bash
         run: ./packaging/ios/build_ios.sh device 2>&1 | tee build/ios-device.log
-      - name: What went wrong (device build)
-        if: failure()
-        run: python3 tools/ci_tail.py device build/ios-device.log 160
+      - name: What the device build said
+        if: always()
+        run: python3 tools/ci_tail.py device build/ios-device.log 14
       - uses: actions/upload-artifact@v4
         with:
           name: ios

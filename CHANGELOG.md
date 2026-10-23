@@ -2,13 +2,14 @@
 
 ## Unreleased
 
-Space Miner on the Mac.
+Space Miner on the Mac and on the iPhone.
 
 - **A macOS app:** the *Release* workflow now also builds `Space Miner.app` inside a `.dmg` for Apple Silicon (`macos-arm64`) and Intel (`macos-x86_64`) Macs: a PyInstaller build with its own icon and version, signed ad hoc (not with an Apple Developer ID, not notarized, so macOS asks you to confirm it once: Control-click -> Open, or *Privacy & Security -> Open Anyway* - the steps are in the README and in a note inside the disk image). `packaging/build_macos.sh` builds it on a Mac.
 - **Mac keyboard and folders:** fullscreen is **Cmd+Enter** (or Ctrl+Cmd+F; F11 and Alt+Enter still work) and the hints say so, and the log goes to `~/Library/Logs/Space Miner/` where the Console app finds it.
 - **CI on a Mac:** every push runs the self-test, the developer-cheat self-test and the stress test on macOS too, and the release workflow tries the built app (`--version` and the self-test, headless) and the disk image before it is uploaded. A failed Mac build does not stop the Linux and Android files from being published.
 - `play.sh` falls back to a virtual environment when the system Python refuses `pip install` (Homebrew's does); `--selftest` of a built app puts its screenshots in the temp folder instead of the app's own folder.
-- iPhone and iPad are not supported (they need Xcode and an Apple Developer account); the README says so.
+- **An iPhone and iPad app:** the *Release* workflow also builds `space-miner-<version>-ios-unsigned.ipa`, a native app (landscape) with the same touch interface as the Android app. It is made with kivy-ios (Python 3.11 and SDL2 for iOS) and a new recipe for pygame (`packaging/ios/recipes/pygame`: a hand-made `Setup` file, pygame's C interface pointers made weak so every module can live in one program, the init functions of `math` and `time` renamed so they do not clash with Python's). The `.ipa` is **unsigned**: Apple only runs signed apps, so it is signed for your phone when you install it (AltStore or Sideloadly with a free Apple ID, which lasts 7 days at a time, or a paid Apple Developer account) - the steps are in the README. The *iOS* workflow builds it on a Mac, starts it in the iOS Simulator and checks that the game runs, draws and saves; it has not been tried on a real phone yet.
+- On an iPhone the canvas is the shape of the screen like on Android, and narrower on a phone with a notch (black bars at the sides) to keep the game clear of it; the save is in the app's Documents folder and the log in `Library/Logs/Space Miner`. `resources.MOBILE` (Android or iOS) replaces `ANDROID` where the phone apps behave alike (always fullscreen, scaled to the screen).
 
 ## 2.0.4
 

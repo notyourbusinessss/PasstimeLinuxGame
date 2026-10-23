@@ -16,11 +16,14 @@ for runtime, devices in d.items():
     if "iOS" not in runtime:
         continue
     for dev in devices:
-        if dev.get("isAvailable") and "iPhone" in dev["name"]:
-            key = (runtime, dev["name"])
+        name = dev["name"]
+        if dev.get("isAvailable") and "iPhone" in name:
+            # the newest iOS, and a phone with a notch (the Pro models have one) to see how the game keeps clear of it
+            key = (runtime, "Pro" in name and "Max" not in name, name)
             if best is None or key > best[0]:
-                best = (key, dev["udid"])
+                best = (key, dev["udid"], name)
 print(best[1])
+print(best[2], file=sys.stderr)
 ')
 echo "Simulator $UDID"
 xcrun simctl boot "$UDID" 2> /dev/null || true
@@ -33,7 +36,8 @@ DATA=$(xcrun simctl get_app_container "$UDID" "$BUNDLE_ID" data)
 echo "--- data folder: $DATA"
 ls -la "$DATA" "$DATA/Documents" "$DATA/Library/Logs/Space Miner" 2>&1 || true
 xcrun simctl io "$UDID" screenshot "$WORK/sim.png" 2>&1 || true
-sips -Z 560 --setProperty format jpeg --setProperty formatOptions 30 "$WORK/sim.png" --out "$WORK/sim.jpg" > /dev/null 2>&1 || true
+# (the simulator's screen is upright and the game is sideways: turn the picture)
+sips -r 270 "$WORK/sim.png" --out "$WORK/sim-turned.png" > /dev/null 2>&1 && sips -Z 640 --setProperty format jpeg --setProperty formatOptions 30 "$WORK/sim-turned.png" --out "$WORK/sim.jpg" > /dev/null 2>&1 || true
 xcrun simctl terminate "$UDID" "$BUNDLE_ID" || true
 echo "--- stdout"; cat "$WORK/sim-out.log" 2> /dev/null | tail -30
 echo "--- stderr"; cat "$WORK/sim-err.log" 2> /dev/null | tail -60
