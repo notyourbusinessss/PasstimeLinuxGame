@@ -49,6 +49,10 @@ jobs:
     # sideways - it must start, draw, take taps and keep its save across a reload. It needs pygbag's CDN, so it can fail when that is down.
     runs-on: ubuntu-22.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit]          # webkit is the engine of Safari
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -57,14 +61,14 @@ jobs:
       - name: Build the web version
         shell: bash
         run: ./packaging/build_web.sh 2>&1 | tee build-web.log
-      - run: pip install playwright && python -m playwright install --with-deps chromium
+      - run: pip install playwright && python -m playwright install --with-deps ${{ matrix.browser }}
       - name: Play it in a phone-shaped browser
         shell: bash
-        run: python tools/web_check.py build/web --out web-check-out 2>&1 | tee web-check.log
+        run: python tools/web_check.py build/web --out web-check-out --browser ${{ matrix.browser }} 2>&1 | tee web-check.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: web-check
+          name: web-check-${{ matrix.browser }}
           path: |
             web-check-out
             build-web.log

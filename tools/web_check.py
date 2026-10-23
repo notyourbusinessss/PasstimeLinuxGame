@@ -4,6 +4,7 @@ that the game starts, draws, moves, reacts to taps and keeps its save in the bro
     python3 tools/web_check.py build/web [--out DIR] [--browser chromium|webkit] [--timeout 420]
 Needs `pip install playwright` and `playwright install chromium`. Writes screenshots and the browser's console to --out. Exit status 1 on a failure."""
 import argparse
+import base64
 import functools
 import http.server
 import json
@@ -18,6 +19,12 @@ from playwright.sync_api import sync_playwright
 UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1")
 SAVE_KEY = "space-miner:.space_miner_save.json"
 FRAMES = re.compile(r"space-miner: (\d+) frames, (\d+) fps")
+
+
+def emit_image(name, data):
+    """In a GitHub run, put a small screenshot into the run's annotations (the artifacts are not always reachable): ::notice title=shot-NAME::BASE64."""
+    if os.environ.get("GITHUB_ACTIONS") and len(data) < 45000:
+        print(f"::notice title=shot-{name}::" + base64.b64encode(data).decode())
 
 
 def serve(directory):
@@ -78,10 +85,11 @@ def main():
             say(f"started after {up[0]:.0f} s: {up[1]}")
             say(f"viewport touch interface / canvas: {page.evaluate('[matchMedia(\"(pointer: coarse)\").matches, document.querySelector(\"canvas\").width, document.querySelector(\"canvas\").height, document.querySelector(\"canvas\").style.width, document.querySelector(\"canvas\").style.height]')}")
             page.wait_for_timeout(1500)
-            first = page.screenshot(type="jpeg", quality=70)
+            first = page.screenshot(type="jpeg", quality=40)
             open(os.path.join(args.out, "1-start.jpg"), "wb").write(first)
+            emit_image("1-start", first)
             page.wait_for_timeout(1500)
-            second = page.screenshot(type="jpeg", quality=70)
+            second = page.screenshot(type="jpeg", quality=40)
             say(f"screenshot sizes: {len(first)} and {len(second)} bytes (a blank page is under 5000)")
             if len(first) < 8000:
                 failures.append("the page looks blank")
@@ -91,7 +99,9 @@ def main():
                 page.touchscreen.tap(300, 200)
                 page.wait_for_timeout(80)
             page.wait_for_timeout(1500)
-            open(os.path.join(args.out, "2-after-taps.jpg"), "wb").write(page.screenshot(type="jpeg", quality=70))
+            shot = page.screenshot(type="jpeg", quality=40)
+            open(os.path.join(args.out, "2-after-taps.jpg"), "wb").write(shot)
+            emit_image("2-after-taps", shot)
             clicks = None
             for _ in range(14):                              # the game saves every 15 seconds
                 page.wait_for_timeout(2000)
@@ -112,9 +122,22 @@ def main():
                     page.wait_for_timeout(20000)
                     after = stored_clicks(page)
                     say(f"after a reload ({back[0]:.0f} s): clicks in storage {after}")
-                    open(os.path.join(args.out, "3-after-reload.jpg"), "wb").write(page.screenshot(type="jpeg", quality=70))
+                    shot = page.screenshot(type="jpeg", quality=40)
+                    open(os.path.join(args.out, "3-after-reload.jpg"), "wb").write(shot)
+                    emit_image("3-after-reload", shot)
                     if not after or after < clicks:
                         failures.append(f"the save was not restored after a reload ({clicks} -> {after})")
+            portrait = browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True, user_agent=UA, device_scale_factor=1)
+            held = portrait.new_page()                          # a phone held upright: the page must ask for it to be turned
+            held.goto(url)
+            held.wait_for_timeout(3000)
+            shot = held.screenshot(type="jpeg", quality=40)
+            emit_image("4-portrait", shot)
+            shown = held.evaluate("getComputedStyle(document.getElementById('rotate')).display")
+            say(f"turn-your-phone message when held upright: display={shown}")
+            if shown == "none":
+                failures.append("the rotate message is not shown on a phone held upright")
+            portrait.close()
             bad = [l for l in logs if "Traceback" in l or l.startswith("[pageerror]")]
             failures += [f"error in the console: {l[:300]}" for l in bad[:5]]
         browser.close()

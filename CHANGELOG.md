@@ -2,13 +2,14 @@
 
 ## Unreleased
 
-Space Miner on the Mac.
+Space Miner on the Mac, and in the browser (iPhone).
 
 - **A macOS app:** the *Release* workflow now also builds `Space Miner.app` inside a `.dmg` for Apple Silicon (`macos-arm64`) and Intel (`macos-x86_64`) Macs: a PyInstaller build with its own icon and version, signed ad hoc (not with an Apple Developer ID, not notarized, so macOS asks you to confirm it once: Control-click -> Open, or *Privacy & Security -> Open Anyway* - the steps are in the README and in a note inside the disk image). `packaging/build_macos.sh` builds it on a Mac.
 - **Mac keyboard and folders:** fullscreen is **Cmd+Enter** (or Ctrl+Cmd+F; F11 and Alt+Enter still work) and the hints say so, and the log goes to `~/Library/Logs/Space Miner/` where the Console app finds it.
 - **CI on a Mac:** every push runs the self-test, the developer-cheat self-test and the stress test on macOS too, and the release workflow tries the built app (`--version` and the self-test, headless) and the disk image before it is uploaded. A failed Mac build does not stop the Linux and Android files from being published.
 - `play.sh` falls back to a virtual environment when the system Python refuses `pip install` (Homebrew's does); `--selftest` of a built app puts its screenshots in the temp folder instead of the app's own folder.
-- iPhone and iPad are not supported (they need Xcode and an Apple Developer account); the README says so.
+- **A web version, for iPhone and iPad (and any browser):** the game also runs as a page, with Python compiled to WebAssembly (pygbag + pygame-ce), so it plays in Safari on an iPhone without an App Store app (that needs an Apple Developer account). Add it to the Home Screen for a full-screen icon. It uses the touch interface of the Android app, a canvas the shape of the page, fast mode, and keeps the save in the browser's storage (every save is copied to localStorage and comes back when the page is opened; coming back to a hidden tab pays what the fleets mined meanwhile). The *Pages* workflow publishes it at `https://<owner>.github.io/<repo>/` and every release carries `space-miner-<version>-web.zip` for any web server. `packaging/build_web.sh` builds it, `tools/web_check.py` plays it in a headless phone-shaped browser (CI does that on every push: it must start, draw, take taps and restore its save after a reload).
+- The main loop is now asynchronous (`main()` runs it, so nothing changes on a computer or Android): a browser only draws and takes events when the game gives control back every frame.
 
 ## 2.0.4
 
