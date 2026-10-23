@@ -5,6 +5,11 @@ name: iOS
 # source); the toolchain is cached after that. The .ipa is not signed: Apple only runs signed apps, so it is signed on its way to a phone
 # (AltStore or Sideloadly with a free Apple ID, or Xcode / TestFlight with a paid Apple Developer account).
 on:
+  workflow_call:                    # (the Release workflow builds it too)
+    inputs:
+      ref:
+        type: string
+        default: ""
   workflow_dispatch:
     inputs:
       ref:
@@ -87,12 +92,14 @@ jobs:
         if: failure()
         run: python3 tools/ci_tail.py device build/ios-device.log 160
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: ios
+          path: dist/*
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-logs
           path: |
-            dist/*.ipa
-            dist/*.sha256
             build/ios-*.log
             build/ios/sim.png
           if-no-files-found: ignore
