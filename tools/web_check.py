@@ -42,6 +42,8 @@ def wait_for_game(page, logs, since, timeout):
         for line in logs[since:]:
             if FRAMES.search(line):
                 return time.time() - t0, line
+        if any("Traceback" in line for line in logs[since:]):          # it will not start: do not wait for the whole time
+            return None
     return None
 
 

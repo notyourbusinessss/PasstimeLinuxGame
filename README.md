@@ -35,7 +35,18 @@ After that it opens like any other app. On a Mac the game uses **Cmd+Enter** (or
 
 The macOS builds are made and tested on GitHub's macOS machines (macOS 14 and 15): the self-test runs headless on the source and on the built app, and the app is checked after it is packed into the disk image. They are built for macOS 11 and newer (Apple Silicon) and 10.13 and newer (Intel), but only the versions GitHub runs have actually been tried.
 
-**iPhone and iPad** are not supported. An iOS app can only be built on a Mac with Xcode and signed with an Apple Developer account, and it would need the game ported to a different Python runtime, so it is not something this repository's build can produce. Android phones and tablets are supported (below).
+**iPhone and iPad** - there is no App Store app (that needs an Apple Developer account and a Mac with Xcode), but the game runs in **Safari** as a web page: see [Play in a browser (iPhone, iPad and anything else)](#play-in-a-browser-iphone-ipad-and-anything-else). Android phones and tablets have an app (below).
+
+## Play in a browser (iPhone, iPad and anything else)
+
+The game also runs in a web browser, which is how it works on an **iPhone or iPad**: it is the same Python game, compiled to WebAssembly with [pygbag](https://pygame-web.github.io/) (pygame-ce).
+
+- **Open** <https://notyourbusinessss.github.io/PasstimeLinuxGame/> in Safari (iOS 15 or newer; Chrome and Firefox on iOS use the same engine) and **turn the phone sideways**. Tap the page once when it says it is ready (that also turns the sound on).
+- **Add it to the Home Screen** (Share button -> *Add to Home Screen*) to get an icon and a full-screen game without the browser's bars. Do this: Safari throws away the stored data of websites you have not opened for a week, but not that of Home Screen apps.
+- The touch interface is the one of the Android app (tap to mine, drag to scroll, pinch the galaxy map). The canvas takes the shape of the page. There is no Fullscreen or Size setting, and Esc does not quit.
+- **Your save** is kept in the browser's storage of that device (every 15 seconds and when you save), so it stays on that device: it is not shared with the Android app or the desktop versions, and *clearing the website data* in Safari's settings erases it. While the page is hidden or the phone is locked the browser stops the game; when you come back it pays what the fleets mined meanwhile (up to 8 hours, like when the game is closed).
+- **It is slower** than the apps, because WebAssembly is slower than a program of its own: fast mode is on by default, and the first start downloads the Python runtime (about 10 MB, then cached) from pygbag's servers, so it needs a connection that time.
+- **Host it yourself:** every release has `space-miner-<version>-web.zip`, a folder of static files for any web server (`python3 -m http.server` in the folder is enough to try it; the browser still fetches the Python runtime from pygbag's CDN). `./packaging/build_web.sh` builds it (the same files as the *Pages* workflow, which publishes the site from the latest release). `?touch=1` at the end of the address forces the touch interface in a desktop browser.
 
 ## Android
 
@@ -843,7 +854,7 @@ The knobs live in `core.py` (`UNLOCK_LOG`, `PROJECT_LOG`, `SECTOR_LOG`, `TUNE` -
 ### Making a release
 
 1. Bump `__version__` in `version.py` and add a section for it to `CHANGELOG.md`.
-2. `./packaging/build_linux.sh` builds `dist/space-miner-<version>-linux-<arch>.tar.gz` (with a `.sha256`) on your machine: a one-file executable made with PyInstaller, the installer, the icon and the docs.
+2. `./packaging/build_web.sh` builds the web version (`dist/space-miner-<version>-web.zip` and the site in `build/web/`); see *Play in a browser*. `./packaging/build_linux.sh` builds `dist/space-miner-<version>-linux-<arch>.tar.gz` (with a `.sha256`) on your machine: a one-file executable made with PyInstaller, the installer, the icon and the docs.
    `./packaging/build_macos.sh` does the same on a Mac: `dist/space-miner-<version>-macos-<arch>.dmg` (with a `.sha256`) holding `Space Miner.app` (a PyInstaller build with an icon made from `assets/icon-512.png`, its `Info.plist` filled in, signed ad hoc) and the note about opening it the first time. The *Release* workflow builds it on an Apple Silicon and an Intel runner.
 3. For a published release, push a tag: `git tag v1.0.1 && git push origin v1.0.1`. The *Release* workflow runs the self-test, builds the files and creates the release on the Releases page, using the changelog section as the notes. You can also publish without a tag: *Actions -> Release -> Run workflow*, tick **publish** (it builds the branch you name, default `main`, and creates the release `v<version>` for you). The *CI* workflow runs the self-test on every push and pull request.
 
