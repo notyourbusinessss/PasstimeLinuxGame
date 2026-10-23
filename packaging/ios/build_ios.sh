@@ -56,6 +56,7 @@ step_project() {
         $PB -c "Add :$key array" -c "Add :$key:0 string UIInterfaceOrientationLandscapeRight" -c "Add :$key:1 string UIInterfaceOrientationLandscapeLeft" "$PLIST"
     done
     $PB -c "Add :UIRequiresFullScreen bool true" "$PLIST" || true
+    $PB -c "Add :UIApplicationSupportsIndirectInputEvents bool true" "$PLIST" || true          # (a mouse or trackpad on an iPad)
     $PB -c "Add :UIViewControllerBasedStatusBarAppearance bool false" "$PLIST" || true
     $PB -c "Add :LSApplicationCategoryType string public.app-category.games" "$PLIST" || true
     $PB -c "Add :ITSAppUsesNonExemptEncryption bool false" "$PLIST" || true

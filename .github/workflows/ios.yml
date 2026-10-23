@@ -21,6 +21,7 @@ on:
       - "packaging/ios/**"
       - ".github/workflows/ios.yml"
       - "tools/ci_tail.py"
+      - "tools/ci_image.py"
 
 jobs:
   ios:
@@ -85,6 +86,12 @@ jobs:
       - name: What the simulator said
         if: always()
         run: python3 tools/ci_tail.py simtest build/ios-simtest.log 120
+      - name: The simulator screen (part 1)
+        if: always()
+        run: python3 tools/ci_image.py screen build/ios/sim.jpg 0
+      - name: The simulator screen (part 2)
+        if: always()
+        run: python3 tools/ci_image.py screen2 build/ios/sim.jpg 9
       - name: Build the unsigned .ipa for a phone
         shell: bash
         run: ./packaging/ios/build_ios.sh device 2>&1 | tee build/ios-device.log

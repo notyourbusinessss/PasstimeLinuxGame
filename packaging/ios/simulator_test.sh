@@ -33,6 +33,7 @@ DATA=$(xcrun simctl get_app_container "$UDID" "$BUNDLE_ID" data)
 echo "--- data folder: $DATA"
 ls -la "$DATA" "$DATA/Documents" "$DATA/Library/Logs/Space Miner" 2>&1 || true
 xcrun simctl io "$UDID" screenshot "$WORK/sim.png" 2>&1 || true
+sips -Z 560 --setProperty format jpeg --setProperty formatOptions 30 "$WORK/sim.png" --out "$WORK/sim.jpg" > /dev/null 2>&1 || true
 xcrun simctl terminate "$UDID" "$BUNDLE_ID" || true
 echo "--- stdout"; cat "$WORK/sim-out.log" 2> /dev/null | tail -30
 echo "--- stderr"; cat "$WORK/sim-err.log" 2> /dev/null | tail -60
