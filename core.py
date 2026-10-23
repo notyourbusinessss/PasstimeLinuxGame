@@ -13,6 +13,7 @@ import galaxy
 import gamelog
 import resources
 import ships
+import webstore
 import worlds
 
 log = gamelog.LOG
@@ -20,6 +21,8 @@ log = gamelog.LOG
 SAVE_VER = 2
 GALAXY_VER = 1           # 1: the Milky Way (systems are indices into galaxy.STARS); saves without it use the old 16 sectors
 SAVE = resources.save_path()
+if webstore.WEB:                                    # a browser starts with an empty file system: bring the save back from localStorage
+    webstore.restore(os.path.dirname(SAVE), [os.path.basename(SAVE), os.path.basename(SAVE) + ".bak"])
 
 GROWTH = 1.15            # ship price growth per owned ship
 BGROWTH = 1.28           # colony building price growth per level
@@ -707,9 +710,11 @@ class Game:
                 if os.path.exists(SAVE) and (not os.path.exists(SAVE + ".bak")
                                              or time.time() - os.path.getmtime(SAVE + ".bak") > 600):
                     shutil.copy2(SAVE, SAVE + ".bak")
+                    webstore.persist(SAVE + ".bak")
             except OSError as e:
                 log.warning("Could not update the save backup: %s", e)
             os.replace(tmp, SAVE)
+            webstore.persist(SAVE)
         except (OSError, TypeError, ValueError) as e:
             log.error("Could not save the game to %s: %s", SAVE, e)
 

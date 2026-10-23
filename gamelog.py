@@ -9,7 +9,6 @@
 
 Find them in ~/.local/state/space-miner/  (the Stats page has a button that opens the folder).
 """
-import faulthandler
 import logging
 import logging.handlers
 import os
@@ -21,6 +20,11 @@ import traceback
 
 import resources
 from version import __version__
+
+try:
+    import faulthandler
+except ImportError:                                 # (not in every WebAssembly Python)
+    faulthandler = None
 
 LOG = logging.getLogger("space_miner")
 LOG.addHandler(logging.NullHandler())
@@ -82,7 +86,8 @@ def setup(debug=False, directory=None):
         fault.write(f"\n--- session start {time.strftime('%Y-%m-%d %H:%M:%S')}  Space Miner {__version__} ---\n")
         fault.flush()
         _state["fault"] = fault                                  # keep the file open for the whole run
-        faulthandler.enable(file=fault, all_threads=True)
+        if faulthandler is not None and not resources.WEB:
+            faulthandler.enable(file=fault, all_threads=True)
     except OSError as e:
         LOG.warning("Cannot write the log files in %s (%s); logging to the terminal only.", d, e)
         _state["dir"] = None
@@ -93,9 +98,14 @@ def setup(debug=False, directory=None):
 
 
 def system_info():
-    info = [f"Space Miner {__version__}", f"Python {sys.version.split()[0]} ({platform.python_implementation()}) "
+    try:
+        where = f"{platform.system()} {platform.release()} {platform.machine()}"
+        impl = platform.python_implementation()
+    except Exception:                                  # (a browser's platform module is not the whole standard one)
+        where, impl = sys.platform, "?"
+    info = [f"Space Miner {__version__}", f"Python {sys.version.split()[0]} ({impl}) "
             f"{'frozen build' if getattr(sys, 'frozen', False) else 'from source'}",
-            f"{platform.system()} {platform.release()} {platform.machine()}", f"argv: {' '.join(sys.argv[1:]) or '-'}"]
+            where, f"argv: {' '.join(sys.argv[1:]) or '-'}"]
     try:
         import pygame
         info.append(f"pygame {pygame.version.ver} (SDL {'.'.join(map(str, pygame.get_sdl_version()))})")

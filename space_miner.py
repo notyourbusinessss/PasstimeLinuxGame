@@ -6,6 +6,7 @@ Unlock the next world with the ores of the ones behind you, travel between them,
 research tech, survive random events, then WARP for permanent Dark Matter.
 Autosaves to ~/.space_miner_save.json; your empire keeps working while you're away.
 """
+import asyncio
 import json
 import math
 import os
@@ -37,6 +38,7 @@ import frontview
 import gfx
 import sounds
 import touch
+import webstore
 import worlds
 import worldview
 from version import __version__
@@ -466,9 +468,9 @@ class App:
     def fast(self):
         """Fast mode, for slow machines (phones draw in software): the backdrop with its stars, glow, vignette and panel is baked into one
         picture, the panel is drawn a few times a second and the game runs at 30 frames a second. The Stats page chooses: Auto (the
-        phone's touch interface), On or Off."""
+        phone's touch interface, or a browser: WebAssembly is slower than a program of its own), On or Off."""
         mode = self.g.settings.get("perf", "auto")
-        return mode == "on" or (mode == "auto" and resources.TOUCH)
+        return mode == "on" or (mode == "auto" and (resources.TOUCH or resources.WEB))
 
     QUALITY_CAP = (99, 99, 3, 1)           # the most ships of a class drawn round the planet at each quality level
 
@@ -2730,7 +2732,7 @@ class App:
         if not self.snd.ok:
             self.txt(scr, tiny, "(no audio device found)", (PANEL.x + 420, y + 12), (160, 120, 120))
         y += 48
-        if not resources.TOUCH:                      # (not on a phone: the game always fills the screen)
+        if not (resources.TOUCH or resources.WEB):   # (not on a phone, and not in a browser: there the game fills the page)
             self.button(scr, pygame.Rect(PANEL.x, y, 180, 36), f"Fullscreen: {'ON' if self.fullscreen else 'OFF'}", sm,
                         self.toggle_fullscreen, enabled=self.can_scale, panel=True,
                         col=(60, 120, 90) if self.fullscreen else (50, 70, 110))
@@ -2747,7 +2749,7 @@ class App:
         mode = st.get("perf", "auto")
         self.button(scr, pygame.Rect(PANEL.x, y, 180, 36), f"Fast mode: {mode.upper()}", sm, self.cycle_perf, panel=True,
                     col=(60, 120, 90) if self.fast else (50, 70, 110))
-        self.txt(scr, tiny, "For slow phones and computers: a lighter picture, 30 frames a second. Auto = on for phones.", (PANEL.x + 192, y + 4), (150, 158, 190))
+        self.txt(scr, tiny, "For slow phones and computers: a lighter picture, 30 frames a second. Auto = on for phones and in a browser.", (PANEL.x + 192, y + 4), (150, 158, 190))
         self.txt(scr, tiny, f"Now {'ON' if self.fast else 'OFF'}.", (PANEL.x + 192, y + 19), (150, 158, 190))
         y += 48
         self.button(scr, pygame.Rect(PANEL.x, y, 180, 36), f"Show FPS: {'ON' if st.get('show_fps') else 'OFF'}", sm,
@@ -2760,7 +2762,7 @@ class App:
                     "CLICK AGAIN: WIPE SAVE" if self.reset_confirm > 0 else "Hard reset (wipe save)", sm,
                     self.hard_reset, panel=True, col=(150, 60, 70) if self.reset_confirm > 0 else (70, 40, 50))
         y += 52
-        if not resources.TOUCH:
+        if not (resources.TOUCH or resources.WEB):
             can_open = not resources.ANDROID and gamelog.enabled()
             self.button(scr, pygame.Rect(PANEL.x, y, 200, 34), "Open log folder", sm, self.open_log_folder, enabled=can_open, panel=True)
             shown = gamelog.log_dir()
@@ -2870,6 +2872,8 @@ def open_window(w, h, fullscreen=False):
     os.environ.setdefault("SDL_HINT_RENDER_SCALE_QUALITY", "linear")          # smooth scaling when the window is not w x h
     if pygame.display.get_driver() == "dummy":                                  # the headless test driver has no renderer
         return pygame.display.set_mode((w, h)), True, False
+    if resources.WEB:                                                           # the page scales the canvas to fit (see packaging/web)
+        return pygame.display.set_mode((w, h)), False, False
     if resources.ANDROID:                                                       # always fullscreen, scaled to the screen
         try:
             return pygame.display.set_mode((w, h), pygame.SCALED | pygame.FULLSCREEN), True, True
@@ -2912,6 +2916,8 @@ def choose_resolution(setting, fullscreen):
                 return w, h
         except ValueError:
             pass
+    if resources.WEB:                                  # the shape of the page, as on a phone: a browser draws in software too
+        return android_canvas(*(webstore.viewport() or (1280, 720)))
     try:
         dw, dh = pygame.display.get_desktop_sizes()[0]
     except (pygame.error, IndexError):
@@ -2953,6 +2959,95 @@ def new_game_reset(save, yes=False, ask=input, say=print):
     return "reset"
 
 
+class FakeWindow:
+    """What the page gives the web build (pygbag's platform.window), for testing it without a browser."""
+
+    class Storage:
+        def __init__(self):
+            self.items = {}
+
+        def setItem(self, k, v):
+            self.items[k] = v
+
+        def getItem(self, k):
+            return self.items.get(k)
+
+        def removeItem(self, k):
+            self.items.pop(k, None)
+
+    class Media:
+        def __init__(self, matches):
+            self.matches = matches
+
+    def __init__(self, width=844, height=390, coarse=True, search=""):
+        self.localStorage = self.Storage()
+        self.innerWidth, self.innerHeight, self.coarse = width, height, coarse
+        self.location = type("Location", (), {"search": search})()
+
+    def matchMedia(self, query):
+        return self.Media(self.coarse and "coarse" in query)
+
+
+def check_web():
+    """The browser build, tested with a stand-in for the page: the save is kept in localStorage and comes back, a phone's browser gets
+    the touch interface and a canvas the shape of the page, and the web build never quits to nowhere."""
+    real = (webstore.window, resources.WEB, resources.TOUCH, core.SAVE)
+    d = tempfile.mkdtemp(prefix="space_miner_web_")
+    try:
+        fake = FakeWindow()
+        webstore.window = lambda: fake
+        assert webstore.touch_device() and webstore.viewport() == (844, 390)
+        fake.coarse = False
+        assert not webstore.touch_device(), "a mouse is not a touch screen"
+        fake.location.search = "?touch=1"
+        assert webstore.touch_device(), "?touch=1 forces the touch interface"
+        # saving keeps a copy in localStorage (the save, and the backup once there is an older save), and a new page gets it back
+        core.SAVE = os.path.join(d, "a", ".space_miner_save.json")
+        os.makedirs(os.path.dirname(core.SAVE))
+        g = core.Game(load=False, sim=True)
+        g.ore[0] = 1234.5
+        g.save()
+        key = webstore.PREFIX + ".space_miner_save.json"
+        assert key in fake.localStorage.items and json.loads(fake.localStorage.items[key])["ore"][0] == 1234.5
+        g.save()
+        os.utime(core.SAVE + ".bak", (0, 0)) if os.path.exists(core.SAVE + ".bak") else None
+        g.ore[0] = 99.0
+        g.save()
+        assert key + ".bak" in fake.localStorage.items, "the backup is kept too"
+        again = os.path.join(d, "b")
+        os.makedirs(again)
+        got = webstore.restore(again, [".space_miner_save.json", ".space_miner_save.json.bak", ".nothing"])
+        assert got == [".space_miner_save.json", ".space_miner_save.json.bak"], got
+        with open(os.path.join(again, ".space_miner_save.json")) as f:
+            assert json.load(f)["ore"][0] == 99.0
+        core.SAVE = os.path.join(again, ".space_miner_save.json")
+        g2 = core.Game(load=True, sim=True)
+        assert g2.ore[0] >= 99.0, "the restored save loads"
+        webstore.forget(".space_miner_save.json")
+        assert key not in fake.localStorage.items
+        # a storage that refuses (private browsing, full) never stops the game
+        fake.localStorage.setItem = lambda k, v: (_ for _ in ()).throw(RuntimeError("QuotaExceededError"))
+        assert webstore.persist(core.SAVE) is False
+        # the canvas takes the shape of the page, 1280 pixels on the long side; the page's touch screen turns the touch interface on
+        resources.WEB = True
+        fake.innerWidth, fake.innerHeight = 844, 390
+        assert choose_resolution("auto", False) == (1280, 591), choose_resolution("auto", False)
+        fake.innerWidth, fake.innerHeight = 1920, 1080
+        assert choose_resolution("auto", False) == (1280, 720)
+        assert choose_resolution("1600x900", False) == (1600, 900), "a chosen size still wins"
+        probe = type("Probe", (), {"g": type("G", (), {"settings": {}})()})()
+        resources.TOUCH = False
+        assert App.fast.fget(probe), "fast mode is on by default in a browser"
+        probe.g.settings["perf"] = "off"
+        assert not App.fast.fget(probe)
+        assert pygame.display.get_driver() == "dummy" and open_window(640, 360)[1:] == (True, False), "the headless test driver is unaffected"
+        assert resources.save_path() == "/tmp/.space_miner_save.json" and resources.log_dir() == "/tmp/space-miner"
+    finally:
+        webstore.window, resources.WEB, resources.TOUCH, core.SAVE = real
+        shutil.rmtree(d, ignore_errors=True)
+    assert not webstore.WEB and webstore.window() is None and not webstore.persist("x") and webstore.restore("x", ["y"]) == []
+
+
 def check_new_game_reset():
     """--new-game: asks, keeps a copy of the old save, removes the backup, and never wipes without a yes."""
     d = tempfile.mkdtemp(prefix="space_miner_reset_")
@@ -2972,7 +3067,7 @@ def check_new_game_reset():
         shutil.rmtree(d, ignore_errors=True)
 
 
-def main():
+async def amain():
     if "--help" in sys.argv or "-h" in sys.argv:
         print(USAGE)
         return
@@ -2984,8 +3079,8 @@ def main():
         if new_game_reset(core.SAVE, yes="--yes" in sys.argv) == "declined":
             return
     dev = "--dev" in sys.argv
-    if "--touch" in sys.argv:
-        resources.TOUCH = True                      # the touch-screen interface, for trying it with a mouse
+    if "--touch" in sys.argv or (resources.WEB and webstore.touch_device()):
+        resources.TOUCH = True                      # the touch-screen interface, for trying it with a mouse (and on a phone's browser)
     test_dir = None
     if selftest:
         os.environ["SDL_VIDEODRIVER"] = "dummy"
@@ -3008,7 +3103,7 @@ def main():
     start_w, start_h = choose_resolution(cli_res or saved.get("resolution", "auto"), want_fs)
     apply_layout(start_w, start_h)
     scr, can_scale, is_fs = open_window(start_w, start_h, want_fs)
-    if not can_scale:
+    if not can_scale and not resources.WEB:
         gamelog.LOG.warning("No scaling renderer: using a fixed-size window (no resizing or fullscreen).")
     gamelog.log_session()
     clock = pygame.time.Clock()
@@ -3021,6 +3116,12 @@ def main():
             return pygame.font.SysFont("dejavusans,liberationsans,arial,freesans", size, bold=bold)
 
     fonts = (font(30, True), font(18, True), font(15), font(12))
+    if resources.WEB:                                # the page is blank until the first frame, and building the world takes a few seconds there
+        scr.fill((6, 8, 18))
+        for text, f, dy in (("SPACE MINER", fonts[0], -14), ("Loading the galaxy...", fonts[2], 22)):
+            label = f.render(text, True, (190, 205, 235))
+            scr.blit(label, label.get_rect(center=(scr.get_width() // 2, scr.get_height() // 2 + dy)))
+        pygame.display.flip()
     t0 = time.time()
     app = App(dev=dev)
     g = app.g
@@ -3054,6 +3155,9 @@ def main():
                 dt = min(raw, 0.25)
                 if selftest:
                     dt = 0.05
+                if raw > 20 and resources.WEB and not selftest:     # the browser stopped the game (the tab was hidden, the phone locked)
+                    app.bg_since = time.time() - raw
+                    app.came_back()                                 # (pays what the fleets mined meanwhile, like coming back to the phone app)
                 if raw > 2.0 and not selftest:
                     gamelog.LOG.info("The game was paused for %.1f s (computer asleep, or the window was being dragged).", raw)
                 else:
@@ -3073,7 +3177,7 @@ def main():
                                 app.pick = None                        # (cancels picking a system for a general's orders)
                             elif app.fullscreen and not resources.ANDROID:
                                 app.toggle_fullscreen()
-                            else:
+                            elif not resources.WEB:                    # (a page has nothing to quit to)
                                 running = False
                         elif e.key == pygame.K_F11 or (e.key == pygame.K_RETURN and e.mod & pygame.KMOD_ALT):
                             app.toggle_fullscreen()
@@ -3139,6 +3243,8 @@ def main():
                     gamelog.LOG.info("alive: %.0f fps average, slowest frame %.0f ms, fast mode %s | %s", beat_frames / secs, slowest * 1000, "on" if app.fast else "off",
                                      app.describe().splitlines()[0])
                     last_beat, beat_frames, slowest = time.monotonic(), 0, 0.0
+                if resources.WEB and (frames in (30, 300) or frames % 1800 == 0):      # (the browser's console is the only log there)
+                    print(f"space-miner: {frames} frames, {app.fps:.0f} fps, detail level Q{app.q}")
             except Exception:
                 if selftest:
                     raise                                    # the self-test must fail loudly
@@ -3154,7 +3260,8 @@ def main():
                     print(f"Space Miner stopped because of an error. Crash report: {path or gamelog.log_path()}", file=sys.stderr)
                     crashed = True
                     running = False
-    except KeyboardInterrupt:
+            await asyncio.sleep(0)                           # a browser draws the frame and runs events only when the game lets go (free on a computer)
+    except (KeyboardInterrupt, asyncio.CancelledError):
         gamelog.LOG.info("Interrupted from the terminal")
     if not crashed:
         g.save()                                             # (after a crash the last autosave is kept as it is)
@@ -3165,6 +3272,10 @@ def main():
         shutil.rmtree(test_dir, ignore_errors=True)
     if crashed:
         sys.exit(1)
+
+
+def main():
+    asyncio.run(amain())
 
 
 _SCR = {}
@@ -4652,6 +4763,7 @@ def selftest_step(app, g, frames, shot):
         check_counter_offensives()
         check_lose_colonies()
         check_new_game_reset()
+        check_web()
     if frames == 3:
         for _ in range(25):
             app.space_click()
