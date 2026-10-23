@@ -1,6 +1,6 @@
 # Space Miner
 
-An idle game for Linux, written in Python with [pygame](https://www.pygame.org). Start on Earth, mine the asteroids orbiting it, and expand across the whole solar system - and beyond. Every planet has its own ore, its own fleet, its own colony and its own bonus.
+An idle game for Linux, macOS and Android, written in Python with [pygame](https://www.pygame.org). Start on Earth, mine the asteroids orbiting it, and expand across the whole solar system - and beyond. Every planet has its own ore, its own fleet, its own colony and its own bonus.
 
 ![Early game on Earth](screenshots/01-earth-early.png)
 
@@ -22,6 +22,20 @@ cd space-miner-*-linux-x86_64
 ```
 
 The build needs a reasonably recent distro (glibc 2.35 or newer, e.g. Ubuntu 22.04+). On an older one, run it from source (below).
+
+**macOS** - `space-miner-<version>-macos-arm64.dmg` for Apple Silicon (M1 and later) or `space-miner-<version>-macos-x86_64.dmg` for an Intel Mac (`uname -m` in Terminal says which you have). Open the disk image, drag **Space Miner** onto **Applications** and start it. No Python or pygame needed.
+
+The app is signed ad hoc, not with an Apple Developer ID, and is not notarized (that needs a paid Apple Developer account), so macOS asks you to confirm it **the first time**:
+
+- **macOS 14 and older:** hold **Control** and click Space Miner (or right-click it), choose **Open**, then click **Open**.
+- **macOS 15 (Sequoia) and newer:** double-click it, close the message that appears, then open *System Settings -> Privacy & Security*, scroll down to "Space Miner was blocked" and click **Open Anyway**.
+- If macOS says the app is **damaged**, run this once in Terminal: `xattr -dr com.apple.quarantine "/Applications/Space Miner.app"`.
+
+After that it opens like any other app. On a Mac the game uses **Cmd+Enter** (or **Ctrl+Cmd+F**, or F11) for fullscreen, **Cmd+Q** quits, the save is `~/.space_miner_save.json` like everywhere else, and the log is in `~/Library/Logs/Space Miner/` (you can open it in the Console app, or with the Stats page's *Open log folder* button). The command-line options work through the app's executable, e.g. `"/Applications/Space Miner.app/Contents/MacOS/Space Miner" --new-game`.
+
+The macOS builds are made and tested on GitHub's macOS machines (macOS 14 and 15): the self-test runs headless on the source and on the built app, and the app is checked after it is packed into the disk image. They are built for macOS 11 and newer (Apple Silicon) and 10.13 and newer (Intel), but only the versions GitHub runs have actually been tried.
+
+**iPhone and iPad** are not supported. An iOS app can only be built on a Mac with Xcode and signed with an Apple Developer account, and it would need the game ported to a different Python runtime, so it is not something this repository's build can produce. Android phones and tablets are supported (below).
 
 ## Android
 
@@ -70,6 +84,7 @@ cd PasstimeLinuxGame
 ```
 
 `play.sh` installs pygame if it is missing and starts the game. You need Python 3.9+ and a desktop session.
+On a Mac, install Python 3 first (from [python.org](https://www.python.org/downloads/macos/) or `brew install python`); `play.sh` then does the rest, using a virtual environment (`venv/`) where the system refuses `pip install` ("externally managed environment", which Homebrew's Python does).
 Prefer to do it by hand?
 
 ```sh
@@ -106,12 +121,12 @@ Missing Python or pip? Debian/Ubuntu: `sudo apt install python3 python3-pip pyth
 | Mouse wheel over the panel | Scroll the list |
 | Click a golden supply crate | Grab it before it drifts off |
 | **0** / **F1** | Jump to the Dev tab (only in [developer mode](#developer-mode)) |
-| **F11** or **Alt+Enter** | Toggle fullscreen |
+| **F11** or **Alt+Enter** (on a Mac: **Cmd+Enter** or **Ctrl+Cmd+F**) | Toggle fullscreen |
 | **Esc** | Leave fullscreen; in a window it quits (the game saves on exit) |
 
 ### Window, resolution and fullscreen
 
-The window is resizable: drag its edges, maximise it with your window manager, or press **F11** (or start with `./play.sh --fullscreen`). The game scales smoothly to fit, with black bars if the shape of your screen is different.
+The window is resizable: drag its edges, maximise it with your window manager, or press **F11** (**Cmd+Enter** on a Mac), or start with `./play.sh --fullscreen`. The game scales smoothly to fit, with black bars if the shape of your screen is different.
 
 The game can also be played at a **higher resolution**. A bigger canvas is not just a bigger picture - everything is laid out again, so you get more room: a taller and slightly wider side panel (more rows at once), a bigger and crisper galaxy map, and a larger field of asteroids around the planet.
 
@@ -132,7 +147,7 @@ Command-line options: `--new-game` (start over, see below), `--fullscreen`, `--r
 
 Your save lives in `~/.space_miner_save.json`.
 
-**Starting over.** From a terminal, run `python3 space_miner.py --new-game` (or `./play.sh --new-game`, or `space-miner --new-game` for the Linux build). It asks you to type `yes`, erases the save and its backup, and starts a brand-new game; add `--yes` to skip the question. The old save is not thrown away: it is kept next to the new one as `~/.space_miner_save.json.before-reset-DATE` (delete that file if you do not want it). Inside the game, *Awards -> Stats -> Hard reset (wipe save)* does the same without a copy. For a softer start over that keeps your achievements and Stardust, use **Ascension** ([New Game+](#9-ascension-new-game)).
+**Starting over.** From a terminal, run `python3 space_miner.py --new-game` (or `./play.sh --new-game`, or `space-miner --new-game` for the Linux build, `"/Applications/Space Miner.app/Contents/MacOS/Space Miner" --new-game` for the Mac one). It asks you to type `yes`, erases the save and its backup, and starts a brand-new game; add `--yes` to skip the question. The old save is not thrown away: it is kept next to the new one as `~/.space_miner_save.json.before-reset-DATE` (delete that file if you do not want it). Inside the game, *Awards -> Stats -> Hard reset (wipe save)* does the same without a copy. For a softer start over that keeps your achievements and Stardust, use **Ascension** ([New Game+](#9-ascension-new-game)).
 
 ## How the game works
 
@@ -691,7 +706,7 @@ The **Stats** chip in the Awards tab lists everything you have done (play time, 
 
 ![Stats](screenshots/15-stats-and-settings.png)
 
-The settings are at the bottom of the page: sound, the **Fullscreen** button (the same as **F11**), the **Size** button (the resolution, see above), saving, and **Open log folder** (see Troubleshooting):
+The settings are at the bottom of the page: sound, the **Fullscreen** button (the same as **F11**, or **Cmd+Enter** on a Mac), the **Size** button (the resolution, see above), saving, and **Open log folder** (see Troubleshooting):
 
 ![Settings with the Fullscreen button](screenshots/38-fullscreen-setting.png)
 
@@ -803,10 +818,10 @@ Enemy raids and counter-offensives are included in these numbers (the bot defend
 | `sim.py` | A greedy bot that plays the game headless and prints a pacing timeline |
 | `calibrate.py` | Searches for planet, megaproject and enemy-strength values that hit a target timeline using the bot |
 | `version.py` | The version number |
-| `resources.py` | Where bundled files, the save file and the logs live (also inside the Linux build) |
+| `resources.py` | Where bundled files, the save file and the logs live (also inside the Linux and macOS builds) |
 | `gamelog.py` | Logging, crash reports and the native-crash dump |
 | `assets/` | The bundled DejaVu Sans font (with its license), the app icon, `galaxy.json` (the star systems) and `worlds.json` (the real planets of the real stars) |
-| `packaging/` | `build_linux.sh` (the release build), the installer and the menu entry |
+| `packaging/` | `build_linux.sh` and `build_macos.sh` (the release builds), the Linux installer and menu entry |
 | `tools/` | `make_icon.py` (draws the icon), `fuzz.py` (random-input crash hunting), `ship_sheet.py` (a contact sheet of every ship) `make_worlds.py` (rebuilds `assets/worlds.json` from the Open Exoplanet Catalogue) and `make_galaxy.py` (rebuilds `assets/galaxy.json`: the real stars and the generated systems) |
 | `CHANGELOG.md`, `.github/workflows/` | Release notes; CI (self-test on every push) and the release workflow |
 | `play.sh` | Launcher that installs pygame if needed |
@@ -829,6 +844,7 @@ The knobs live in `core.py` (`UNLOCK_LOG`, `PROJECT_LOG`, `SECTOR_LOG`, `TUNE` -
 
 1. Bump `__version__` in `version.py` and add a section for it to `CHANGELOG.md`.
 2. `./packaging/build_linux.sh` builds `dist/space-miner-<version>-linux-<arch>.tar.gz` (with a `.sha256`) on your machine: a one-file executable made with PyInstaller, the installer, the icon and the docs.
+   `./packaging/build_macos.sh` does the same on a Mac: `dist/space-miner-<version>-macos-<arch>.dmg` (with a `.sha256`) holding `Space Miner.app` (a PyInstaller build with an icon made from `assets/icon-512.png`, its `Info.plist` filled in, signed ad hoc) and the note about opening it the first time. The *Release* workflow builds it on an Apple Silicon and an Intel runner.
 3. For a published release, push a tag: `git tag v1.0.1 && git push origin v1.0.1`. The *Release* workflow runs the self-test, builds the files and creates the release on the Releases page, using the changelog section as the notes. You can also publish without a tag: *Actions -> Release -> Run workflow*, tick **publish** (it builds the branch you name, default `main`, and creates the release `v<version>` for you). The *CI* workflow runs the self-test on every push and pull request.
 
 ### Self-test
@@ -837,7 +853,7 @@ The knobs live in `core.py` (`UNLOCK_LOG`, `PROJECT_LOG`, `SECTOR_LOG`, `TUNE` -
 
 ## Troubleshooting
 
-- **Something went wrong or the game crashed** - the game writes a log, so there is always a record of why. Look in `~/.local/state/space-miner/` (the Stats page has an **Open log folder** button):
+- **Something went wrong or the game crashed** - the game writes a log, so there is always a record of why. Look in `~/.local/state/space-miner/` (`~/Library/Logs/Space Miner/` on a Mac; the Stats page has an **Open log folder** button):
   - `space-miner.log` - start-up details (version, system, graphics driver), saves and loads, warps, setting changes and every error with its full traceback and the state of the game at that moment. It keeps the last few megabytes.
   - `crash-<date>.txt` - written when the game has to stop; it has the error, the system details and the end of the log.
   - `faulthandler.log` - a stack dump if the program dies for a reason Python cannot catch (a crash inside the graphics library, for example).
@@ -845,6 +861,7 @@ The knobs live in `core.py` (`UNLOCK_LOG`, `PROJECT_LOG`, `SECTOR_LOG`, `TUNE` -
   An error in one frame is logged and the game carries on, and the Stats page shows how many errors were logged this session. If you report a bug, please attach `space-miner.log` and any `crash-*.txt`. Run with `--debug` for more detail.
 - **My save is gone or broken** - a backup (`~/.space_miner_save.json.bak`, refreshed every 10 minutes) is used automatically if the save is damaged, and a save that cannot be read is never overwritten silently: a copy named `.unreadable-<date>` or `.broken-<date>` is kept next to it.
 
+- **macOS says the app "cannot be opened" or is "damaged"** - it is not signed with an Apple Developer ID: see the first-start steps under [Download](#download) (Control-click -> Open, or *Privacy & Security -> Open Anyway*, or the `xattr` line).
 - **`ModuleNotFoundError: No module named 'pygame'`** - run `pip install pygame` (or use `./play.sh`).
 - **No window appears over SSH / in a container** - the game needs a display. Run it from a desktop session.
 - **The window is bigger than my screen / everything is tiny or huge** - choose another size with the **Size** button in the Stats page, or start with `--resolution 1280x720`. *Auto* normally picks a size that fits.

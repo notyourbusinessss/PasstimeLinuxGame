@@ -25,3 +25,21 @@ jobs:
         run: python space_miner.py --selftest --dev
       - name: Random-input stress test
         run: python tools/fuzz.py frames=500 states=fresh,mid
+
+  macos:
+    # The game on a Mac (Apple Silicon): the same checks, plus that the packaging script is valid shell.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pygame
+      - run: python space_miner.py --version
+      - name: Self-test (headless)
+        run: python space_miner.py --selftest
+      - name: Self-test with every developer cheat
+        run: python space_miner.py --selftest --dev
+      - name: Random-input stress test
+        run: python tools/fuzz.py frames=300 states=fresh,mid
+      - run: sh -n packaging/build_macos.sh
