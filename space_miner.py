@@ -624,7 +624,7 @@ class App:
 
     def open_log_folder(self):
         d = gamelog.log_dir()
-        for cmd in (["xdg-open", d], ["open", d]):
+        for cmd in ((["open", d], ["xdg-open", d]) if sys.platform == "darwin" else (["xdg-open", d], ["open", d])):
             if shutil.which(cmd[0]):
                 try:
                     subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -660,7 +660,7 @@ class App:
         return True
 
     def toggle_fullscreen(self):
-        """F11 / Alt+Enter / the Stats page button. The canvas is scaled to fit the screen (black bars if the aspect
+        """F11 / Alt+Enter / Cmd+Enter / the Stats page button. The canvas is scaled to fit the screen (black bars if the aspect
         ratio differs); with the automatic resolution a fullscreen game uses the whole desktop's resolution."""
         g = self.g
         if not self.can_scale:
@@ -676,7 +676,7 @@ class App:
             return False
         g.settings["fullscreen"] = self.fullscreen
         gamelog.LOG.info("Fullscreen %s", "on" if self.fullscreen else "off")
-        g.toast("Fullscreen on - press F11 or Esc to leave it." if self.fullscreen else "Back to the window.", 3)
+        g.toast(f"Fullscreen on - press {FS_KEYS_SHORT} or Esc to leave it." if self.fullscreen else "Back to the window.", 3)
         return True
 
     def set_resolution_choice(self, value):
@@ -2736,7 +2736,7 @@ class App:
             self.button(scr, pygame.Rect(PANEL.x, y, 180, 36), f"Fullscreen: {'ON' if self.fullscreen else 'OFF'}", sm,
                         self.toggle_fullscreen, enabled=self.can_scale, panel=True,
                         col=(60, 120, 90) if self.fullscreen else (50, 70, 110))
-            self.txt(scr, tiny, "F11 or Alt+Enter. You can also resize or maximise the window.", (PANEL.x + 192, y + 11), (150, 158, 190))
+            self.txt(scr, tiny, f"{FS_KEYS_LONG}. You can also resize or maximise the window.", (PANEL.x + 192, y + 11), (150, 158, 190))
             y += 48
             opts = ["auto"] + [f"{w}x{h}" for w, h in RESOLUTIONS]
             cur = st.get("resolution", "auto")
@@ -2855,7 +2855,7 @@ usage: space-miner [--new-game [--yes]] [--fullscreen] [--resolution WxH] [--tou
 
   --new-game   erase your save and start over (asks first; --yes skips the question). A copy of the old save is kept
                next to it as .space_miner_save.json.before-reset-DATE
-  --fullscreen start in fullscreen (F11 toggles it any time; the window can also be resized or maximised)
+  --fullscreen start in fullscreen (F11 or Alt+Enter toggles it any time, Cmd+Enter on a Mac; the window can also be resized or maximised)
   --resolution WxH   canvas size for this run, e.g. 1920x1080 (the Stats page saves a choice; the default is automatic)
   --touch      the touch-screen interface (tap, drag to scroll, bigger buttons), to try it with a mouse
   --debug      verbose log (also printed in the terminal)
@@ -2863,6 +2863,21 @@ usage: space-miner [--new-game [--yes]] [--fullscreen] [--resolution WxH] [--tou
   --selftest   run headless for a few seconds and exercise the game (used for testing)
   --version    print the version and exit
 """
+
+
+MAC = sys.platform == "darwin"
+FS_KEYS_SHORT = "Cmd+Enter" if MAC else "F11"                                   # the fullscreen shortcut named in hints
+FS_KEYS_LONG = "Cmd+Enter or F11" if MAC else "F11 or Alt+Enter"
+
+
+def fullscreen_key(key, mod):
+    """True for the fullscreen shortcuts: F11 (not on a Mac keyboard's default row, where it hides the windows), Alt+Enter
+    (Windows / Linux), Cmd+Enter and Ctrl+Cmd+F (macOS)."""
+    if key == pygame.K_F11:
+        return True
+    if key in (pygame.K_RETURN, pygame.K_KP_ENTER) and mod & (pygame.KMOD_ALT | pygame.KMOD_META):
+        return True
+    return key == pygame.K_f and bool(mod & pygame.KMOD_CTRL) and bool(mod & pygame.KMOD_META)
 
 
 def open_window(w, h, fullscreen=False):
@@ -3048,6 +3063,46 @@ def check_web():
     assert not webstore.WEB and webstore.window() is None and not webstore.persist("x") and webstore.restore("x", ["y"]) == []
 
 
+def check_platform():
+    """The Mac side of the game, testable anywhere: the fullscreen shortcuts and where the log goes on each system."""
+    K = pygame
+    assert fullscreen_key(K.K_F11, 0) and fullscreen_key(K.K_RETURN, K.KMOD_LALT) and fullscreen_key(K.K_RETURN, K.KMOD_LMETA)
+    assert fullscreen_key(K.K_KP_ENTER, K.KMOD_RMETA), "Cmd+Enter on the numeric pad too"
+    assert fullscreen_key(K.K_f, K.KMOD_LCTRL | K.KMOD_LMETA), "Ctrl+Cmd+F, the macOS fullscreen shortcut"
+    assert not (fullscreen_key(K.K_RETURN, 0) or fullscreen_key(K.K_RETURN, K.KMOD_SHIFT) or fullscreen_key(K.K_f, 0)
+                or fullscreen_key(K.K_f, K.KMOD_LMETA) or fullscreen_key(K.K_f, K.KMOD_LCTRL) or fullscreen_key(K.K_SPACE, K.KMOD_LALT))
+    assert FS_KEYS_SHORT in FS_KEYS_LONG
+    real, env = sys.platform, {k: os.environ.get(k) for k in ("XDG_STATE_HOME", "ANDROID_PRIVATE")}
+    try:
+        os.environ.pop("XDG_STATE_HOME", None)
+        sys.platform = "darwin"
+        assert resources.log_dir() == os.path.expanduser("~/Library/Logs/Space Miner"), resources.log_dir()
+        sys.platform = "linux"
+        assert resources.log_dir() == os.path.expanduser("~/.local/state/space-miner"), resources.log_dir()
+        os.environ["XDG_STATE_HOME"] = "/tmp/xdg-state"
+        assert resources.log_dir() == "/tmp/xdg-state/space-miner"
+    finally:
+        sys.platform = real
+        for k, v in env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    # a frozen build (PyInstaller, a Mac .app too) reads its files from the unpacked bundle, not from the source folder
+    frozen, meipass = getattr(sys, "frozen", None), getattr(sys, "_MEIPASS", None)
+    try:
+        sys.frozen, sys._MEIPASS = True, "/Applications/Space Miner.app/Contents/Resources"
+        assert resources.resource("assets/icon.png") == "/Applications/Space Miner.app/Contents/Resources/assets/icon.png"
+    finally:
+        for name, v in (("frozen", frozen), ("_MEIPASS", meipass)):
+            if v is None:
+                if hasattr(sys, name):
+                    delattr(sys, name)
+            else:
+                setattr(sys, name, v)
+    assert os.path.exists(resources.resource("assets/icon.png")) and os.path.exists(resources.resource("assets/fonts/DejaVuSans.ttf"))
+
+
 def check_new_game_reset():
     """--new-game: asks, keeps a copy of the old save, removes the backup, and never wipes without a yes."""
     d = tempfile.mkdtemp(prefix="space_miner_reset_")
@@ -3136,7 +3191,7 @@ async def amain():
         print(f"startup {time.time() - t0:.2f}s")
     gamelog.LOG.info("Ready in %.2f s", time.time() - t0)
     _SCR.update(scr=scr, fonts=fonts)
-    here = os.path.dirname(os.path.abspath(__file__))
+    here = tempfile.gettempdir() if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))     # (where --selftest puts its screenshots)
     running = True
     frames = 0
     fail_streak = 0
@@ -3179,7 +3234,7 @@ async def amain():
                                 app.toggle_fullscreen()
                             elif not resources.WEB:                    # (a page has nothing to quit to)
                                 running = False
-                        elif e.key == pygame.K_F11 or (e.key == pygame.K_RETURN and e.mod & pygame.KMOD_ALT):
+                        elif fullscreen_key(e.key, e.mod):
                             app.toggle_fullscreen()
                         elif e.key == pygame.K_SPACE and not g.event:
                             app.space_click()
@@ -4764,6 +4819,7 @@ def selftest_step(app, g, frames, shot):
         check_lose_colonies()
         check_new_game_reset()
         check_web()
+        check_platform()
     if frames == 3:
         for _ in range(25):
             app.space_click()

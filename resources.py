@@ -28,10 +28,13 @@ def save_path():
 
 
 def log_dir():
-    """Where the log and crash reports go: ~/.local/state/space-miner (the app's private folder on Android)."""
+    """Where the log and crash reports go: ~/.local/state/space-miner (the app's private folder on Android,
+    ~/Library/Logs/Space Miner on a Mac, where the Console app looks)."""
     if ANDROID:
         return os.path.join(os.environ.get("ANDROID_PRIVATE", os.path.expanduser("~")), "logs")
     if WEB:
         return "/tmp/space-miner"                   # (the page's file system is gone when it closes; the log is for the browser's console)
+    if sys.platform == "darwin":
+        return os.path.expanduser("~/Library/Logs/Space Miner")
     state = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
     return os.path.join(state, "space-miner")
