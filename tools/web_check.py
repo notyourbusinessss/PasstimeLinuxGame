@@ -4,7 +4,6 @@ that the game starts, draws, moves, reacts to taps and keeps its save in the bro
     python3 tools/web_check.py build/web [--out DIR] [--browser chromium|webkit] [--timeout 420]
 Needs `pip install playwright` and `playwright install chromium`. Writes screenshots and the browser's console to --out. Exit status 1 on a failure."""
 import argparse
-import base64
 import functools
 import http.server
 import json
@@ -19,12 +18,6 @@ from playwright.sync_api import sync_playwright
 UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1")
 SAVE_KEY = "space-miner:.space_miner_save.json"
 FRAMES = re.compile(r"space-miner: (\d+) frames, (\d+) fps")
-
-
-def emit_image(name, data):
-    """In a GitHub run, put a small screenshot into the run's annotations (the artifacts are not always reachable): ::notice title=shot-NAME::BASE64."""
-    if os.environ.get("GITHUB_ACTIONS") and len(data) < 45000:
-        print(f"::notice title=shot-{name}::" + base64.b64encode(data).decode())
 
 
 def serve(directory):
@@ -45,6 +38,7 @@ def wait_for_game(page, logs, since, timeout):
     t0 = time.time()
     while time.time() - t0 < timeout:
         page.touchscreen.tap(422, 195)
+        page.mouse.click(422, 195)                           # (a tap and a click: whichever the browser counts as the user's first touch)
         page.wait_for_timeout(2000)
         for line in logs[since:]:
             if FRAMES.search(line):
@@ -76,18 +70,27 @@ def main():
         page = ctx.new_page()
         page.on("console", lambda m: logs.append(f"[{m.type}] {m.text}"))
         page.on("pageerror", lambda e: logs.append(f"[pageerror] {e}"))
+        page.on("requestfailed", lambda r: logs.append(f"[requestfailed] {r.url} {r.failure}"))
+        page.on("crash", lambda: logs.append("[crash] the page crashed"))
         page.goto(url)
         up = wait_for_game(page, logs, 0, args.timeout)
         if up is None:
             page.screenshot(path=os.path.join(args.out, "timeout.png"))
             failures.append(f"the game did not start within {args.timeout} s")
+            try:
+                say("infobox says: " + str(page.evaluate("document.getElementById('infobox') && document.getElementById('infobox').innerText")))
+                say("terminal says: " + str(page.evaluate("(document.getElementById('terminal') || {}).innerText || ''"))[-600:])
+            except Exception as e:
+                say(f"could not ask the page: {e}")
+            say("--- all of the console ---")
+            for line in logs:
+                say(line[:220])
         else:
             say(f"started after {up[0]:.0f} s: {up[1]}")
             say(f"viewport touch interface / canvas: {page.evaluate('[matchMedia(\"(pointer: coarse)\").matches, document.querySelector(\"canvas\").width, document.querySelector(\"canvas\").height, document.querySelector(\"canvas\").style.width, document.querySelector(\"canvas\").style.height]')}")
             page.wait_for_timeout(1500)
             first = page.screenshot(type="jpeg", quality=40)
             open(os.path.join(args.out, "1-start.jpg"), "wb").write(first)
-            emit_image("1-start", first)
             page.wait_for_timeout(1500)
             second = page.screenshot(type="jpeg", quality=40)
             say(f"screenshot sizes: {len(first)} and {len(second)} bytes (a blank page is under 5000)")
@@ -101,7 +104,6 @@ def main():
             page.wait_for_timeout(1500)
             shot = page.screenshot(type="jpeg", quality=40)
             open(os.path.join(args.out, "2-after-taps.jpg"), "wb").write(shot)
-            emit_image("2-after-taps", shot)
             clicks = None
             for _ in range(14):                              # the game saves every 15 seconds
                 page.wait_for_timeout(2000)
@@ -124,7 +126,6 @@ def main():
                     say(f"after a reload ({back[0]:.0f} s): clicks in storage {after}")
                     shot = page.screenshot(type="jpeg", quality=40)
                     open(os.path.join(args.out, "3-after-reload.jpg"), "wb").write(shot)
-                    emit_image("3-after-reload", shot)
                     if not after or after < clicks:
                         failures.append(f"the save was not restored after a reload ({clicks} -> {after})")
             portrait = browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True, user_agent=UA, device_scale_factor=1)
@@ -132,7 +133,6 @@ def main():
             held.goto(url)
             held.wait_for_timeout(3000)
             shot = held.screenshot(type="jpeg", quality=40)
-            emit_image("4-portrait", shot)
             shown = held.evaluate("getComputedStyle(document.getElementById('rotate')).display")
             say(f"turn-your-phone message when held upright: display={shown}")
             if shown == "none":
@@ -145,10 +145,12 @@ def main():
     with open(os.path.join(args.out, "console.log"), "w", encoding="utf-8") as f:
         f.write("\n".join(logs))
     say(f"{len(logs)} console lines; failures: {failures or 'none'}")
-    if os.environ.get("GITHUB_ACTIONS"):                    # the run's annotations are the quickest place to read the result
+    if os.environ.get("GITHUB_ACTIONS"):                    # the run's annotations are the quickest place to read the result (4096 characters each)
         tail = "\n".join(l[:240] for l in logs[-60:])
-        text = "\n".join(report + ["--- console (last lines) ---", tail])[:30000]
-        print("::notice title=web-check::" + text.replace("%", "%25").replace("\r", "").replace("\n", "%0A"))
+        text = "\n".join(report + ["--- console (last lines) ---", tail])
+        chunks = [text[i:i + 3800] for i in range(0, len(text), 3800)][:9]
+        for n, chunk in enumerate(chunks):
+            print(f"::notice title=web-check-{n}::" + chunk.replace("%", "%25").replace("\r", "").replace("\n", "%0A"))
     return 1 if failures else 0
 
 

@@ -64,7 +64,7 @@ jobs:
       - run: pip install playwright && python -m playwright install --with-deps ${{ matrix.browser }}
       - name: Play it in a phone-shaped browser
         shell: bash
-        run: python tools/web_check.py build/web --out web-check-out --browser ${{ matrix.browser }} 2>&1 | tee web-check.log
+        run: python tools/web_check.py build/web --out web-check-out --timeout 150 --browser ${{ matrix.browser }} 2>&1 | tee web-check.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
