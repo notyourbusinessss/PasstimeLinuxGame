@@ -1,0 +1,112 @@
+name: iOS
+
+# Builds the iPhone app on a Mac (kivy-ios: Python and SDL2 for iOS, plus the pygame recipe in packaging/ios/recipes), tries it in the iOS Simulator
+# and packs dist/space-miner-<version>-ios-unsigned.ipa. The first run takes about an hour (it builds Python, OpenSSL and the SDL libraries from
+# source); the toolchain is cached after that. The .ipa is not signed: Apple only runs signed apps, so it is signed on its way to a phone
+# (AltStore or Sideloadly with a free Apple ID, or Xcode / TestFlight with a paid Apple Developer account).
+on:
+  workflow_call:                    # (the Release workflow builds it too)
+    inputs:
+      ref:
+        type: string
+        default: ""
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag or commit to build"
+        default: main
+  push:
+    branches: [feature/ios]
+    paths:
+      - "packaging/ios/**"
+      - ".github/workflows/ios.yml"
+      - "tools/ci_tail.py"
+      - "tools/ci_image.py"
+
+jobs:
+  ios:
+    runs-on: macos-15
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Tools
+        run: |
+          brew install autoconf automake libtool pkg-config
+          brew link libtool || true
+          pip install wheel "Cython==0.29.36"
+          pip install "kivy-ios @ git+https://github.com/kivy/kivy-ios@fd363d49eddb5ac06766348738bd89c7d46007f8"
+          mkdir -p build/ios
+          xcodebuild -version
+      - name: Restore the toolchain
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            build/ios/build
+            build/ios/dist
+            build/ios/.cache
+          key: ios-toolchain-${{ runner.os }}-${{ hashFiles('packaging/ios/recipes/**') }}
+          restore-keys: |
+            ios-toolchain-${{ runner.os }}-
+      - name: Build the toolchain (Python, SDL2 and pygame for iOS)
+        shell: bash
+        run: ./packaging/ios/build_ios.sh toolchain 2>&1 | tee build/ios-toolchain.log
+      - name: Keep the toolchain for the next run
+        if: always() && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            build/ios/build
+            build/ios/dist
+            build/ios/.cache
+          key: ios-toolchain-${{ runner.os }}-${{ hashFiles('packaging/ios/recipes/**') }}
+      - name: What went wrong (toolchain)
+        if: failure()
+        run: python3 tools/ci_tail.py toolchain build/ios-toolchain.log 160
+      - name: Make the Xcode project
+        shell: bash
+        run: ./packaging/ios/build_ios.sh project 2>&1 | tee build/ios-project.log
+      - name: What went wrong (project)
+        if: failure()
+        run: python3 tools/ci_tail.py project build/ios-project.log 120
+      - name: Build for the simulator
+        shell: bash
+        run: ./packaging/ios/build_ios.sh simulator 2>&1 | tee build/ios-simulator.log
+      - name: What went wrong (simulator build)
+        if: failure()
+        run: python3 tools/ci_tail.py simbuild build/ios-simulator.log 160
+      - name: Try it in the simulator
+        shell: bash
+        run: ./packaging/ios/simulator_test.sh 75 2>&1 | tee build/ios-simtest.log
+      - name: What the simulator said
+        if: always()
+        run: python3 tools/ci_tail.py simtest build/ios-simtest.log 120
+      - name: The simulator screen (part 1)
+        if: always()
+        run: python3 tools/ci_image.py screen build/ios/sim.jpg 0
+      - name: The simulator screen (part 2)
+        if: always()
+        run: python3 tools/ci_image.py screen2 build/ios/sim.jpg 9
+      - name: Build the unsigned .ipa for a phone
+        shell: bash
+        run: ./packaging/ios/build_ios.sh device 2>&1 | tee build/ios-device.log
+      - name: What the device build said
+        if: always()
+        run: python3 tools/ci_tail.py device build/ios-device.log 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios
+          path: dist/*
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-logs
+          path: |
+            build/ios-*.log
+            build/ios/sim.png
+          if-no-files-found: ignore

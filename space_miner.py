@@ -2761,7 +2761,7 @@ class App:
                     self.hard_reset, panel=True, col=(150, 60, 70) if self.reset_confirm > 0 else (70, 40, 50))
         y += 52
         if not resources.TOUCH:
-            can_open = not resources.ANDROID and gamelog.enabled()
+            can_open = not resources.MOBILE and gamelog.enabled()
             self.button(scr, pygame.Rect(PANEL.x, y, 200, 34), "Open log folder", sm, self.open_log_folder, enabled=can_open, panel=True)
             shown = gamelog.log_dir()
             if len(shown) > 52:
@@ -2885,11 +2885,11 @@ def open_window(w, h, fullscreen=False):
     os.environ.setdefault("SDL_HINT_RENDER_SCALE_QUALITY", "linear")          # smooth scaling when the window is not w x h
     if pygame.display.get_driver() == "dummy":                                  # the headless test driver has no renderer
         return pygame.display.set_mode((w, h)), True, False
-    if resources.ANDROID:                                                       # always fullscreen, scaled to the screen
+    if resources.MOBILE:                                                        # always fullscreen, scaled to the screen
         try:
             return pygame.display.set_mode((w, h), pygame.SCALED | pygame.FULLSCREEN), True, True
         except pygame.error as e:
-            gamelog.LOG.warning("Scaled fullscreen failed on Android (%s); trying a plain fullscreen.", e)
+            gamelog.LOG.warning("Scaled fullscreen failed on a phone (%s); trying a plain fullscreen.", e)
             return pygame.display.set_mode((w, h), pygame.FULLSCREEN), False, True
     flags = pygame.SCALED | pygame.RESIZABLE
     if fullscreen:
@@ -2917,6 +2917,14 @@ def android_canvas(dw, dh):
     return 1280, max(540, round(1280 / aspect))
 
 
+def ios_canvas(dw, dh):
+    """Like android_canvas, but on an iPhone with a notch (a screen longer than 1.9 : 1) the canvas is narrower than the screen: SDL scales it to fit and
+    the black bars it leaves at the sides and the bottom keep the game out from under the notch, the rounded corners and the home bar."""
+    if max(dw, dh) / max(1, min(dw, dh)) > 1.9:
+        dw, dh = dw * 0.88, dh * 0.965
+    return android_canvas(dw, dh)
+
+
 def choose_resolution(setting, fullscreen):
     """The canvas size to use: the one picked in the settings, or ("auto") the biggest preset that suits the screen -
     the whole desktop when fullscreen, otherwise what fits in a window."""
@@ -2931,6 +2939,8 @@ def choose_resolution(setting, fullscreen):
         dw, dh = pygame.display.get_desktop_sizes()[0]
     except (pygame.error, IndexError):
         dw, dh = 1920, 1080
+    if resources.IOS:
+        return ios_canvas(dw, dh)
     if resources.ANDROID:
         return android_canvas(dw, dh)
     lim = (dw, dh) if fullscreen else (dw * 0.92, dh * 0.85)
@@ -3008,6 +3018,25 @@ def check_platform():
     assert os.path.exists(resources.resource("assets/icon.png")) and os.path.exists(resources.resource("assets/fonts/DejaVuSans.ttf"))
 
 
+def check_ios():
+    """The iPhone app: its launcher is recognised, the save lives in Documents, and a notch phone gets a canvas with room for the notch."""
+    real = (resources.IOS, resources.MOBILE, resources.TOUCH)
+    try:
+        resources.IOS, resources.MOBILE, resources.TOUCH = True, True, True
+        assert resources.save_path() == os.path.join(os.path.expanduser("~"), "Documents", ".space_miner_save.json"), resources.save_path()
+        assert ios_canvas(844, 390) == (1280, 649), ios_canvas(844, 390)          # a notch phone (2.16 : 1): the canvas is 1.97 : 1, bars at the sides
+        assert ios_canvas(932, 430) == (1280, 648), ios_canvas(932, 430)
+        assert ios_canvas(667, 375) == (1280, 720), "a phone without a notch fills its screen"
+        assert ios_canvas(1024, 768) == (1280, 960), "an iPad is 4 : 3"
+        resources.IOS, resources.MOBILE, resources.TOUCH = False, True, True
+        assert resources.save_path() != os.path.join(os.path.expanduser("~"), "Documents", ".space_miner_save.json")
+    finally:
+        resources.IOS, resources.MOBILE, resources.TOUCH = real
+    assert resources.is_ios({"KIVY_BUILD": "ios"}, "darwin") and resources.is_ios({"SPACE_MINER_IOS": "1"}, "linux") and resources.is_ios({}, "ios")
+    assert not resources.is_ios({}, "darwin") and not resources.is_ios({"KIVY_BUILD": "android"}, "linux")
+    assert (resources.IOS, resources.TOUCH) == (real[0], real[2])
+
+
 def check_new_game_reset():
     """--new-game: asks, keeps a copy of the old save, removes the backup, and never wipes without a yes."""
     d = tempfile.mkdtemp(prefix="space_miner_reset_")
@@ -3059,7 +3088,7 @@ def main():
     cli_res = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--resolution=")), None)
     if cli_res is None and "--resolution" in sys.argv and sys.argv.index("--resolution") + 1 < len(sys.argv):
         cli_res = sys.argv[sys.argv.index("--resolution") + 1]
-    want_fs = resources.ANDROID or ((not selftest) and ("--fullscreen" in sys.argv or bool(saved.get("fullscreen"))))
+    want_fs = resources.MOBILE or ((not selftest) and ("--fullscreen" in sys.argv or bool(saved.get("fullscreen"))))
     start_w, start_h = choose_resolution(cli_res or saved.get("resolution", "auto"), want_fs)
     apply_layout(start_w, start_h)
     scr, can_scale, is_fs = open_window(start_w, start_h, want_fs)
@@ -3126,7 +3155,7 @@ def main():
                         elif e.key == pygame.K_ESCAPE:
                             if app.pick:
                                 app.pick = None                        # (cancels picking a system for a general's orders)
-                            elif app.fullscreen and not resources.ANDROID:
+                            elif app.fullscreen and not resources.MOBILE:
                                 app.toggle_fullscreen()
                             else:
                                 running = False
@@ -4708,6 +4737,7 @@ def selftest_step(app, g, frames, shot):
         check_lose_colonies()
         check_new_game_reset()
         check_platform()
+        check_ios()
     if frames == 3:
         for _ in range(25):
             app.space_click()

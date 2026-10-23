@@ -35,7 +35,19 @@ After that it opens like any other app. On a Mac the game uses **Cmd+Enter** (or
 
 The macOS builds are made and tested on GitHub's macOS machines (macOS 14 and 15): the self-test runs headless on the source and on the built app, and the app is checked after it is packed into the disk image. They are built for macOS 11 and newer (Apple Silicon) and 10.13 and newer (Intel), but only the versions GitHub runs have actually been tried.
 
-**iPhone and iPad** are not supported. An iOS app can only be built on a Mac with Xcode and signed with an Apple Developer account, and it would need the game ported to a different Python runtime, so it is not something this repository's build can produce. Android phones and tablets are supported (below).
+**iPhone and iPad** - `space-miner-<version>-ios-unsigned.ipa`, a real app with the same touch interface as the Android one. Apple only runs signed apps, so the file has to be signed for your phone when you install it (free with AltStore or Sideloadly, or with a paid developer account): see [iPhone and iPad](#iphone-and-ipad). Android phones and tablets are in the next section.
+
+## iPhone and iPad
+
+Space Miner is also an app for the iPhone and iPad (landscape): the same game with the same touch interface as the Android app (tap to mine, drag to scroll, pinch the galaxy map, double-tap a system). It is not a web page: Python and pygame run inside the app (it is made with [kivy-ios](https://github.com/kivy/kivy-ios), and `packaging/ios/recipes/pygame` teaches it to build pygame). On a phone with a notch the game keeps clear of it with black bars at the sides; there is no Fullscreen or Size setting (the game always fills the screen), and your save is in the app's own Documents folder.
+
+**Getting it onto your phone.** Apple only runs apps that are signed with a certificate tied to a developer account, and an app on GitHub cannot be signed for your phone in advance. So `space-miner-<version>-ios-unsigned.ipa` on the [Releases page](https://github.com/notyourbusinessss/PasstimeLinuxGame/releases/latest) is **unsigned**, and you sign it for your own phone when you install it:
+
+- **Free: [AltStore](https://altstore.io) or [Sideloadly](https://sideloadly.io)** - they sign the app with your ordinary Apple ID and install it (on a computer, with the phone plugged in or on the same Wi-Fi). A free signature lasts **7 days**: after that the app does not open until it is signed again (AltStore does that by itself while its helper runs on your computer; with Sideloadly you install the file again), your save stays in the app, and a free account can have 3 sideloaded apps at once.
+- **A paid Apple Developer account** (99 USD a year): sign the `.ipa` with your own certificate (a signature then lasts a year) or put it on TestFlight.
+- **From source, on a Mac:** `./packaging/ios/build_ios.sh` builds the Xcode project (`build/ios/spaceminer-ios/spaceminer.xcodeproj`, about an hour the first time); open it in Xcode, choose your Apple ID as the team and run it on your phone.
+
+> **Status:** the build machine builds the app, starts it in the iOS Simulator and checks that the game runs, draws and saves (*iOS* workflow; `packaging/ios/simulator_test.sh`), and builds the unsigned `.ipa` for a phone the same way. It has not been tried on a real iPhone yet, so touch, sound and speed on a real device are not confirmed.
 
 ## Android
 
@@ -821,7 +833,7 @@ Enemy raids and counter-offensives are included in these numbers (the bot defend
 | `resources.py` | Where bundled files, the save file and the logs live (also inside the Linux and macOS builds) |
 | `gamelog.py` | Logging, crash reports and the native-crash dump |
 | `assets/` | The bundled DejaVu Sans font (with its license), the app icon, `galaxy.json` (the star systems) and `worlds.json` (the real planets of the real stars) |
-| `packaging/` | `build_linux.sh` and `build_macos.sh` (the release builds), the Linux installer and menu entry |
+| `packaging/` | `build_linux.sh`, `build_macos.sh` and `ios/` (the release builds; `ios/recipes/pygame` is the kivy-ios recipe for pygame), the Linux installer and menu entry |
 | `tools/` | `make_icon.py` (draws the icon), `fuzz.py` (random-input crash hunting), `ship_sheet.py` (a contact sheet of every ship) `make_worlds.py` (rebuilds `assets/worlds.json` from the Open Exoplanet Catalogue) and `make_galaxy.py` (rebuilds `assets/galaxy.json`: the real stars and the generated systems) |
 | `CHANGELOG.md`, `.github/workflows/` | Release notes; CI (self-test on every push) and the release workflow |
 | `play.sh` | Launcher that installs pygame if needed |
@@ -844,6 +856,7 @@ The knobs live in `core.py` (`UNLOCK_LOG`, `PROJECT_LOG`, `SECTOR_LOG`, `TUNE` -
 
 1. Bump `__version__` in `version.py` and add a section for it to `CHANGELOG.md`.
 2. `./packaging/build_linux.sh` builds `dist/space-miner-<version>-linux-<arch>.tar.gz` (with a `.sha256`) on your machine: a one-file executable made with PyInstaller, the installer, the icon and the docs.
+   `./packaging/ios/build_ios.sh` builds the iPhone app on a Mac (see *iPhone and iPad*); the *Release* workflow does it with the *iOS* workflow and attaches the unsigned `.ipa`.
    `./packaging/build_macos.sh` does the same on a Mac: `dist/space-miner-<version>-macos-<arch>.dmg` (with a `.sha256`) holding `Space Miner.app` (a PyInstaller build with an icon made from `assets/icon-512.png`, its `Info.plist` filled in, signed ad hoc) and the note about opening it the first time. The *Release* workflow builds it on an Apple Silicon and an Intel runner.
 3. For a published release, push a tag: `git tag v1.0.1 && git push origin v1.0.1`. The *Release* workflow runs the self-test, builds the files and creates the release on the Releases page, using the changelog section as the notes. You can also publish without a tag: *Actions -> Release -> Run workflow*, tick **publish** (it builds the branch you name, default `main`, and creates the release `v<version>` for you). The *CI* workflow runs the self-test on every push and pull request.
 
@@ -862,6 +875,7 @@ The knobs live in `core.py` (`UNLOCK_LOG`, `PROJECT_LOG`, `SECTOR_LOG`, `TUNE` -
 - **My save is gone or broken** - a backup (`~/.space_miner_save.json.bak`, refreshed every 10 minutes) is used automatically if the save is damaged, and a save that cannot be read is never overwritten silently: a copy named `.unreadable-<date>` or `.broken-<date>` is kept next to it.
 
 - **macOS says the app "cannot be opened" or is "damaged"** - it is not signed with an Apple Developer ID: see the first-start steps under [Download](#download) (Control-click -> Open, or *Privacy & Security -> Open Anyway*, or the `xattr` line).
+- **The iPhone app stopped opening after a week** - a free Apple ID signature lasts 7 days: sign it again (AltStore refreshes it for you while its helper runs on your computer; with Sideloadly install the `.ipa` again). Your save stays in the app.
 - **`ModuleNotFoundError: No module named 'pygame'`** - run `pip install pygame` (or use `./play.sh`).
 - **No window appears over SSH / in a container** - the game needs a display. Run it from a desktop session.
 - **The window is bigger than my screen / everything is tiny or huge** - choose another size with the **Size** button in the Stats page, or start with `--resolution 1280x720`. *Auto* normally picks a size that fits.
